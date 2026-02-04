@@ -924,16 +924,16 @@ const dbService = {
         }
     },
 
-    async getCustomers({ page = 1, pageSize = 50, searchTerm = '', customerType = null, sortCol = 'id', sortDir = 'desc' } = {}) {
+    async getCustomers({ page = 1, pageSize = 50, searchTerm = '', customerType = null, sortCol = 'id', sortDir = 'desc', overdueThreshold = 30 } = {}) {
         const startTime = performance.now();
         try {
-            const timestamp = new Date().toLocaleTimeString('ar-EG', { 
-                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 
+            const timestamp = new Date().toLocaleTimeString('ar-EG', {
+                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
             });
             console.log(`[${timestamp}] 🔍 [BACKEND] طلب getCustomers - الصفحة: ${page} | الحجم: ${pageSize}`);
-            console.log(`[${timestamp}] 🔍 [BACKEND] البحث: "${searchTerm}" | النوع: ${customerType}`);
+            console.log(`[${timestamp}] 🔍 [BACKEND] البحث: "${searchTerm}" | النوع: ${customerType} | حد التأخير: ${overdueThreshold} يوم`);
             console.log(`[${timestamp}] 🔍 [BACKEND] الترتيب حسب: ${sortCol} | الاتجاه: ${sortDir}`);
-            
+
             const skip = (page - 1) * pageSize;
             const where = {};
 
@@ -953,7 +953,7 @@ const dbService = {
             }
 
             // التعامل مع الترتيب
-            // ملاحظة: الترتيب حسب "balance" (الرصيد المحسوب) يتطلب منطق خاص لأن الرصيد ليس عموداً في قاعدة البيانات
+            // ملاحظة: الترتيب حسب "balance" أو الحقول المحسوبة يتطلب منطق خاص
             const validSortCols = ['id', 'name', 'phone', 'city', 'createdAt', 'creditLimit'];
             let orderBy = {};
             if (validSortCols.includes(sortCol)) {
@@ -965,9 +965,9 @@ const dbService = {
             }
 
             console.log(`[${timestamp}] 🗄️ [BACKEND] استعلام قاعدة البيانات - where:`, where, 'orderBy:', orderBy);
-            
+
             const dbStartTime = performance.now();
-            
+
             const [customers, total] = await Promise.all([
                 prisma.customer.findMany({
                     skip,
@@ -983,13 +983,13 @@ const dbService = {
 
             console.log(`[${timestamp}] 📦 [BACKEND] عدد العملاء من قاعدة البيانات: ${customers.length} | الإجمالي: ${total} (استغرق ${dbDuration}ms)`);
 
-            // استعلام سريع للحصول على الأرصدة فقط للعملاء الحاليين باستخدام GroupBy
             const customerIds = customers.map(c => c.id);
-            console.log(`[${timestamp}] 💰 [BACKEND] حساب الأرصدة لـ ${customerIds.length} عميل`);
-            
-            const balanceStartTime = performance.now();
-            
-            const balances = await prisma.customerTransaction.groupBy({
+            console.log(`[${timestamp}] 💰 [BACKEND] حساب الأرصدة والمديونيات لـ ${customerIds.length} عميل`);
+
+            const statsStartTime = performance.now();
+
+            // 1. حساب الأرصدة
+            const balancesPromise = prisma.customerTransaction.groupBy({
                 by: ['customerId'],
                 _sum: {
                     debit: true,
@@ -1000,31 +1000,104 @@ const dbService = {
                 }
             });
 
-            const balanceEndTime = performance.now();
-            const balanceDuration = (balanceEndTime - balanceStartTime).toFixed(2);
+            // 2. إحصائيات الدفعات (تاريخ أول وآخر دفعة)
+            const paymentsPromise = prisma.customerPayment.groupBy({
+                by: ['customerId'],
+                _max: { paymentDate: true },
+                _min: { paymentDate: true },
+                where: { customerId: { in: customerIds } }
+            });
 
-            console.log(`[${timestamp}] 💳 [BACKEND] عدد الأرصدة المحسوبة: ${balances.length} (استغرق ${balanceDuration}ms)`);
+            // 3. إحصائيات المبيعات (تاريخ أول فاتورة)
+            const salesPromise = prisma.sale.groupBy({
+                by: ['customerId'],
+                _min: { invoiceDate: true },
+                where: { customerId: { in: customerIds } }
+            });
 
-            // تحويل مصفوفة الأرصدة إلى Map لسهولة الوصول
+            const [balances, paymentStats, saleStats] = await Promise.all([
+                balancesPromise,
+                paymentsPromise,
+                salesPromise
+            ]);
+
+            const statsEndTime = performance.now();
+            const statsDuration = (statsEndTime - statsStartTime).toFixed(2);
+
+            console.log(`[${timestamp}] 🧮 [BACKEND] تم حساب الإحصائيات (استغرق ${statsDuration}ms)`);
+
+            // تجهيز Maps للبحث السريع
             const balanceMap = {};
             balances.forEach(b => {
                 balanceMap[b.customerId] = (b._sum.debit || 0) - (b._sum.credit || 0);
             });
 
-            // دمج الرصيد مع بيانات العميل
-            const customersWithBalance = customers.map(customer => ({
-                ...customer,
-                balance: balanceMap[customer.id] || 0
-            }));
+            const paymentMap = {};
+            paymentStats.forEach(p => {
+                paymentMap[p.customerId] = {
+                    lastPayment: p._max.paymentDate,
+                    firstPayment: p._min.paymentDate
+                };
+            });
 
-            // إذا كان الترتيب مطلوب حسب الرصيد، نرتب الصفحة الحالية فقط
+            const saleMap = {};
+            saleStats.forEach(s => {
+                saleMap[s.customerId] = s._min.invoiceDate;
+            });
+
+            // دمج كل البيانات
+            const now = new Date();
+            const customersWithDetails = customers.map(customer => {
+                const balance = balanceMap[customer.id] || 0;
+
+                const pStats = paymentMap[customer.id];
+                const lastPaymentDate = pStats?.lastPayment || null;
+                const firstPaymentDate = pStats?.firstPayment || null;
+                const firstSaleDate = saleMap[customer.id] || null;
+
+                // تحديد تاريخ بداية النشاط المالي (الأقدم بين أول فاتورة وأول دفعة)
+                let startDate = null;
+                if (firstSaleDate && firstPaymentDate) {
+                    startDate = firstSaleDate < firstPaymentDate ? firstSaleDate : firstPaymentDate;
+                } else {
+                    startDate = firstSaleDate || firstPaymentDate;
+                }
+
+                let lastPaymentDays = 0;
+                let isOverdue = false;
+
+                if (startDate) {
+                    // إذا كان هناك أي نشاط، نحسب فترة التأخير
+                    // إذا لم يدفع أبداً، نحسب من تاريخ البداية، وإلا من تاريخ آخر دفعة
+                    const referenceDate = lastPaymentDate || startDate;
+
+                    // حساب الفرق بالأيام
+                    const diffTime = Math.abs(now - referenceDate);
+                    lastPaymentDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    // العميل يعتبر متأخر إذا تجاوز الحد المسموح
+                    isOverdue = lastPaymentDays > overdueThreshold;
+                }
+
+                // إذا لم يكن هناك نشاط (لا فواتير ولا دفعات)، لا يعتبر متأخر
+
+                return {
+                    ...customer,
+                    balance,
+                    lastPaymentDate,
+                    lastPaymentDays,
+                    isOverdue
+                };
+            });
+
+            // إذا كان الترتيب مطلوب حسب الرصيد
             if (sortCol === 'balance') {
                 console.log(`[${timestamp}] 📊 [BACKEND] ترتيب حسب الرصيد`);
-                customersWithBalance.sort((a, b) => sortDir === 'asc' ? a.balance - b.balance : b.balance - a.balance);
+                customersWithDetails.sort((a, b) => sortDir === 'asc' ? a.balance - b.balance : b.balance - a.balance);
             }
 
             const result = {
-                data: customersWithBalance,
+                data: customersWithDetails,
                 total,
                 page,
                 totalPages: Math.ceil(total / pageSize)
@@ -1038,8 +1111,8 @@ const dbService = {
         } catch (error) {
             const endTime = performance.now();
             const duration = (endTime - startTime).toFixed(2);
-            const timestamp = new Date().toLocaleTimeString('ar-EG', { 
-                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 
+            const timestamp = new Date().toLocaleTimeString('ar-EG', {
+                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
             });
             console.error(`[${timestamp}] 💥 [BACKEND] خطأ في getCustomers (بعد ${duration}ms):`, error);
             return { error: error.message };

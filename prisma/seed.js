@@ -450,6 +450,180 @@ async function main() {
         });
     }
 
+    // 12. إنشاء عملاء للتجربة (Overdue Testing)
+    console.log('🧪 إنشاء عملاء اختبار لحالة التأخير...');
+
+    // عميل متأخر جدا (فاتورة من 60 يوم ولم يدفع)
+    const overdueCustomer = await prisma.customer.create({
+        data: {
+            name: 'عميل متأخر (تجربة)',
+            phone: '01000000001',
+            city: 'القاهرة',
+            creditLimit: 10000,
+            customerType: 'عادي',
+            notes: 'يجب أن يظهر كنقطة حمراء'
+        }
+    });
+
+    const overdueVariant = createdProducts[0].id ?
+        await prisma.variant.findFirst({ where: { productId: createdProducts[0].id } }) : null;
+
+    if (overdueVariant) {
+        const oldDate = new Date();
+        oldDate.setDate(oldDate.getDate() - 60); // فاتورة من 60 يوم
+
+        const sale = await prisma.sale.create({
+            data: {
+                customerId: overdueCustomer.id,
+                total: 1000,
+                status: 'COMPLETED',
+                invoiceDate: oldDate,
+                createdAt: oldDate,
+                items: {
+                    create: {
+                        variantId: overdueVariant.id,
+                        quantity: 1,
+                        price: 1000
+                    }
+                }
+            }
+        });
+
+        await prisma.customerTransaction.create({
+            data: {
+                customerId: overdueCustomer.id,
+                date: oldDate,
+                type: 'SALE',
+                referenceType: 'SALE',
+                referenceId: sale.id,
+                debit: 1000,
+                credit: 0,
+                notes: 'فاتورة قديمة للتجربة'
+            }
+        });
+    }
+
+    // عميل ملتزم (فاتورة من 10 أيام)
+    const goodCustomer = await prisma.customer.create({
+        data: {
+            name: 'عميل ملتزم (تجربة)',
+            phone: '01000000002',
+            city: 'الإسكندرية',
+            creditLimit: 10000,
+            customerType: 'VIP',
+            notes: 'لن يظهر كنقطة حمراء'
+        }
+    });
+
+    if (overdueVariant) {
+        const recentDate = new Date();
+        recentDate.setDate(recentDate.getDate() - 10); // فاتورة من 10 أيام
+
+        const sale = await prisma.sale.create({
+            data: {
+                customerId: goodCustomer.id,
+                total: 500,
+                status: 'COMPLETED',
+                invoiceDate: recentDate,
+                createdAt: recentDate,
+                items: {
+                    create: {
+                        variantId: overdueVariant.id,
+                        quantity: 1,
+                        price: 500
+                    }
+                }
+            }
+        });
+
+        await prisma.customerTransaction.create({
+            data: {
+                customerId: goodCustomer.id,
+                date: recentDate,
+                type: 'SALE',
+                referenceType: 'SALE',
+                referenceId: sale.id,
+                debit: 500,
+                credit: 0,
+                notes: 'فاتورة حديثة للتجربة'
+            }
+        });
+    }
+
+    // عميل متأخر ولكن دفع قريباً (فاتورة قديمة + دفعة حديثة)
+    const paidCustomer = await prisma.customer.create({
+        data: {
+            name: 'عميل دفع مؤخراً (تجربة)',
+            phone: '01000000003',
+            city: 'الجيزة',
+            creditLimit: 10000,
+            customerType: 'عادي',
+            notes: 'كان متأخر ودفع - لا يجب أن يظهر أحمر'
+        }
+    });
+
+    if (overdueVariant) {
+        const oldDate = new Date();
+        oldDate.setDate(oldDate.getDate() - 60); // فاتورة من 60 يوم
+
+        const recentPaymentDate = new Date(); // دفعة اليوم
+
+        // الفاتورة القديمة
+        const sale = await prisma.sale.create({
+            data: {
+                customerId: paidCustomer.id,
+                total: 2000,
+                status: 'COMPLETED',
+                invoiceDate: oldDate,
+                createdAt: oldDate,
+                items: {
+                    create: {
+                        variantId: overdueVariant.id,
+                        quantity: 2,
+                        price: 1000
+                    }
+                }
+            }
+        });
+
+        await prisma.customerTransaction.create({
+            data: {
+                customerId: paidCustomer.id,
+                date: oldDate,
+                type: 'SALE',
+                referenceType: 'SALE',
+                referenceId: sale.id,
+                debit: 2000,
+                credit: 0,
+                notes: 'فاتورة قديمة'
+            }
+        });
+
+        // الدفعة الحديثة
+        const payment = await prisma.customerPayment.create({
+            data: {
+                customerId: paidCustomer.id,
+                paymentMethodId: createdPaymentMethods[0].id,
+                amount: 500,
+                paymentDate: recentPaymentDate,
+                notes: 'دفعة جزئية حديثة'
+            }
+        });
+
+        await prisma.customerTransaction.create({
+            data: {
+                customerId: paidCustomer.id,
+                date: recentPaymentDate,
+                type: 'PAYMENT',
+                referenceType: 'PAYMENT',
+                referenceId: payment.id,
+                debit: 0,
+                credit: 500,
+                notes: 'دفعة حديثة'
+            }
+        });
+    }
+
     console.log('\n✅ تم إنشاء جميع البيانات التجريبية بنجاح!\n');
     console.log('📊 ملخص البيانات:');
     console.log(`   • ${3} مستخدمين`);

@@ -56,8 +56,15 @@ const CustomerRow = memo(function CustomerRow({
     const lastPaymentDays = customer.lastPaymentDays || 0;
     const lastPaymentDate = new Date();
     lastPaymentDate.setDate(lastPaymentDate.getDate() - lastPaymentDays);
-    const isOverdue = lastPaymentDays > overdueThreshold;
+
+    // استخدام قيمة الباك اند إذا وجدت، وإلا الحساب المحلي
+    const isOverdue = customer.isOverdue !== undefined ? customer.isOverdue : lastPaymentDays > overdueThreshold;
     const lastOperationType = customer.lastOperationType || 'فاتورة';
+
+    // Log for debugging
+    if (index < 3) {
+      console.log(`[CustomerRow] ${customer.name}: Days=${lastPaymentDays}, Threshold=${overdueThreshold}, Overdue=${isOverdue}`);
+    }
 
     return {
       lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
@@ -65,7 +72,7 @@ const CustomerRow = memo(function CustomerRow({
       operationType: lastOperationType,
       isOverdue: isOverdue
     };
-  }, [customer.lastPaymentDays, customer.lastOperationType, overdueThreshold]);
+  }, [customer.lastPaymentDays, customer.isOverdue, customer.lastOperationType, overdueThreshold, index, customer.name]);
 
   const rowBgColor = isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb';
 
@@ -268,7 +275,11 @@ export default function Customers() {
   const [paymentData, setPaymentData] = useState({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [overdueThreshold, setOverdueThreshold] = useState(30); // عدد الأيام
+  const [overdueThreshold, setOverdueThreshold] = useState(() => {
+    const saved = localStorage.getItem('overdueThreshold');
+    return saved ? parseInt(saved) : 30;
+  });
+  const [tempThreshold, setTempThreshold] = useState(overdueThreshold);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -324,7 +335,8 @@ export default function Customers() {
         page: 1,
         pageSize: 1000, // تحميل كل العملاء دفعة واحدة
         searchTerm: '',
-        customerType: 'all'
+        customerType: 'all',
+        overdueThreshold: overdueThreshold // تمرير حد التأخير للإعدادات
       });
 
       const endTime = performance.now();
@@ -444,7 +456,7 @@ export default function Customers() {
 
     const endTime = performance.now();
     logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
-  }, [debouncedSearch, filterType, customersLoaded, columnSearch]);
+  }, [debouncedSearch, filterType, customersLoaded, columnSearch, overdueThreshold]);
 
   const loadCustomers = async (isBackground = false) => {
     // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
@@ -525,6 +537,11 @@ export default function Customers() {
     setEditingCustomer(null);
     resetCustomerForm();
     setShowModal(true);
+  };
+
+  const openSettings = () => {
+    setTempThreshold(overdueThreshold);
+    setShowSettings(true);
   };
 
   const handleEdit = (customer) => {
@@ -664,6 +681,7 @@ export default function Customers() {
     let debtedCount = 0;
     let compliantCount = 0;
     let totalDebt = 0;
+    let overdueCount = 0;
 
     for (const c of customers) {
       if (c.customerType === 'VIP') vipCount += 1;
@@ -673,10 +691,17 @@ export default function Customers() {
       } else {
         compliantCount += 1;
       }
+
+      // حساب حالة التأخر محلياً لضمان سرعة الاستجابة عند تغيير الإعدادات
+      // نستخدم قيمة lastPaymentDays المستلمة من الباك اند
+      const isOverdue = (c.lastPaymentDays !== undefined ? c.lastPaymentDays : 0) > overdueThreshold;
+      if (isOverdue) {
+        overdueCount += 1;
+      }
     }
 
-    return { vipCount, debtedCount, compliantCount, totalDebt };
-  }, [customers]);
+    return { vipCount, debtedCount, compliantCount, totalDebt, overdueCount };
+  }, [customers, overdueThreshold]);
 
   // Auto-focus على مربع الدفع عند فتح الموديل
   useEffect(() => {
@@ -1447,7 +1472,7 @@ export default function Customers() {
             التقارير والطباعة
           </button>
           <button
-            onClick={() => setShowSettings(true)}
+            onClick={openSettings}
             style={{
               backgroundColor: '#6366f1',
               color: 'white',
@@ -1643,13 +1668,20 @@ export default function Customers() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginBottom: '20px' }}>
         <div style={{ padding: '15px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center' }}>
           <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>إجمالي العملاء</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>{customers.length}</div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>{allCustomers.length}</div>
         </div>
         <div style={{ padding: '15px', backgroundColor: '#fffbeb', borderRadius: '8px', textAlign: 'center' }}>
           <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>عملاء VIP</div>
           <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#f59e0b' }}>
             {customerStats.vipCount}
           </div>
+        </div>
+        <div style={{ padding: '15px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center', border: '1px solid #fee2e2' }}>
+          <div style={{ fontSize: '12px', color: '#991b1b', marginBottom: '5px' }}>🔴 عملاء متأخرين</div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#dc2626' }}>
+            {customerStats.overdueCount}
+          </div>
+          <div style={{ fontSize: '10px', color: '#ef4444' }}>مضى {overdueThreshold} يوم</div>
         </div>
         <div style={{ padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
           <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>نتائج البحث</div>
@@ -2142,6 +2174,7 @@ export default function Customers() {
                   <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
                     <div>إجمالي العملاء: {customers.length}</div>
                     <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
+                    <div style={{ color: '#dc2626' }}>عملاء متأخرين: {customerStats.overdueCount}</div>
                   </div>
                 </div>
               </div>
@@ -2206,8 +2239,8 @@ export default function Customers() {
                     min="7"
                     max="90"
                     step="1"
-                    value={overdueThreshold}
-                    onChange={(e) => setOverdueThreshold(parseInt(e.target.value))}
+                    value={tempThreshold}
+                    onChange={(e) => setTempThreshold(parseInt(e.target.value))}
                     style={{
                       flex: 1,
                       height: '8px',
@@ -2227,19 +2260,22 @@ export default function Customers() {
                       textAlign: 'center'
                     }}
                   >
-                    {overdueThreshold} يوم
+                    {tempThreshold} يوم
                   </div>
                 </div>
                 <div style={{ marginTop: '10px', fontSize: '12px', color: '#1e40af' }}>
-                  ℹ️ النقطة الحمراء ستظهر عندما يمر {overdueThreshold} يوم بدون دفع أو فاتورة
+                  ℹ️ النقطة الحمراء ستظهر عندما يمر {tempThreshold} يوم بدون دفع أو فاتورة
                 </div>
               </div>
 
               <div style={{ marginBottom: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
                 <h3 style={{ margin: '0 0 10px 0', color: '#374151' }}>📊 معلومات سريعة:</h3>
                 <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                  <div>• إجمالي العملاء: <strong>{customers.length}</strong></div>
+                  <div>• إجمالي العملاء: <strong>{allCustomers.length}</strong></div>
                   <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
+                  <div style={{ marginTop: '8px', color: '#dc2626', fontWeight: 'bold' }}>
+                    • عملاء متأخرين الآن: <strong>{allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length}</strong>
+                  </div>
                   <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
                 </div>
               </div>
@@ -2247,8 +2283,10 @@ export default function Customers() {
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={() => {
+                    localStorage.setItem('overdueThreshold', tempThreshold.toString());
+                    setOverdueThreshold(tempThreshold);
                     setShowSettings(false);
-                    loadCustomers(); // reload لتحديث البيانات
+                    loadAllCustomers(); // إعادة تحميل بشبكة الأيام الجديدة
                   }}
                   style={{
                     flex: 1,

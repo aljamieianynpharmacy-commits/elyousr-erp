@@ -925,12 +925,21 @@ const dbService = {
     },
 
     async getCustomers({ page = 1, pageSize = 50, searchTerm = '', customerType = null, sortCol = 'id', sortDir = 'desc' } = {}) {
+        const startTime = performance.now();
         try {
+            const timestamp = new Date().toLocaleTimeString('ar-EG', { 
+                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 
+            });
+            console.log(`[${timestamp}] 🔍 [BACKEND] طلب getCustomers - الصفحة: ${page} | الحجم: ${pageSize}`);
+            console.log(`[${timestamp}] 🔍 [BACKEND] البحث: "${searchTerm}" | النوع: ${customerType}`);
+            console.log(`[${timestamp}] 🔍 [BACKEND] الترتيب حسب: ${sortCol} | الاتجاه: ${sortDir}`);
+            
             const skip = (page - 1) * pageSize;
             const where = {};
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length >= 2) {
+                console.log(`[${timestamp}] 🔎 [BACKEND] تطبيق فلتر البحث على: "${normalizedSearch}"`);
                 where.OR = [
                     { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
                     { phone: { startsWith: normalizedSearch } },
@@ -939,6 +948,7 @@ const dbService = {
             }
 
             if (customerType && customerType !== 'all') {
+                console.log(`[${timestamp}] 🏷️ [BACKEND] فلترة حسب النوع: ${customerType}`);
                 where.customerType = customerType;
             }
 
@@ -948,10 +958,16 @@ const dbService = {
             let orderBy = {};
             if (validSortCols.includes(sortCol)) {
                 orderBy = { [sortCol]: sortDir };
+                console.log(`[${timestamp}] 📊 [BACKEND] الترتيب حسب: ${sortCol} ${sortDir}`);
             } else {
                 orderBy = { createdAt: 'desc' };
+                console.log(`[${timestamp}] 📊 [BACKEND] الترتيب الافتراضي حسب التاريخ`);
             }
 
+            console.log(`[${timestamp}] 🗄️ [BACKEND] استعلام قاعدة البيانات - where:`, where, 'orderBy:', orderBy);
+            
+            const dbStartTime = performance.now();
+            
             const [customers, total] = await Promise.all([
                 prisma.customer.findMany({
                     skip,
@@ -962,8 +978,17 @@ const dbService = {
                 prisma.customer.count({ where })
             ]);
 
+            const dbEndTime = performance.now();
+            const dbDuration = (dbEndTime - dbStartTime).toFixed(2);
+
+            console.log(`[${timestamp}] 📦 [BACKEND] عدد العملاء من قاعدة البيانات: ${customers.length} | الإجمالي: ${total} (استغرق ${dbDuration}ms)`);
+
             // استعلام سريع للحصول على الأرصدة فقط للعملاء الحاليين باستخدام GroupBy
             const customerIds = customers.map(c => c.id);
+            console.log(`[${timestamp}] 💰 [BACKEND] حساب الأرصدة لـ ${customerIds.length} عميل`);
+            
+            const balanceStartTime = performance.now();
+            
             const balances = await prisma.customerTransaction.groupBy({
                 by: ['customerId'],
                 _sum: {
@@ -974,6 +999,11 @@ const dbService = {
                     customerId: { in: customerIds }
                 }
             });
+
+            const balanceEndTime = performance.now();
+            const balanceDuration = (balanceEndTime - balanceStartTime).toFixed(2);
+
+            console.log(`[${timestamp}] 💳 [BACKEND] عدد الأرصدة المحسوبة: ${balances.length} (استغرق ${balanceDuration}ms)`);
 
             // تحويل مصفوفة الأرصدة إلى Map لسهولة الوصول
             const balanceMap = {};
@@ -989,16 +1019,29 @@ const dbService = {
 
             // إذا كان الترتيب مطلوب حسب الرصيد، نرتب الصفحة الحالية فقط
             if (sortCol === 'balance') {
+                console.log(`[${timestamp}] 📊 [BACKEND] ترتيب حسب الرصيد`);
                 customersWithBalance.sort((a, b) => sortDir === 'asc' ? a.balance - b.balance : b.balance - a.balance);
             }
 
-            return {
+            const result = {
                 data: customersWithBalance,
                 total,
                 page,
                 totalPages: Math.ceil(total / pageSize)
             };
+
+            const endTime = performance.now();
+            const totalDuration = (endTime - startTime).toFixed(2);
+
+            console.log(`[${timestamp}] ✅ [BACKEND] إرجاع النتائج - البيانات: ${result.data.length} | الإجمالي: ${result.total} (الإجمالي: ${totalDuration}ms)`);
+            return result;
         } catch (error) {
+            const endTime = performance.now();
+            const duration = (endTime - startTime).toFixed(2);
+            const timestamp = new Date().toLocaleTimeString('ar-EG', { 
+                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 
+            });
+            console.error(`[${timestamp}] 💥 [BACKEND] خطأ في getCustomers (بعد ${duration}ms):`, error);
             return { error: error.message };
         }
     },

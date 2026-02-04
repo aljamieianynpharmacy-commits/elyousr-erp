@@ -1,8 +1,230 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
+
+// دالة مساعدة لإضافة timestamp
+const logWithTime = (message, data = null) => {
+  const timestamp = new Date().toLocaleTimeString('ar-EG', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  });
+  const logMessage = `[${timestamp}] ${message}`;
+  if (data) {
+    console.log(logMessage, data);
+  } else {
+    console.log(logMessage);
+  }
+};
+
+const logErrorWithTime = (message, data = null) => {
+  const timestamp = new Date().toLocaleTimeString('ar-EG', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  });
+  const logMessage = `[${timestamp}] ${message}`;
+  if (data) {
+    console.error(logMessage, data);
+  } else {
+    console.error(logMessage);
+  }
+};
+
+// مكون صف العميل المُحسّن - يتجنب إعادة الرندر غير الضرورية
+const CustomerRow = memo(function CustomerRow({
+  customer,
+  index,
+  isSelected,
+  visibleColumns,
+  overdueThreshold,
+  onShowLedger,
+  onPayment,
+  onEdit,
+  onDelete,
+  getCustomerTypeColor,
+  formatCurrency
+}) {
+  // حساب معلومات آخر دفعة
+  const paymentInfo = useMemo(() => {
+    const lastPaymentDays = customer.lastPaymentDays || 0;
+    const lastPaymentDate = new Date();
+    lastPaymentDate.setDate(lastPaymentDate.getDate() - lastPaymentDays);
+    const isOverdue = lastPaymentDays > overdueThreshold;
+    const lastOperationType = customer.lastOperationType || 'فاتورة';
+
+    return {
+      lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
+      daysAgo: lastPaymentDays,
+      operationType: lastOperationType,
+      isOverdue: isOverdue
+    };
+  }, [customer.lastPaymentDays, customer.lastOperationType, overdueThreshold]);
+
+  const rowBgColor = isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb';
+
+  return (
+    <tr
+      style={{
+        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: rowBgColor,
+        transition: 'background-color 0.2s'
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = rowBgColor}
+    >
+      {visibleColumns.id && <td style={{ padding: '15px' }}>{customer.id}</td>}
+      {visibleColumns.name && (
+        <td style={{ padding: '15px', fontWeight: 'bold', color: '#1f2937' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+            {paymentInfo.isOverdue && (
+              <div
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  backgroundColor: '#dc2626',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+                title={`🔴 لم يدفع منذ ${paymentInfo.daysAgo} يوم`}
+              />
+            )}
+            <span>{customer.name}</span>
+          </div>
+        </td>
+      )}
+      {visibleColumns.type && (
+        <td style={{ padding: '15px' }}>
+          <span style={{
+            padding: '4px 8px',
+            borderRadius: '12px',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            backgroundColor: getCustomerTypeColor(customer.customerType) + '20',
+            color: getCustomerTypeColor(customer.customerType)
+          }}>
+            {customer.customerType}
+          </span>
+        </td>
+      )}
+      {visibleColumns.phone && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone || '-'}</td>}
+      {visibleColumns.phone2 && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone2 || '-'}</td>}
+      {visibleColumns.address && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || '-'}</td>}
+      {visibleColumns.city && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.city || '-'}</td>}
+      {visibleColumns.district && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.district || '-'}</td>}
+      {visibleColumns.notes && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.notes || '-'}</td>}
+      {visibleColumns.creditLimit && <td style={{ padding: '15px', color: '#6b7280', fontWeight: 'bold' }}>{(customer.creditLimit || 0).toFixed(2)}</td>}
+      {visibleColumns.balance && (
+        <td style={{ padding: '15px' }}>
+          <span style={{
+            fontWeight: 'bold',
+            color: customer.balance > 0 ? '#ef4444' : customer.balance < 0 ? '#10b981' : '#6b7280',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '15px'
+          }}>
+            {customer.balance.toFixed(2)}
+          </span>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onShowLedger(customer.id)}
+            title="كشف الحساب"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <FileText size={16} color="#0307c9ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onPayment(customer)}
+            title="تسجيل دفعة"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <DollarSign size={16} color="#177400ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onEdit(customer)}
+            title="تعديل"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <Edit2 size={16} color="#f78c00ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onDelete(customer.id)}
+            title="حذف"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <Trash2 size={16} color="#dc2626" />
+          </button>
+        </td>
+      )}
+    </tr>
+  );
+});
 
 export default function Customers() {
   const [customers, setCustomers] = useState([]);
@@ -57,46 +279,154 @@ export default function Customers() {
 
   useEffect(() => {
     const handler = setTimeout(() => {
+      const startTime = performance.now();
       const trimmed = searchTerm.trim();
-      setDebouncedSearch(trimmed);
-      setCurrentPage(1);
-    }, 500);
+
+      if (trimmed !== debouncedSearch) {
+        logWithTime('⏰ [FRONTEND] Debounced Search بدأ - القيمة الأصلية: ' + searchTerm + ' | القيمة المعالجة: ' + trimmed);
+
+        setDebouncedSearch(trimmed);
+        setCurrentPage(1);
+
+        const endTime = performance.now();
+        logWithTime('🏁 [FRONTEND] Debounced Search انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
+      }
+    }, 50); // 50ms للبحث المحلي - سريع!
+
     return () => clearTimeout(handler);
-  }, [searchTerm]);
+  }, [searchTerm, debouncedSearch]);
 
   useEffect(() => {
+    logWithTime('🔄 [FRONTEND] تغيير فلتر النوع إلى: ' + filterType);
     setCurrentPage(1);
   }, [filterType]);
 
-  useEffect(() => {
-    loadCustomers();
-  }, [currentPage, debouncedSearch, filterType]);
+  // State لتخزين كل العملاء (للبحث المحلي)
+  const [allCustomers, setAllCustomers] = useState([]);
+  const [customersLoaded, setCustomersLoaded] = useState(false);
 
-  const loadCustomers = async (isBackground = false) => {
+  useEffect(() => {
+    // تحميل كل العملاء مرة واحدة فقط
+    if (!customersLoaded) {
+      loadAllCustomers();
+    }
+  }, []);
+
+  const loadAllCustomers = async () => {
+    const startTime = performance.now();
     try {
-      if (!isBackground) setLoading(true);
-      const requestId = ++latestRequestIdRef.current;
-      const normalizedSearch = debouncedSearch.trim();
+      logWithTime('🚀 [FRONTEND] بدء تحميل كل العملاء من الداتابيز...');
+      setLoading(true);
+
       const result = await window.api.getCustomers({
-        page: currentPage,
-        pageSize: 20,
-        searchTerm: normalizedSearch.length >= 2 ? normalizedSearch : '',
-        customerType: filterType
+        page: 1,
+        pageSize: 1000, // تحميل كل العملاء دفعة واحدة
+        searchTerm: '',
+        customerType: 'all'
       });
 
-      if (requestId !== latestRequestIdRef.current) return;
+      const endTime = performance.now();
+      const duration = (endTime - startTime).toFixed(2);
+
+      logWithTime('📦 [BACKEND] استجابة الداتابيز', result);
+      logWithTime('📊 [BACKEND] عدد العملاء المستلمة: ' + (result.data?.length || 0));
+      logWithTime('⏱️ [FRONTEND] وقت استجابة الداتابيز: ' + duration + 'ms');
+
       if (!result.error) {
-        setCustomers(result.data || []);
-        setTotalPages(result.totalPages || 1);
-        setTotalItems(result.total || 0);
+        setAllCustomers(result.data || []);
+        setCustomersLoaded(true);
+        logWithTime('✅ [FRONTEND] تم تحميل العملاء بنجاح');
+        // تطبيق الفلترة الحالية
+        applyFilters();
       } else {
-        console.error(result.error);
+        logErrorWithTime('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
       }
     } catch (err) {
-      console.error('فشل تحميل العملاء', err);
+      const endTime = performance.now();
+      const duration = (endTime - startTime).toFixed(2);
+      logErrorWithTime('💥 [FRONTEND] استثناء في تحميل العملاء (بعد ' + duration + 'ms):', err);
     } finally {
-      if (!isBackground) setLoading(false);
+      setLoading(false);
+      const endTime = performance.now();
+      const totalDuration = (endTime - startTime).toFixed(2);
+      logWithTime('🏁 [FRONTEND] انتهاء عملية التحميل - الإجمالي: ' + totalDuration + 'ms');
     }
+  };
+
+  const applyFilters = () => {
+    const startTime = performance.now();
+
+    logWithTime('🔍 [FRONTEND] applyFilters بدأ - البحث: "' + debouncedSearch + '" | النوع: ' + filterType);
+    logWithTime('📊 [FRONTEND] عدد العملاء الأصلي: ' + allCustomers.length);
+
+    let filtered = [...allCustomers];
+
+    // تطبيق فلتر البحث
+    if (debouncedSearch.trim().length > 0) {
+      const searchLower = debouncedSearch.toLowerCase();
+      const searchStartTime = performance.now();
+
+      filtered = filtered.filter(customer => {
+        const nameMatch = customer.name.toLowerCase().includes(searchLower);
+        const phoneMatch = customer.phone?.includes(debouncedSearch);
+        const cityMatch = customer.city?.toLowerCase().includes(searchLower);
+        return nameMatch || phoneMatch || cityMatch;
+      });
+
+      const searchEndTime = performance.now();
+      const searchDuration = (searchEndTime - searchStartTime).toFixed(2);
+
+      logWithTime('📈 [FRONTEND] البحث اكتمل - النتائج: ' + filtered.length + ' (استغرق ' + searchDuration + 'ms)');
+    }
+
+    // تطبيق فلتر النوع
+    if (filterType && filterType !== 'all') {
+      const beforeTypeFilter = filtered.length;
+      const typeStartTime = performance.now();
+
+      filtered = filtered.filter(customer => customer.customerType === filterType);
+
+      const typeEndTime = performance.now();
+      const typeDuration = (typeEndTime - typeStartTime).toFixed(2);
+
+      logWithTime('📊 [FRONTEND] فلترة النوع اكتملت - النتائج: ' + filtered.length + ' من ' + beforeTypeFilter + ' (استغرق ' + typeDuration + 'ms)');
+    }
+
+    // تحديث الـ state
+    setCustomers(filtered);
+    setTotalPages(1);
+    setTotalItems(filtered.length);
+
+    const endTime = performance.now();
+    const totalDuration = (endTime - startTime).toFixed(2);
+
+    logWithTime('🎯 [FRONTEND] applyFilters انتهت - النتائج النهائية: ' + filtered.length + ' عميل (الإجمالي: ' + totalDuration + 'ms)');
+  };
+
+  useEffect(() => {
+    const startTime = performance.now();
+    logWithTime('🎯 [FRONTEND] useEffect للفلاتر بدأ - هل العملاء محملين؟ ' + customersLoaded);
+    logWithTime('🔍 [FRONTEND] البحث الحالي: "' + debouncedSearch + '" | النوع الحالي: ' + filterType);
+
+    // Step 1: التحقق من تحميل العملاء
+    const step1Time = performance.now();
+    if (customersLoaded && allCustomers.length > 0) {
+      logWithTime('✅ [FRONTEND] Step 1: العملاء محملين - تطبيق الفلاتر (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
+
+      // Step 2: استدعاء applyFilters
+      const step2Time = performance.now();
+      applyFilters();
+      logWithTime('🔧 [FRONTEND] Step 2: تم استدعاء applyFilters (استغرق ' + (step2Time - step1Time).toFixed(2) + 'ms)');
+    } else {
+      logWithTime('⏳ [FRONTEND] Step 1: العملاء لم يتم تحميلهم بعد (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
+    }
+
+    const endTime = performance.now();
+    logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
+  }, [debouncedSearch, filterType, customersLoaded]);
+
+  const loadCustomers = async (isBackground = false) => {
+    // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
   };
 
   const resetCustomerForm = () => {
@@ -115,20 +445,46 @@ export default function Customers() {
 
   const saveCustomer = async () => {
     try {
+      console.log('💾 [FRONTEND] بدء حفظ العميل - تعديل؟', !!editingCustomer);
+      console.log('📝 [FRONTEND] بيانات العميل:', formData);
+
       if (editingCustomer) {
+        console.log('✏️ [FRONTEND] تعديل عميل رقم:', editingCustomer.id);
         const result = await window.api.updateCustomer(editingCustomer.id, formData);
-        if (result.error) { alert(result.error); return; }
+        console.log('📦 [BACKEND] نتيجة التعديل:', result);
+
+        if (result.error) {
+          console.error('❌ [BACKEND] خطأ في التعديل:', result.error);
+          alert(result.error);
+          return;
+        }
+        // تحديث العميل في allCustomers محلياً
+        setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
         setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
+        console.log('✅ [FRONTEND] تم تحديث العميل محلياً');
       } else {
+        console.log('➕ [FRONTEND] إضافة عميل جديد');
         const result = await window.api.addCustomer(formData);
-        if (result.error) { alert(result.error); return; }
-        if (currentPage !== 1) setCurrentPage(1);
-        else loadCustomers();
+        console.log('📦 [BACKEND] نتيجة الإضافة:', result);
+
+        if (result.error) {
+          console.error('❌ [BACKEND] خطأ في الإضافة:', result.error);
+          alert(result.error);
+          return;
+        }
+        // إضافة العميل الجديد لـ allCustomers
+        const newCustomer = { id: result.id || Date.now(), ...formData };
+        setAllCustomers(prev => [...prev, newCustomer]);
+        console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
+        // تطبيق الفلاتر تاني عشان يظهر العميل الجديد
+        applyFilters();
       }
       setShowModal(false);
       resetCustomerForm();
       setEditingCustomer(null);
+      console.log('🎉 [FRONTEND] انتهت عملية حفظ العميل بنجاح');
     } catch (err) {
+      console.error('💥 [FRONTEND] استثناء في حفظ العميل:', err);
       alert('خطأ في حفظ البيانات: ' + err.message);
     }
   };
@@ -167,15 +523,35 @@ export default function Customers() {
   };
 
   const handleDelete = async (id) => {
+    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
+
     if (confirm('هل أنت متأكد من الحذف؟')) {
       try {
+        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
         const result = await window.api.deleteCustomer(id);
-        if (result && result.error) { alert(result.error); return; }
-        setCustomers(prev => prev.filter(c => c.id !== id));
-        setTotalItems(prev => prev - 1);
+        console.log('📦 [BACKEND] نتيجة الحذف:', result);
+
+        if (result.error) {
+          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
+          alert('خطأ في الحذف');
+        } else {
+          // حذف العميل من allCustomers محلياً
+          setAllCustomers(prev => {
+            const beforeDelete = prev.length;
+            const afterDelete = prev.filter(c => c.id !== id).length;
+            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
+            return prev.filter(c => c.id !== id);
+          });
+          setCustomers(prev => prev.filter(c => c.id !== id));
+          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
+          alert('تم الحذف بنجاح');
+        }
       } catch (err) {
+        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
         alert('خطأ في الحذف');
       }
+    } else {
+      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
     }
   };
 
@@ -186,10 +562,15 @@ export default function Customers() {
   };
 
   const submitPayment = async (paymentFormData) => {
+    console.log('💳 [FRONTEND] بدء تسجيل دفعة');
+    console.log('👤 [FRONTEND] العميل:', selectedCustomer?.name, 'الرصيد الحالي:', selectedCustomer?.balance);
+    console.log('💰 [FRONTEND] بيانات الدفعة:', paymentFormData);
+
     // تأكيد بسيط للمستخدم قبل الإرسال
     const paymentAmount = parseFloat(paymentFormData.amount);
     // Allow negative amounts (customer may receive money), but disallow zero or non-numeric
     if (isNaN(paymentAmount) || paymentAmount === 0) {
+      console.error('❌ [FRONTEND] مبلغ غير صالح:', paymentAmount);
       alert('الرجاء إدخال مبلغ صالح (غير صفر)');
       return;
     }
@@ -197,8 +578,12 @@ export default function Customers() {
     const previewNewBalance = (selectedCustomer.balance - paymentAmount).toFixed(2);
     const paymentDate = new Date(paymentFormData.paymentDate);
     const confirmText = `سوف تُسجّل دفعة بقيمة ${formatCurrency(paymentAmount)} بتاريخ ${paymentDate.toLocaleDateString('ar-EG')}\nالرصيد بعد التسجيل: ${previewNewBalance}\n\nهل تريد المتابعة؟`;
-    if (!window.confirm(confirmText)) return;
+    if (!window.confirm(confirmText)) {
+      console.log('❌ [FRONTEND] المستخدم ألغى الدفعة');
+      return;
+    }
 
+    console.log('✅ [FRONTEND] المستخدم أكد الدفعة - جاري الإرسال للداتابيز');
     setPaymentSubmitting(true);
     try {
       const payload = {
@@ -208,21 +593,44 @@ export default function Customers() {
         paymentDate: paymentFormData.paymentDate // ✅ إرسال التاريخ بصيغة YYYY-MM-DD
       };
 
+      console.log('📤 [FRONTEND] إرسال طلب الدفعة للباك:', payload);
       const result = await window.api.addCustomerPayment(payload);
+      console.log('📦 [BACKEND] استجابة الدفعة:', result);
+
       if (!result.error) {
-        // refresh data but do not close modal here; parent (PaymentModal) will decide when to close
-        loadCustomers();
+        console.log('✅ [BACKEND] تم تسجيل الدفعة بنجاح');
+        const newBalance = (selectedCustomer.balance || 0) - paymentAmount;
+        console.log('📊 [FRONTEND] تحديث الرصيد من', selectedCustomer.balance, 'إلى', newBalance);
+
+        // تحديث رصيد العميل في allCustomers محلياً
+        setAllCustomers(prev => prev.map(c =>
+          c.id === selectedCustomer.id
+            ? { ...c, balance: newBalance }
+            : c
+        ));
+
+        // تحديث رصيد العميل في customers (العرض الحالي) مباشرة
+        setCustomers(prev => prev.map(c =>
+          c.id === selectedCustomer.id
+            ? { ...c, balance: newBalance }
+            : c
+        ));
+
         // clear local paymentData so modal fields reset when closed
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
+        console.log('🎉 [FRONTEND] انتهت عملية الدفعة بنجاح');
+      } else {
+        console.error('❌ [BACKEND] خطأ في تسجيل الدفعة:', result.error);
       }
 
       // return result to caller so it can show alerts / close UI
       return result;
     } catch (err) {
-      console.error('Payment error:', err);
+      console.error('💥 [FRONTEND] استثناء في تسجيل الدفعة:', err);
       alert('خطأ في التسجيل: ' + err.message);
     } finally {
       setPaymentSubmitting(false);
+      console.log('🏁 [FRONTEND] انتهاء عملية الدفعة');
     }
   };
 
@@ -256,24 +664,84 @@ export default function Customers() {
     }
   }, [showPaymentModal]);
 
-  const getCustomerTypeColor = (type) => {
+  const getCustomerTypeColor = useCallback((type) => {
     const colors = {
       'عادي': '#6b7280',
       'VIP': '#f59e0b',
       'تاجر جملة': '#8b5cf6'
     };
     return colors[type] || '#6b7280';
-  };
+  }, []);
 
   // مساعدة لتنسيق العملة
-  const formatCurrency = (value) => {
+  const formatCurrency = useCallback((value) => {
     try {
       const num = typeof value === 'string' ? parseFloat(value || 0) : (value || 0);
       return new Intl.NumberFormat('ar-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(num);
     } catch (e) {
       return value;
     }
-  };
+  }, []);
+
+  // Callbacks للأزرار - تمنع إعادة إنشاء الدوال في كل render
+  const handleShowLedger = useCallback((customerId) => {
+    setShowLedger(customerId);
+  }, []);
+
+  const handlePaymentCallback = useCallback((customer) => {
+    setSelectedCustomer(customer);
+    setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
+    setShowPaymentModal(true);
+  }, []);
+
+  const handleEditCallback = useCallback((customer) => {
+    setEditingCustomer(customer);
+    setFormData({
+      name: customer.name,
+      phone: customer.phone || '',
+      phone2: customer.phone2 || '',
+      address: customer.address || '',
+      city: customer.city || '',
+      district: customer.district || '',
+      notes: customer.notes || '',
+      creditLimit: customer.creditLimit || 0,
+      customerType: customer.customerType || 'عادي'
+    });
+    setShowModal(true);
+  }, []);
+
+  const handleDeleteCallback = useCallback(async (id) => {
+    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
+
+    if (confirm('هل أنت متأكد من الحذف؟')) {
+      try {
+        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
+        const result = await window.api.deleteCustomer(id);
+        console.log('📦 [BACKEND] نتيجة الحذف:', result);
+
+        if (result.error) {
+          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
+          alert('خطأ في الحذف');
+        } else {
+          // حذف العميل من allCustomers محلياً
+          setAllCustomers(prev => {
+            const beforeDelete = prev.length;
+            const afterDelete = prev.filter(c => c.id !== id).length;
+            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
+            return prev.filter(c => c.id !== id);
+          });
+          setCustomers(prev => prev.filter(c => c.id !== id));
+          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
+          alert('تم الحذف بنجاح');
+        }
+      } catch (err) {
+        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
+        alert('خطأ في الحذف');
+      }
+    } else {
+      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
+    }
+  }, []);
 
   // دالة لحساب آخر تاريخ دفع وحالة النشاط - من البيانات الحقيقية
   const getLastPaymentInfo = (customer) => {
@@ -1158,238 +1626,20 @@ export default function Customers() {
               </tr>
             ) : (
               customers.map((customer, index) => (
-                <tr key={customer.id} style={{
-                  borderBottom: '1px solid #e5e7eb',
-                  backgroundColor: selectedSearchIndex === index ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb',
-                  transition: 'background-color 0.2s'
-                }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSearchIndex === index ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb'}
-                >
-                  {visibleColumns.id && <td style={{ padding: '15px' }}>{customer.id}</td>}
-                  {visibleColumns.name && <td style={{ padding: '15px', fontWeight: 'bold', color: '#1f2937' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
-                      {(() => {
-                        const paymentInfo = getLastPaymentInfo(customer);
-                        if (paymentInfo.isOverdue) {
-                          return (
-                            <div
-                              style={{
-                                position: 'relative',
-                                display: 'inline-block'
-                              }}
-                              onMouseEnter={(e) => {
-                                const tooltip = e.currentTarget.querySelector('[data-tooltip]');
-                                if (tooltip) tooltip.style.opacity = '1';
-                              }}
-                              onMouseLeave={(e) => {
-                                const tooltip = e.currentTarget.querySelector('[data-tooltip]');
-                                if (tooltip) tooltip.style.opacity = '0';
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: '12px',
-                                  height: '12px',
-                                  borderRadius: '50%',
-                                  backgroundColor: '#dc2626',
-                                  cursor: 'pointer',
-                                  flexShrink: 0
-                                }}
-                                title={`🔴 لم يدفع منذ ${paymentInfo.daysAgo} يوم`}
-                              />
-                              <div
-                                data-tooltip="true"
-                                style={{
-                                  position: 'absolute',
-                                  bottom: '125%',
-                                  left: '-50px',
-                                  backgroundColor: '#1f2937',
-                                  color: 'white',
-                                  padding: '8px 12px',
-                                  borderRadius: '6px',
-                                  fontSize: '12px',
-                                  whiteSpace: 'nowrap',
-                                  zIndex: 1000,
-                                  opacity: 0,
-                                  pointerEvents: 'none',
-                                  transition: 'opacity 0.2s',
-                                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                  marginBottom: '5px'
-                                }}
-                              >
-                                <div>🔴 {paymentInfo.operationType}: {paymentInfo.lastPaymentDate}</div>
-                                <div style={{ marginTop: '4px', fontSize: '11px', color: '#e5e7eb' }}>
-                                  لم يدفع منذ {paymentInfo.daysAgo} {paymentInfo.operationType === 'دفعة' ? 'دفع' : 'فاتورة'}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                      <span>{customer.name}</span>
-                    </div>
-                  </td>}
-                  {visibleColumns.type && (
-                    <td style={{ padding: '15px' }}>
-                      <span style={{
-                        padding: '4px 8px',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        backgroundColor: getCustomerTypeColor(customer.customerType) + '20',
-                        color: getCustomerTypeColor(customer.customerType)
-                      }}>
-                        {customer.customerType}
-                      </span>
-                    </td>
-                  )}
-                  {visibleColumns.phone && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone || '-'}</td>}
-                  {visibleColumns.phone2 && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone2 || '-'}</td>}
-                  {visibleColumns.address && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || '-'}</td>}
-                  {visibleColumns.city && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.city || '-'}</td>}
-                  {visibleColumns.district && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.district || '-'}</td>}
-                  {visibleColumns.notes && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.notes || '-'}</td>}
-                  {visibleColumns.creditLimit && <td style={{ padding: '15px', color: '#6b7280', fontWeight: 'bold' }}>{(customer.creditLimit || 0).toFixed(2)}</td>}
-                  {visibleColumns.balance && (
-                    <td style={{ padding: '15px' }}>
-                      <span style={{
-                        fontWeight: 'bold',
-                        color: customer.balance > 0 ? '#ef4444' : customer.balance < 0 ? '#10b981' : '#6b7280',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        fontSize: '15px'
-                      }}>
-                        {customer.balance.toFixed(2)}
-                      </span>
-                    </td>
-                  )}
-                  {visibleColumns.actions && (
-                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => setShowLedger(customer.id)}
-                        title="كشف الحساب"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '2px',
-                          borderRadius: '3px',
-                          transition: 'all 0.2s',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '24px',
-                          height: '24px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#dbeafe';
-                          e.currentTarget.querySelector('svg').style.color = '#2563eb';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.querySelector('svg').style.color = '#6b7280';
-                        }}
-                      >
-                        <FileText size={16} color="#0307c9ff" />
-                      </button>
-                    </td>
-                  )}
-                  {visibleColumns.actions && (
-                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handlePayment(customer)}
-                        title="تسجيل دفعة"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '2px',
-                          borderRadius: '3px',
-                          transition: 'all 0.2s',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '24px',
-                          height: '24px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#dcfce7';
-                          e.currentTarget.querySelector('svg').style.color = '#16a34a';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.querySelector('svg').style.color = '#6b7280';
-                        }}
-                      >
-                        <DollarSign size={16} color="#177400ff" />
-                      </button>
-                    </td>
-                  )}
-                  {visibleColumns.actions && (
-                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handleEdit(customer)}
-                        title="تعديل"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '2px',
-                          borderRadius: '3px',
-                          transition: 'all 0.2s',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '24px',
-                          height: '24px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#fef3c7';
-                          e.currentTarget.querySelector('svg').style.color = '#d97706';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.querySelector('svg').style.color = '#6b7280';
-                        }}
-                      >
-                        <Edit2 size={16} color="#f78c00ff" />
-                      </button>
-                    </td>
-                  )}
-                  {visibleColumns.actions && (
-                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handleDelete(customer.id)}
-                        title="حذف"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '2px',
-                          borderRadius: '3px',
-                          transition: 'all 0.2s',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '24px',
-                          height: '24px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#fee2e2';
-                          e.currentTarget.querySelector('svg').style.color = '#dc2626';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.querySelector('svg').style.color = '#6b7280';
-                        }}
-                      >
-                        <Trash2 size={16} color="#d81711ff" />
-                      </button>
-                    </td>
-                  )}
-                </tr>
+                <CustomerRow
+                  key={customer.id}
+                  customer={customer}
+                  index={index}
+                  isSelected={selectedSearchIndex === index}
+                  visibleColumns={visibleColumns}
+                  overdueThreshold={overdueThreshold}
+                  onShowLedger={handleShowLedger}
+                  onPayment={handlePaymentCallback}
+                  onEdit={handleEditCallback}
+                  onDelete={handleDeleteCallback}
+                  getCustomerTypeColor={getCustomerTypeColor}
+                  formatCurrency={formatCurrency}
+                />
               ))
             )}
           </tbody>

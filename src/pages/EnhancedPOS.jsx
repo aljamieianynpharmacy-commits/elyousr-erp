@@ -579,6 +579,7 @@ export default function EnhancedPOS() {
      * تحديد أقصى 50 عميل بدون بحث، و 20 مع البحث
      */
     const filteredCustomers = useMemo(() => {
+        if (!Array.isArray(customers)) return [];
         if (showCustomerList && !customerSearchTerm) return customers.slice(0, 50);
         if (!customerSearchTerm) return [];
         const lowerTerm = customerSearchTerm.toLowerCase();
@@ -797,7 +798,7 @@ export default function EnhancedPOS() {
             ]);
 
             if (!variantsData.error) setVariants(variantsData);
-            if (!customersData.error) setCustomers(customersData);
+            if (!customersData.error) setCustomers(customersData.data || []);
         } catch (error) {
             console.error(error);
             if (!isBackground) showToast("فشل في تحميل البيانات", "error");

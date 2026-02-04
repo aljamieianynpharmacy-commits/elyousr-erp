@@ -350,15 +350,16 @@ export default function Customers() {
         setAllCustomers(result.data || []);
         setCustomersLoaded(true);
         logWithTime('✅ [FRONTEND] تم تحميل العملاء بنجاح');
-        // تطبيق الفلترة الحالية
-        applyFilters();
+        // تطبيق الفلترة الحالية سيتم تلقائياً عبر useEffect
       } else {
         logErrorWithTime('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
+        alert('خطأ في تحميل العملاء: ' + result.error);
       }
     } catch (err) {
       const endTime = performance.now();
       const duration = (endTime - startTime).toFixed(2);
       logErrorWithTime('💥 [FRONTEND] استثناء في تحميل العملاء (بعد ' + duration + 'ms):', err);
+      alert('خطأ في الاتصال بقاعدة البيانات: ' + err.message);
     } finally {
       setLoading(false);
       const endTime = performance.now();
@@ -367,7 +368,7 @@ export default function Customers() {
     }
   };
 
-  const applyFilters = () => {
+  const applyFilters = useCallback(() => {
     const startTime = performance.now();
 
     logWithTime('🔍 [FRONTEND] applyFilters بدأ - البحث: "' + debouncedSearch + '" | النوع: ' + filterType);
@@ -434,7 +435,7 @@ export default function Customers() {
     const totalDuration = (endTime - startTime).toFixed(2);
 
     logWithTime('🎯 [FRONTEND] applyFilters انتهت - النتائج النهائية: ' + filtered.length + ' عميل (الإجمالي: ' + totalDuration + 'ms)');
-  };
+  }, [allCustomers, debouncedSearch, filterType, columnSearch, overdueThreshold]);
 
   useEffect(() => {
     const startTime = performance.now();
@@ -443,7 +444,7 @@ export default function Customers() {
 
     // Step 1: التحقق من تحميل العملاء
     const step1Time = performance.now();
-    if (customersLoaded && allCustomers.length > 0) {
+    if (customersLoaded && allCustomers.length >= 0) { // Allow empty arrays
       logWithTime('✅ [FRONTEND] Step 1: العملاء محملين - تطبيق الفلاتر (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
 
       // Step 2: استدعاء applyFilters
@@ -456,11 +457,9 @@ export default function Customers() {
 
     const endTime = performance.now();
     logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
-  }, [debouncedSearch, filterType, customersLoaded, columnSearch, overdueThreshold]);
+  }, [debouncedSearch, filterType, customersLoaded, columnSearch, overdueThreshold, applyFilters]);
 
-  const loadCustomers = async (isBackground = false) => {
-    // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
-  };
+  // Removed unused loadCustomers function - using loadAllCustomers instead
 
   const resetCustomerForm = () => {
     setFormData({
@@ -491,10 +490,14 @@ export default function Customers() {
           alert(result.error);
           return;
         }
-        // تحديث العميل في allCustomers محلياً
-        setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
-        setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
+        
+        // تحديث العميل في allCustomers محلياً مع الحفاظ على البيانات الأخرى
+        const updatedCustomer = { ...editingCustomer, ...formData };
+        setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? updatedCustomer : c));
         console.log('✅ [FRONTEND] تم تحديث العميل محلياً');
+        
+        // تطبيق الفلاتر لتحديث العرض
+        setTimeout(() => applyFilters(), 0);
       } else {
         console.log('➕ [FRONTEND] إضافة عميل جديد');
         const result = await window.api.addCustomer(formData);
@@ -505,13 +508,28 @@ export default function Customers() {
           alert(result.error);
           return;
         }
+        
+        // إنشاء العميل الجديد مع البيانات الافتراضية
+        const newCustomer = { 
+          id: result.id || Date.now(), 
+          ...formData,
+          balance: 0,
+          lastPaymentDays: 0,
+          isOverdue: false,
+          lastOperationType: 'فاتورة'
+        };
+        
         // إضافة العميل الجديد لـ allCustomers
-        const newCustomer = { id: result.id || Date.now(), ...formData };
-        setAllCustomers(prev => [...prev, newCustomer]);
-        console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
-        // تطبيق الفلاتر تاني عشان يظهر العميل الجديد
-        applyFilters();
+        setAllCustomers(prev => {
+          const updated = [...prev, newCustomer];
+          console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
+          return updated;
+        });
+        
+        // تطبيق الفلاتر بعد تحديث allCustomers
+        setTimeout(() => applyFilters(), 0);
       }
+      
       setShowModal(false);
       resetCustomerForm();
       setEditingCustomer(null);
@@ -558,39 +576,6 @@ export default function Customers() {
       customerType: customer.customerType || 'عادي'
     });
     setShowModal(true);
-  };
-
-  const handleDelete = async (id) => {
-    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
-
-    if (confirm('هل أنت متأكد من الحذف؟')) {
-      try {
-        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
-        const result = await window.api.deleteCustomer(id);
-        console.log('📦 [BACKEND] نتيجة الحذف:', result);
-
-        if (result.error) {
-          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
-          alert('خطأ في الحذف');
-        } else {
-          // حذف العميل من allCustomers محلياً
-          setAllCustomers(prev => {
-            const beforeDelete = prev.length;
-            const afterDelete = prev.filter(c => c.id !== id).length;
-            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
-            return prev.filter(c => c.id !== id);
-          });
-          setCustomers(prev => prev.filter(c => c.id !== id));
-          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
-          alert('تم الحذف بنجاح');
-        }
-      } catch (err) {
-        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
-        alert('خطأ في الحذف');
-      }
-    } else {
-      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
-    }
   };
 
   const handlePayment = (customer) => {
@@ -643,22 +628,18 @@ export default function Customers() {
         // تحديث رصيد العميل في allCustomers محلياً
         setAllCustomers(prev => prev.map(c =>
           c.id === selectedCustomer.id
-            ? { ...c, balance: newBalance }
-            : c
-        ));
-
-        // تحديث رصيد العميل في customers (العرض الحالي) مباشرة
-        setCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id
-            ? { ...c, balance: newBalance }
+            ? { ...c, balance: newBalance, lastPaymentDays: 0 } // Reset payment days
             : c
         ));
 
         // clear local paymentData so modal fields reset when closed
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
         console.log('🎉 [FRONTEND] انتهت عملية الدفعة بنجاح');
+        
+        // تطبيق الفلاتر سيتم تلقائياً عبر useEffect
       } else {
         console.error('❌ [BACKEND] خطأ في تسجيل الدفعة:', result.error);
+        alert('خطأ في تسجيل الدفعة: ' + result.error);
       }
 
       // return result to caller so it can show alerts / close UI
@@ -767,27 +748,32 @@ export default function Customers() {
 
         if (result.error) {
           console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
-          alert('خطأ في الحذف');
+          alert('خطأ في الحذف: ' + result.error);
         } else {
           // حذف العميل من allCustomers محلياً
           setAllCustomers(prev => {
             const beforeDelete = prev.length;
-            const afterDelete = prev.filter(c => c.id !== id).length;
+            const updated = prev.filter(c => c.id !== id);
+            const afterDelete = updated.length;
             console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
-            return prev.filter(c => c.id !== id);
+            return updated;
           });
-          setCustomers(prev => prev.filter(c => c.id !== id));
           console.log('✅ [FRONTEND] تم حذف العميل محلياً');
           alert('تم الحذف بنجاح');
+          
+          // تطبيق الفلاتر سيتم تلقائياً عبر useEffect
         }
       } catch (err) {
         console.error('💥 [FRONTEND] استثناء في الحذف:', err);
-        alert('خطأ في الحذف');
+        alert('خطأ في الحذف: ' + err.message);
       }
     } else {
       console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
     }
   }, []);
+
+  // This function is replaced by handleDeleteCallback - keeping for backward compatibility
+  const handleDelete = handleDeleteCallback;
 
   // دالة لحساب آخر تاريخ دفع وحالة النشاط - من البيانات الحقيقية
   const getLastPaymentInfo = (customer) => {
@@ -1491,6 +1477,28 @@ export default function Customers() {
           </button>
           <button
             onClick={() => {
+              setCustomersLoaded(false);
+              loadAllCustomers();
+            }}
+            disabled={loading}
+            style={{
+              backgroundColor: loading ? '#9ca3af' : '#059669',
+              color: 'white',
+              padding: '10px 16px',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Search size={18} />
+            {loading ? 'جاري التحديث...' : 'تحديث البيانات'}
+          </button>
+          <button
+            onClick={() => {
               openNewCustomerModal();
             }}
             style={{
@@ -1823,7 +1831,7 @@ export default function Customers() {
             customerId={showLedger}
             onClose={() => {
               setShowLedger(null);
-              loadCustomers(true);
+              // Refresh will happen automatically via useEffect when allCustomers changes
             }}
           />
         )

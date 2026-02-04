@@ -1,0 +1,311 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/* =========================
+   USERS & ROLES
+========================= */
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  username  String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  CASHIER
+  STOREKEEPER
+}
+
+/* =========================
+   CATALOG
+========================= */
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  image       String?
+  icon        String?
+  color       String?
+  createdAt   DateTime @default(now())
+
+  products    Product[]
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  categoryId  Int?
+  brand       String?
+  barcode     String?  @unique
+  image       String?
+  sku         String?  @unique
+  basePrice   Float    @default(0)
+  cost        Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  variants    Variant[]
+  inventory   Inventory?
+}
+
+model Variant {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  productSize String
+  color       String
+  price       Float
+  cost        Float
+  quantity    Int
+  barcode     String?  @unique
+  image       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  saleItems    SaleItem[]
+  purchaseItems PurchaseItem[]
+  returnItems  ReturnItem[]
+}
+
+model Inventory {
+  id            Int      @id @default(autoincrement())
+  productId     Int      @unique
+  totalQuantity Int      @default(0)
+  minStock      Int      @default(5)
+  maxStock      Int      @default(100)
+  warehouseQty  Int      @default(0)
+  displayQty    Int      @default(0)
+  lastRestock   DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+/* =========================
+   CUSTOMERS & ACCOUNTING
+========================= */
+
+model Customer {
+  id           Int      @id @default(autoincrement())
+  name         String
+  phone        String?
+  phone2       String?
+  address      String?
+  city         String?
+  district     String?
+  notes        String?
+  creditLimit  Float    @default(0)
+  customerType String   @default("عادي")
+  rating       Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  sales        Sale[]
+  returns      Return[]
+  payments     CustomerPayment[]
+  transactions CustomerTransaction[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([city])
+  @@index([customerType])
+}
+
+model CustomerTransaction {
+  id            Int      @id @default(autoincrement())
+  customerId    Int
+  date          DateTime @default(now())
+
+  type          TransactionType
+  referenceType ReferenceType?
+  referenceId   Int?
+
+  debit         Float    @default(0)
+  credit        Float    @default(0)
+  notes         String?
+
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, date])
+  @@index([type])
+  @@index([referenceType, referenceId])
+}
+
+enum TransactionType {
+  SALE
+  PAYMENT
+  RETURN
+  DISCOUNT
+  ADJUSTMENT
+}
+
+enum ReferenceType {
+  SALE
+  PAYMENT
+  RETURN
+}
+
+/* =========================
+   SALES
+========================= */
+
+model Sale {
+  id          Int      @id @default(autoincrement())
+  customerId  Int?
+  total       Float
+  discount    Float    @default(0)
+  saleType    String   @default("نقدي")
+  notes       String?
+  invoiceDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items       SaleItem[]
+  returns     Return[]
+}
+
+model SaleItem {
+  id        Int
+  saleId    Int
+  variantId Int
+  quantity  Int
+  price     Float
+  discount  Float   @default(0)
+
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variant   Variant @relation(fields: [variantId], references: [id])
+
+  @@id([id, saleId])
+}
+
+/* =========================
+   RETURNS
+========================= */
+
+model Return {
+  id         Int      @id @default(autoincrement())
+  saleId     Int?
+  customerId Int?
+  total      Float
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  sale       Sale?     @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items      ReturnItem[]
+}
+
+model ReturnItem {
+  id        Int
+  returnId  Int
+  variantId Int
+  quantity  Int
+  price     Float
+
+  return    Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  variant   Variant @relation(fields: [variantId], references: [id])
+
+  @@id([id, returnId])
+}
+
+/* =========================
+   PAYMENTS
+========================= */
+
+model PaymentMethod {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  code      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  payments  CustomerPayment[]
+}
+
+model CustomerPayment {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+  paymentMethodId Int
+  amount          Float
+  notes           String?
+  paymentDate     DateTime @default(now())
+
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+}
+
+/* =========================
+   SUPPLIERS (BASIC)
+========================= */
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String?
+  address   String?
+  balance   Float    @default(0)
+  createdAt DateTime @default(now())
+
+  purchases Purchase[]
+  payments  SupplierPayment[]
+}
+
+model Purchase {
+  id         Int      @id @default(autoincrement())
+  supplierId Int?
+  total      Float
+  paid       Float    @default(0)
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items      PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         Int
+  purchaseId Int
+  variantId  Int
+  quantity   Int
+  cost       Float
+
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  variant    Variant  @relation(fields: [variantId], references: [id])
+
+  @@id([id, purchaseId])
+}
+
+model SupplierPayment {
+  id         Int      @id @default(autoincrement())
+  supplierId Int
+  amount     Float
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+}
+
+/* =========================
+   EXPENSES
+========================= */
+
+model Expense {
+  id        Int      @id @default(autoincrement())
+  title     String
+  amount    Float
+  createdAt DateTime @default(now())
+}

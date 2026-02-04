@@ -276,6 +276,8 @@ export default function Customers() {
   const [totalItems, setTotalItems] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const latestRequestIdRef = useRef(0);
+  const [columnSearch, setColumnSearch] = useState({});
+  const [showSearchRow, setShowSearchRow] = useState(false);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -361,7 +363,7 @@ export default function Customers() {
 
     let filtered = [...allCustomers];
 
-    // تطبيق فلتر البحث
+    // تطبيق فلتر البحث العالمي
     if (debouncedSearch.trim().length > 0) {
       const searchLower = debouncedSearch.toLowerCase();
       const searchStartTime = performance.now();
@@ -377,6 +379,25 @@ export default function Customers() {
       const searchDuration = (searchEndTime - searchStartTime).toFixed(2);
 
       logWithTime('📈 [FRONTEND] البحث اكتمل - النتائج: ' + filtered.length + ' (استغرق ' + searchDuration + 'ms)');
+    }
+
+    // تطبيق فلتر الأعمدة
+    const activeColumnFilters = Object.entries(columnSearch).filter(([_, value]) => value && value.trim() !== '');
+    if (activeColumnFilters.length > 0) {
+      filtered = filtered.filter(customer => {
+        return activeColumnFilters.every(([key, value]) => {
+          if (!value) return true;
+          const searchValue = value.toLowerCase();
+          let itemValue = '';
+
+          if (key === 'type') itemValue = customer.customerType || '';
+          else if (key === 'balance') itemValue = (customer.balance || 0).toString();
+          else if (key === 'creditLimit') itemValue = (customer.creditLimit || 0).toString();
+          else itemValue = customer[key] || '';
+
+          return String(itemValue).toLowerCase().includes(searchValue);
+        });
+      });
     }
 
     // تطبيق فلتر النوع
@@ -423,7 +444,7 @@ export default function Customers() {
 
     const endTime = performance.now();
     logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
-  }, [debouncedSearch, filterType, customersLoaded]);
+  }, [debouncedSearch, filterType, customersLoaded, columnSearch]);
 
   const loadCustomers = async (isBackground = false) => {
     // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
@@ -778,6 +799,13 @@ export default function Customers() {
 
   // البحث والفلترة
 
+
+  const handleColumnSearchChange = (field, value) => {
+    setColumnSearch(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const toggleColumn = (column) => {
     setVisibleColumns(prev => ({
@@ -1534,16 +1562,42 @@ export default function Customers() {
             <div style={{
               position: 'absolute',
               top: '100%',
-              right: 0,
+              left: 0, // المحاذاة لليسار بدلاً من اليمين لمنع الخروج عن الشاشة
               backgroundColor: 'white',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              padding: '15px',
-              marginTop: '5px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              padding: '8px',
+              marginTop: '8px',
               zIndex: 100,
-              minWidth: '200px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              minWidth: '240px',
+              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+              maxHeight: '400px',
+              overflowY: 'auto'
             }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '10px 12px',
+                cursor: 'pointer',
+                gap: '10px',
+                borderBottom: '1px solid #f3f4f6',
+                marginBottom: '5px',
+                fontWeight: 'bold',
+                color: '#3b82f6',
+                borderRadius: '8px',
+                transition: 'background-color 0.2s',
+              }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <input
+                  type="checkbox"
+                  checked={showSearchRow}
+                  onChange={(e) => setShowSearchRow(e.target.checked)}
+                  style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#3b82f6' }}
+                />
+                <span>🔍 إظهار صف البحث</span>
+              </label>
               {Object.entries({
                 id: '#',
                 name: 'الاسم',
@@ -1560,15 +1614,22 @@ export default function Customers() {
                 <label key={key} style={{
                   display: 'flex',
                   alignItems: 'center',
-                  padding: '8px 0',
+                  padding: '8px 12px',
                   cursor: 'pointer',
-                  gap: '8px'
-                }}>
+                  gap: '10px',
+                  borderRadius: '8px',
+                  transition: 'background-color 0.2s',
+                  color: '#374151',
+                  fontSize: '14px'
+                }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
                   <input
                     type="checkbox"
                     checked={visibleColumns[key] || false}
                     onChange={() => toggleColumn(key)}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#3b82f6' }}
                   />
                   <span>{label}</span>
                 </label>
@@ -1616,6 +1677,26 @@ export default function Customers() {
               {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>تعديل</th>}
               {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>حذف</th>}
             </tr>
+            {/* صف البحث */}
+            {showSearchRow && (
+              <tr style={{ backgroundColor: '#f3f4f6' }}>
+                {visibleColumns.id && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.id || ''} onChange={(e) => handleColumnSearchChange('id', e.target.value)} /></th>}
+                {visibleColumns.name && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.name || ''} onChange={(e) => handleColumnSearchChange('name', e.target.value)} /></th>}
+                {visibleColumns.type && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.type || ''} onChange={(e) => handleColumnSearchChange('type', e.target.value)} /></th>}
+                {visibleColumns.phone && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.phone || ''} onChange={(e) => handleColumnSearchChange('phone', e.target.value)} /></th>}
+                {visibleColumns.phone2 && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.phone2 || ''} onChange={(e) => handleColumnSearchChange('phone2', e.target.value)} /></th>}
+                {visibleColumns.address && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.address || ''} onChange={(e) => handleColumnSearchChange('address', e.target.value)} /></th>}
+                {visibleColumns.city && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.city || ''} onChange={(e) => handleColumnSearchChange('city', e.target.value)} /></th>}
+                {visibleColumns.district && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.district || ''} onChange={(e) => handleColumnSearchChange('district', e.target.value)} /></th>}
+                {visibleColumns.notes && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.notes || ''} onChange={(e) => handleColumnSearchChange('notes', e.target.value)} /></th>}
+                {visibleColumns.creditLimit && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.creditLimit || ''} onChange={(e) => handleColumnSearchChange('creditLimit', e.target.value)} /></th>}
+                {visibleColumns.balance && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.balance || ''} onChange={(e) => handleColumnSearchChange('balance', e.target.value)} /></th>}
+                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
+                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
+                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
+                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
+              </tr>
+            )}
           </thead>
           <tbody>
             {customers.length === 0 ? (
@@ -1704,500 +1785,506 @@ export default function Customers() {
       />
 
       {/* Customer Ledger */}
-      {showLedger && (
-        <CustomerLedger
-          customerId={showLedger}
-          onClose={() => {
-            setShowLedger(null);
-            loadCustomers(true);
-          }}
-        />
-      )}
+      {
+        showLedger && (
+          <CustomerLedger
+            customerId={showLedger}
+            onClose={() => {
+              setShowLedger(null);
+              loadCustomers(true);
+            }}
+          />
+        )
+      }
 
       {/* Reports Modal */}
-      {showReports && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1300
-          }}
-          onClick={() => setShowReports(false)}
-        >
+      {
+        showReports && (
           <div
             style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '30px',
-              width: '500px',
-              maxHeight: '80vh',
-              overflow: 'auto'
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1300
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={() => setShowReports(false)}
           >
-            <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>📊 التقارير والطباعة</h2>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <button
-                onClick={() => {
-                  printReport('debts');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#fee2e2',
-                  border: '2px solid #dc2626',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fecaca';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fee2e2';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>💳 تقرير المديونيات</div>
-                <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '5px' }}>عملاء مدينين بفترات</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('topDebtors');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#fef3c7',
-                  border: '2px solid #f59e0b',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fde68a';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fef3c7';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#f59e0b', fontSize: '16px' }}>🏆 أكبر المدينين</div>
-                <div style={{ fontSize: '12px', color: '#92400e', marginTop: '5px' }}>أكبر 20 عميل مدين</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('types');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#dbeafe',
-                  border: '2px solid #2563eb',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#bfdbfe';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#dbeafe';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#2563eb', fontSize: '16px' }}>📋 تصنيف العملاء</div>
-                <div style={{ fontSize: '12px', color: '#1e40af', marginTop: '5px' }}>عادي / VIP / جملة</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('cities');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#d1fae5',
-                  border: '2px solid #10b981',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#a7f3d0';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d1fae5';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '16px' }}>🗺️ التوزيع الجغرافي</div>
-                <div style={{ fontSize: '12px', color: '#065f46', marginTop: '5px' }}>العملاء حسب المدينة</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('selected');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#e9d5ff',
-                  border: '2px solid #a855f7',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d8b4fe';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#e9d5ff';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#a855f7', fontSize: '16px' }}>🔍 التقرير المخصص</div>
-                <div style={{ fontSize: '12px', color: '#581c87', marginTop: '5px' }}>بناءً على البحث الحالي</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('aging');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#fecdd3',
-                  border: '2px solid #f43f5e',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fbcfe8';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fecdd3';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#f43f5e', fontSize: '16px' }}>⏳ أعمار الديون</div>
-                <div style={{ fontSize: '12px', color: '#be123c', marginTop: '5px' }}>0-30 / 31-60 / +90 يوم</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('goodPayers');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#d1f2eb',
-                  border: '2px solid #14b8a6',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#99f6e4';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d1f2eb';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#14b8a6', fontSize: '16px' }}>💸 العملاء الملتزمون</div>
-                <div style={{ fontSize: '12px', color: '#0d9488', marginTop: '5px' }}>صفر دين أو دفعات مقدمة</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('trend');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#fef08a',
-                  border: '2px solid #eab308',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#facc15';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fef08a';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#eab308', fontSize: '16px' }}>📈 تطور المديونية</div>
-                <div style={{ fontSize: '12px', color: '#a16207', marginTop: '5px' }}>12 شهر الأخيرة</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('movements');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#e0e7ff',
-                  border: '2px solid #6366f1',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c7d2fe';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#e0e7ff';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#6366f1', fontSize: '16px' }}>🧾 الحركات المالية</div>
-                <div style={{ fontSize: '12px', color: '#3730a3', marginTop: '5px' }}>فواتير و دفعات</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('behavior');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#fda29b',
-                  border: '2px solid #ff6b6b',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fd8c7a';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fda29b';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#ff6b6b', fontSize: '16px' }}>🧠 سلوك الدفع</div>
-                <div style={{ fontSize: '12px', color: '#c92a2a', marginTop: '5px' }}>ملتزم / متوسط / متأخر</div>
-              </button>
-
-              <button
-                onClick={() => {
-                  printReport('inactive');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#d7d7d7',
-                  border: '2px solid #737373',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c4c4c4';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d7d7d7';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#737373', fontSize: '16px' }}>🎯 العملاء غير النشطين</div>
-                <div style={{ fontSize: '12px', color: '#525252', marginTop: '5px' }}>30+ يوم بلا حركة</div>
-              </button>
-
-              <div
-                style={{
-                  padding: '15px',
-                  backgroundColor: '#f3f4f6',
-                  border: '2px solid #d1d5db',
-                  borderRadius: '8px',
-                  textAlign: 'right',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'center'
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#374151', fontSize: '14px' }}>📈 معلومات سريعة</div>
-                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                  <div>إجمالي العملاء: {customers.length}</div>
-                  <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowReports(false)}
+            <div
               style={{
-                width: '100%',
-                marginTop: '20px',
-                padding: '10px',
-                backgroundColor: '#6b7280',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '30px',
+                width: '500px',
+                maxHeight: '80vh',
+                overflow: 'auto'
               }}
+              onClick={(e) => e.stopPropagation()}
             >
-              إغلاق
-            </button>
-          </div>
-        </div>
-      )}
+              <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>📊 التقارير والطباعة</h2>
 
-      {/* Settings Modal */}
-      {showSettings && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1400
-          }}
-          onClick={() => setShowSettings(false)}
-        >
-          <div
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '30px',
-              width: '500px'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>⚙️ الإعدادات</h2>
-
-            <div style={{ marginBottom: '30px', borderRadius: '8px', backgroundColor: '#f0f9ff', padding: '20px', border: '2px solid #3b82f6' }}>
-              <label style={{ display: 'block', marginBottom: '15px', fontWeight: 'bold', color: '#1e40af' }}>
-                🔴 عدد أيام عدم الدفع (حتى تظهر النقطة الحمراء)
-              </label>
-              <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-                <input
-                  type="range"
-                  min="7"
-                  max="90"
-                  step="1"
-                  value={overdueThreshold}
-                  onChange={(e) => setOverdueThreshold(parseInt(e.target.value))}
-                  style={{
-                    flex: 1,
-                    height: '8px',
-                    borderRadius: '5px',
-                    outline: 'none',
-                    accentColor: '#3b82f6'
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                <button
+                  onClick={() => {
+                    printReport('debts');
+                    setShowReports(false);
                   }}
-                />
-                <div
                   style={{
-                    backgroundColor: '#3b82f6',
-                    color: 'white',
-                    padding: '8px 16px',
-                    borderRadius: '6px',
-                    fontWeight: 'bold',
-                    minWidth: '80px',
-                    textAlign: 'center'
+                    padding: '15px',
+                    backgroundColor: '#fee2e2',
+                    border: '2px solid #dc2626',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fecaca';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fee2e2';
+                    e.currentTarget.style.transform = 'translateY(0)';
                   }}
                 >
-                  {overdueThreshold} يوم
+                  <div style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>💳 تقرير المديونيات</div>
+                  <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '5px' }}>عملاء مدينين بفترات</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('topDebtors');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fef3c7',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fde68a';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fef3c7';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#f59e0b', fontSize: '16px' }}>🏆 أكبر المدينين</div>
+                  <div style={{ fontSize: '12px', color: '#92400e', marginTop: '5px' }}>أكبر 20 عميل مدين</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('types');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#dbeafe',
+                    border: '2px solid #2563eb',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bfdbfe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#dbeafe';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#2563eb', fontSize: '16px' }}>📋 تصنيف العملاء</div>
+                  <div style={{ fontSize: '12px', color: '#1e40af', marginTop: '5px' }}>عادي / VIP / جملة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('cities');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#d1fae5',
+                    border: '2px solid #10b981',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#a7f3d0';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1fae5';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '16px' }}>🗺️ التوزيع الجغرافي</div>
+                  <div style={{ fontSize: '12px', color: '#065f46', marginTop: '5px' }}>العملاء حسب المدينة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('selected');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#e9d5ff',
+                    border: '2px solid #a855f7',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d8b4fe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#e9d5ff';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#a855f7', fontSize: '16px' }}>🔍 التقرير المخصص</div>
+                  <div style={{ fontSize: '12px', color: '#581c87', marginTop: '5px' }}>بناءً على البحث الحالي</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('aging');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fecdd3',
+                    border: '2px solid #f43f5e',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fbcfe8';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fecdd3';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#f43f5e', fontSize: '16px' }}>⏳ أعمار الديون</div>
+                  <div style={{ fontSize: '12px', color: '#be123c', marginTop: '5px' }}>0-30 / 31-60 / +90 يوم</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('goodPayers');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#d1f2eb',
+                    border: '2px solid #14b8a6',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#99f6e4';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1f2eb';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#14b8a6', fontSize: '16px' }}>💸 العملاء الملتزمون</div>
+                  <div style={{ fontSize: '12px', color: '#0d9488', marginTop: '5px' }}>صفر دين أو دفعات مقدمة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('trend');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fef08a',
+                    border: '2px solid #eab308',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#facc15';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fef08a';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#eab308', fontSize: '16px' }}>📈 تطور المديونية</div>
+                  <div style={{ fontSize: '12px', color: '#a16207', marginTop: '5px' }}>12 شهر الأخيرة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('movements');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#e0e7ff',
+                    border: '2px solid #6366f1',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#c7d2fe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#e0e7ff';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#6366f1', fontSize: '16px' }}>🧾 الحركات المالية</div>
+                  <div style={{ fontSize: '12px', color: '#3730a3', marginTop: '5px' }}>فواتير و دفعات</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('behavior');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fda29b',
+                    border: '2px solid #ff6b6b',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fd8c7a';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fda29b';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#ff6b6b', fontSize: '16px' }}>🧠 سلوك الدفع</div>
+                  <div style={{ fontSize: '12px', color: '#c92a2a', marginTop: '5px' }}>ملتزم / متوسط / متأخر</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('inactive');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#d7d7d7',
+                    border: '2px solid #737373',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#c4c4c4';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d7d7d7';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#737373', fontSize: '16px' }}>🎯 العملاء غير النشطين</div>
+                  <div style={{ fontSize: '12px', color: '#525252', marginTop: '5px' }}>30+ يوم بلا حركة</div>
+                </button>
+
+                <div
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#f3f4f6',
+                    border: '2px solid #d1d5db',
+                    borderRadius: '8px',
+                    textAlign: 'right',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#374151', fontSize: '14px' }}>📈 معلومات سريعة</div>
+                  <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
+                    <div>إجمالي العملاء: {customers.length}</div>
+                    <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
+                  </div>
                 </div>
               </div>
-              <div style={{ marginTop: '10px', fontSize: '12px', color: '#1e40af' }}>
-                ℹ️ النقطة الحمراء ستظهر عندما يمر {overdueThreshold} يوم بدون دفع أو فاتورة
-              </div>
-            </div>
 
-            <div style={{ marginBottom: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
-              <h3 style={{ margin: '0 0 10px 0', color: '#374151' }}>📊 معلومات سريعة:</h3>
-              <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                <div>• إجمالي العملاء: <strong>{customers.length}</strong></div>
-                <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
-                <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
               <button
-                onClick={() => {
-                  setShowSettings(false);
-                  loadCustomers(); // reload لتحديث البيانات
-                }}
+                onClick={() => setShowReports(false)}
                 style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '14px'
-                }}
-              >
-                ✅ حفظ الإعدادات
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                style={{
-                  flex: 1,
-                  padding: '12px',
+                  width: '100%',
+                  marginTop: '20px',
+                  padding: '10px',
                   backgroundColor: '#6b7280',
                   color: 'white',
                   border: 'none',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '14px'
+                  fontWeight: 'bold'
                 }}
               >
-                ✕ إلغاء
+                إغلاق
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+
+      {/* Settings Modal */}
+      {
+        showSettings && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1400
+            }}
+            onClick={() => setShowSettings(false)}
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '30px',
+                width: '500px'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>⚙️ الإعدادات</h2>
+
+              <div style={{ marginBottom: '30px', borderRadius: '8px', backgroundColor: '#f0f9ff', padding: '20px', border: '2px solid #3b82f6' }}>
+                <label style={{ display: 'block', marginBottom: '15px', fontWeight: 'bold', color: '#1e40af' }}>
+                  🔴 عدد أيام عدم الدفع (حتى تظهر النقطة الحمراء)
+                </label>
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min="7"
+                    max="90"
+                    step="1"
+                    value={overdueThreshold}
+                    onChange={(e) => setOverdueThreshold(parseInt(e.target.value))}
+                    style={{
+                      flex: 1,
+                      height: '8px',
+                      borderRadius: '5px',
+                      outline: 'none',
+                      accentColor: '#3b82f6'
+                    }}
+                  />
+                  <div
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      fontWeight: 'bold',
+                      minWidth: '80px',
+                      textAlign: 'center'
+                    }}
+                  >
+                    {overdueThreshold} يوم
+                  </div>
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#1e40af' }}>
+                  ℹ️ النقطة الحمراء ستظهر عندما يمر {overdueThreshold} يوم بدون دفع أو فاتورة
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
+                <h3 style={{ margin: '0 0 10px 0', color: '#374151' }}>📊 معلومات سريعة:</h3>
+                <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                  <div>• إجمالي العملاء: <strong>{customers.length}</strong></div>
+                  <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
+                  <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => {
+                    setShowSettings(false);
+                    loadCustomers(); // reload لتحديث البيانات
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  ✅ حفظ الإعدادات
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#6b7280',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  ✕ إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+    </div >
   );
 }

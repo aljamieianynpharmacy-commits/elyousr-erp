@@ -4,6 +4,29 @@ import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
 
+// Utility functions - moved outside component for better performance
+const getCustomerTypeColor = (type) => {
+  const colors = {
+    'عادي': '#6b7280',
+    'VIP': '#f59e0b',
+    'تاجر جملة': '#8b5cf6'
+  };
+  return colors[type] || '#6b7280';
+};
+
+const formatCurrency = (value) => {
+  try {
+    const num = typeof value === 'string' ? parseFloat(value || 0) : (value || 0);
+    return new Intl.NumberFormat('ar-EG', { 
+      style: 'currency', 
+      currency: 'EGP', 
+      maximumFractionDigits: 2 
+    }).format(num);
+  } catch (e) {
+    return value;
+  }
+};
+
 // مكون صف العميل المُحسّن - يتجنب إعادة الرندر غير الضرورية
 const CustomerRow = memo(function CustomerRow({
   customer,
@@ -569,25 +592,6 @@ export default function Customers() {
       setTimeout(() => paymentInputRef.current?.focus(), 0);
     }
   }, [showPaymentModal]);
-
-  const getCustomerTypeColor = useCallback((type) => {
-    const colors = {
-      'عادي': '#6b7280',
-      'VIP': '#f59e0b',
-      'تاجر جملة': '#8b5cf6'
-    };
-    return colors[type] || '#6b7280';
-  }, []);
-
-  // مساعدة لتنسيق العملة
-  const formatCurrency = useCallback((value) => {
-    try {
-      const num = typeof value === 'string' ? parseFloat(value || 0) : (value || 0);
-      return new Intl.NumberFormat('ar-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(num);
-    } catch (e) {
-      return value;
-    }
-  }, []);
 
   // Callbacks للأزرار - تمنع إعادة إنشاء الدوال في كل render
   const handleShowLedger = useCallback((customerId) => {

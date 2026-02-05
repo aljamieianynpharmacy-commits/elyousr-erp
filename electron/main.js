@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const dbService = require('./db-service')
 
@@ -142,16 +142,86 @@ ipcMain.handle('db:updateSale', async (event, saleId, saleData) => {
     return await dbService.updateSale(saleId, saleData);
 });
 
-// Printing Handler
+// Message Box Handler (for safeAlert and safeConfirm)
+ipcMain.handle('dialog:showMessageBox', async (event, options) => {
+    try {
+        const result = await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
+            type: options.type || 'info',
+            title: options.title || 'رسالة',
+            message: options.message || '',
+            detail: options.detail,
+            buttons: options.buttons || ['موافق'],
+            defaultId: options.defaultId || 0,
+            cancelId: options.cancelId
+        });
+        return result;
+    } catch (err) {
+        console.error('Dialog Error:', err);
+        return { error: err.message };
+    }
+});
+
+// HTML Printing Handler (for safePrint)
+ipcMain.handle('print:html', async (event, options) => {
+    try {
+        const printWindow = new BrowserWindow({
+            width: 900,
+            height: 700,
+            show: true,
+            title: options.title || 'معاينة الطباعة',
+            webPreferences: {
+                preload: path.join(__dirname, 'print-preload.js'),
+                nodeIntegration: false,
+                contextIsolation: true
+            }
+        });
+        
+        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(options.html)}`);
+
+        // Handler للطباعة من داخل النافذة
+        ipcMain.handleOnce('trigger-print', async () => {
+            return new Promise((resolve) => {
+                printWindow.webContents.print(
+                    {
+                        silent: false,
+                        printBackground: true,
+                        color: true,
+                        margins: { marginType: 'printableArea' },
+                        pageSize: 'A4'
+                    },
+                    (success, errorType) => {
+                        resolve({ success, error: errorType });
+                    }
+                );
+            });
+        });
+
+        return new Promise((resolve) => {
+            printWindow.on('closed', () => {
+                resolve({ success: true, windowOpened: true });
+            });
+            
+            printWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+                printWindow.close();
+                resolve({ success: false, error: errorDescription });
+            });
+        });
+    } catch (err) {
+        console.error('Print Error:', err);
+        return { error: err.message };
+    }
+});
+
+// Legacy Printing Handler (kept for backward compatibility)
 ipcMain.handle('print:sale', async (event, saleId) => {
     try {
         const sale = await dbService.getSaleDetails(saleId);
         if (!sale || sale.error) return { error: 'Sale not found' };
 
         const printWindow = new BrowserWindow({
-            width: 400, // Thermal printer width approx
+            width: 400,
             height: 600,
-            show: false, // Hidden window
+            show: false,
             webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -161,11 +231,8 @@ ipcMain.handle('print:sale', async (event, saleId) => {
         const printPath = path.join(__dirname, 'print.html');
         await printWindow.loadFile(printPath);
 
-        // Send data to window
         printWindow.webContents.send('print-data', sale);
 
-        // Wait for print completion (handled inside print.html via ipcRenderer if needed, or just let it close)
-        // For simplicity, we let the window close itself after printing
         return { success: true };
     } catch (err) {
         console.error('Print Error:', err);

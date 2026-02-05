@@ -74,5 +74,9 @@ contextBridge.exposeInMainWorld('api', {
     getUsers: () => ipcRenderer.invoke('db:getUsers'),
     addUser: (userData) => ipcRenderer.invoke('db:addUser', userData),
     updateUser: (id, userData) => ipcRenderer.invoke('db:updateUser', id, userData),
-    deleteUser: (id) => ipcRenderer.invoke('db:deleteUser', id)
+    deleteUser: (id) => ipcRenderer.invoke('db:deleteUser', id),
+
+    // Dialog & Printing
+    showMessageBox: (options) => ipcRenderer.invoke('dialog:showMessageBox', options),
+    printHTML: (options) => ipcRenderer.invoke('print:html', options)
 });

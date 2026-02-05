@@ -380,43 +380,34 @@ export default function Customers() {
 
   const saveCustomer = async () => {
     try {
-      console.log('💾 [FRONTEND] بدء حفظ العميل - تعديل؟', !!editingCustomer);
-      console.log('📝 [FRONTEND] بيانات العميل:', formData);
-
       if (editingCustomer) {
-        console.log('✏️ [FRONTEND] تعديل عميل رقم:', editingCustomer.id);
         const result = await window.api.updateCustomer(editingCustomer.id, formData);
-        console.log('📦 [BACKEND] نتيجة التعديل:', result);
 
         if (result.error) {
-          console.error('❌ [BACKEND] خطأ في التعديل:', result.error);
+          console.error('Error updating customer:', result.error);
           alert(result.error);
           return;
         }
-        // تحديث العميل في allCustomers محلياً
+        
         setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
-        console.log('✅ [FRONTEND] تم تحديث العميل محلياً');
       } else {
-        console.log('➕ [FRONTEND] إضافة عميل جديد');
         const result = await window.api.addCustomer(formData);
-        console.log('📦 [BACKEND] نتيجة الإضافة:', result);
 
         if (result.error) {
-          console.error('❌ [BACKEND] خطأ في الإضافة:', result.error);
+          console.error('Error adding customer:', result.error);
           alert(result.error);
           return;
         }
-        // إضافة العميل الجديد لـ allCustomers
+        
         const newCustomer = { id: result.id || Date.now(), ...formData };
         setAllCustomers(prev => [...prev, newCustomer]);
-        console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
       }
+      
       setShowModal(false);
       resetCustomerForm();
       setEditingCustomer(null);
-      console.log('🎉 [FRONTEND] انتهت عملية حفظ العميل بنجاح');
     } catch (err) {
-      console.error('💥 [FRONTEND] استثناء في حفظ العميل:', err);
+      console.error('Exception saving customer:', err);
       alert('خطأ في حفظ البيانات: ' + err.message);
     }
   };
@@ -460,34 +451,21 @@ export default function Customers() {
   };
 
   const handleDelete = async (id) => {
-    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
+    if (!confirm('هل أنت متأكد من الحذف؟')) return;
 
-    if (confirm('هل أنت متأكد من الحذف؟')) {
-      try {
-        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
-        const result = await window.api.deleteCustomer(id);
-        console.log('📦 [BACKEND] نتيجة الحذف:', result);
+    try {
+      const result = await window.api.deleteCustomer(id);
 
-        if (result.error) {
-          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
-          alert('خطأ في الحذف');
-        } else {
-          // حذف العميل من allCustomers محلياً
-          setAllCustomers(prev => {
-            const beforeDelete = prev.length;
-            const afterDelete = prev.filter(c => c.id !== id).length;
-            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
-            return prev.filter(c => c.id !== id);
-          });
-          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
-          alert('تم الحذف بنجاح');
-        }
-      } catch (err) {
-        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
+      if (result.error) {
+        console.error('Error deleting customer:', result.error);
         alert('خطأ في الحذف');
+      } else {
+        setAllCustomers(prev => prev.filter(c => c.id !== id));
+        alert('تم الحذف بنجاح');
       }
-    } else {
-      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
+    } catch (err) {
+      console.error('Exception deleting customer:', err);
+      alert('خطأ في الحذف');
     }
   };
 
@@ -498,15 +476,9 @@ export default function Customers() {
   };
 
   const submitPayment = async (paymentFormData) => {
-    console.log('💳 [FRONTEND] بدء تسجيل دفعة');
-    console.log('👤 [FRONTEND] العميل:', selectedCustomer?.name, 'الرصيد الحالي:', selectedCustomer?.balance);
-    console.log('💰 [FRONTEND] بيانات الدفعة:', paymentFormData);
-
-    // تأكيد بسيط للمستخدم قبل الإرسال
     const paymentAmount = parseFloat(paymentFormData.amount);
-    // Allow negative amounts (customer may receive money), but disallow zero or non-numeric
+    
     if (isNaN(paymentAmount) || paymentAmount === 0) {
-      console.error('❌ [FRONTEND] مبلغ غير صالح:', paymentAmount);
       alert('الرجاء إدخال مبلغ صالح (غير صفر)');
       return;
     }
@@ -514,52 +486,38 @@ export default function Customers() {
     const previewNewBalance = (selectedCustomer.balance - paymentAmount).toFixed(2);
     const paymentDate = new Date(paymentFormData.paymentDate);
     const confirmText = `سوف تُسجّل دفعة بقيمة ${formatCurrency(paymentAmount)} بتاريخ ${paymentDate.toLocaleDateString('ar-EG')}\nالرصيد بعد التسجيل: ${previewNewBalance}\n\nهل تريد المتابعة؟`;
-    if (!window.confirm(confirmText)) {
-      console.log('❌ [FRONTEND] المستخدم ألغى الدفعة');
-      return;
-    }
+    
+    if (!window.confirm(confirmText)) return;
 
-    console.log('✅ [FRONTEND] المستخدم أكد الدفعة - جاري الإرسال للداتابيز');
     setPaymentSubmitting(true);
     try {
       const payload = {
         customerId: selectedCustomer.id,
         amount: paymentAmount,
         notes: paymentFormData.notes || '',
-        paymentDate: paymentFormData.paymentDate // ✅ إرسال التاريخ بصيغة YYYY-MM-DD
+        paymentDate: paymentFormData.paymentDate
       };
 
-      console.log('📤 [FRONTEND] إرسال طلب الدفعة للباك:', payload);
       const result = await window.api.addCustomerPayment(payload);
-      console.log('📦 [BACKEND] استجابة الدفعة:', result);
 
       if (!result.error) {
-        console.log('✅ [BACKEND] تم تسجيل الدفعة بنجاح');
         const newBalance = (selectedCustomer.balance || 0) - paymentAmount;
-        console.log('📊 [FRONTEND] تحديث الرصيد من', selectedCustomer.balance, 'إلى', newBalance);
-
-        // تحديث رصيد العميل في allCustomers محلياً
+        
         setAllCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id
-            ? { ...c, balance: newBalance }
-            : c
+          c.id === selectedCustomer.id ? { ...c, balance: newBalance } : c
         ));
 
-        // clear local paymentData so modal fields reset when closed
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
-        console.log('🎉 [FRONTEND] انتهت عملية الدفعة بنجاح');
       } else {
-        console.error('❌ [BACKEND] خطأ في تسجيل الدفعة:', result.error);
+        console.error('Error submitting payment:', result.error);
       }
 
-      // return result to caller so it can show alerts / close UI
       return result;
     } catch (err) {
-      console.error('💥 [FRONTEND] استثناء في تسجيل الدفعة:', err);
+      console.error('Exception submitting payment:', err);
       alert('خطأ في التسجيل: ' + err.message);
     } finally {
       setPaymentSubmitting(false);
-      console.log('🏁 [FRONTEND] انتهاء عملية الدفعة');
     }
   };
 
@@ -634,64 +592,20 @@ export default function Customers() {
         console.log('📦 [BACKEND] نتيجة الحذف:', result);
 
         if (result.error) {
-          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
+          console.error('Error deleting customer:', result.error);
           alert('خطأ في الحذف');
         } else {
-          // حذف العميل من allCustomers محلياً
-          setAllCustomers(prev => {
-            const beforeDelete = prev.length;
-            const afterDelete = prev.filter(c => c.id !== id).length;
-            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
-            return prev.filter(c => c.id !== id);
-          });
-          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
+          setAllCustomers(prev => prev.filter(c => c.id !== id));
           alert('تم الحذف بنجاح');
         }
       } catch (err) {
-        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
+        console.error('Exception deleting customer:', err);
         alert('خطأ في الحذف');
       }
-    } else {
-      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
     }
   }, []);
 
-  // دالة لحساب آخر تاريخ دفع وحالة النشاط - من البيانات الحقيقية
-  const getLastPaymentInfo = (customer) => {
-    // نحصل على آخر حركة من customerLedger أو invoices
-    // إذا ما فيش آخر دفعة نستخدم آخر فاتورة
-    const lastPaymentDays = customer.lastPaymentDays || 0;
-    const lastPaymentDate = new Date();
-    lastPaymentDate.setDate(lastPaymentDate.getDate() - lastPaymentDays);
-
-    // يستخدم overdueThreshold من الإعدادات
-    const isOverdue = lastPaymentDays > overdueThreshold;
-    const lastOperationType = customer.lastOperationType || 'فاتورة';
-
-    return {
-      lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
-      daysAgo: lastPaymentDays,
-      operationType: lastOperationType,
-      isOverdue: isOverdue,
-      tooltipText: `آخر ${lastOperationType}: ${lastPaymentDate.toLocaleDateString('ar-EG')}\n(${lastPaymentDays} يوم مضت)`
-    };
-  };
-
-  const cellStyle = {
-    padding: '14px',
-    maxWidth: '180px',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    fontSize: '14px',
-    color: '#374151',
-  };
-
-
-
   // البحث والفلترة
-
-
   const handleColumnSearchChange = (field, value) => {
     setColumnSearch(prev => ({
       ...prev,

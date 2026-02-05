@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function CustomerLedger({ customerId, onClose, onCustomerUpdated }) {
     const [customer, setCustomer] = useState(null);
@@ -561,7 +562,7 @@ export default function CustomerLedger({ customerId, onClose, onCustomerUpdated 
                                                                     try {
                                                                         const result = await window.api.deleteSale(transaction.details.id);
                                                                         if (result.error) {
-                                                                            alert('خطأ: ' + result.error);
+                                                                            safeAlert('خطأ: ' + result.error);
                                                                         } else {
                                                                             // إعادة تحميل بيانات العميل أولاً للحصول على الرصيد المحدث
                                                                             const updatedCustomer = await window.api.getCustomer(customerId);
@@ -570,11 +571,11 @@ export default function CustomerLedger({ customerId, onClose, onCustomerUpdated 
                                                                                 // إرسال الرصيد المحدث للصفحة الرئيسية
                                                                                 onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
                                                                             }
-                                                                            alert('✅ تم حذف الفاتورة بنجاح');
+                                                                            safeAlert('✅ تم حذف الفاتورة بنجاح');
                                                                             loadCustomerData(); // إعادة تحميل المعاملات
                                                                         }
                                                                     } catch (err) {
-                                                                        alert('خطأ في الحذف: ' + err.message);
+                                                                        safeAlert('خطأ في الحذف: ' + err.message);
                                                                     }
                                                                 }
                                                             }}
@@ -616,7 +617,7 @@ export default function CustomerLedger({ customerId, onClose, onCustomerUpdated 
                                                                     try {
                                                                         const result = await window.api.deleteCustomerPayment(transaction.details.id);
                                                                         if (result.error) {
-                                                                            alert('خطأ: ' + result.error);
+                                                                            safeAlert('خطأ: ' + result.error);
                                                                         } else {
                                                                             // إعادة تحميل بيانات العميل أولاً للحصول على الرصيد المحدث
                                                                             const updatedCustomer = await window.api.getCustomer(customerId);
@@ -625,11 +626,11 @@ export default function CustomerLedger({ customerId, onClose, onCustomerUpdated 
                                                                                 // إرسال الرصيد المحدث للصفحة الرئيسية
                                                                                 onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
                                                                             }
-                                                                            alert('✅ تم حذف الدفعة بنجاح');
+                                                                            safeAlert('✅ تم حذف الدفعة بنجاح');
                                                                             loadCustomerData(); // إعادة تحميل المعاملات
                                                                         }
                                                                     } catch (err) {
-                                                                        alert('خطأ في الحذف: ' + err.message);
+                                                                        safeAlert('خطأ في الحذف: ' + err.message);
                                                                     }
                                                                 }
                                                             }}
@@ -699,3 +700,4 @@ export default function CustomerLedger({ customerId, onClose, onCustomerUpdated 
         </div>
     );
 }
+

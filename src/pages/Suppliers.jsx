@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function Suppliers() {
     const [suppliers, setSuppliers] = useState([]);
@@ -37,7 +38,7 @@ export default function Suppliers() {
             setFormData({ name: '', phone: '' });
             setEditingSupplier(null);
         } catch (err) {
-            alert('خطأ في حفظ البيانات');
+            safeAlert('خطأ في حفظ البيانات');
         }
     };
 
@@ -53,7 +54,7 @@ export default function Suppliers() {
                 await window.api.deleteSupplier(id);
                 loadSuppliers();
             } catch (err) {
-                alert('خطأ في الحذف');
+                safeAlert('خطأ في الحذف');
             }
         }
     };
@@ -231,3 +232,4 @@ export default function Suppliers() {
         </div>
     );
 }
+

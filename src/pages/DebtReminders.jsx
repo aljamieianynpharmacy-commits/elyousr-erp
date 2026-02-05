@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function DebtReminders() {
     const [customers, setCustomers] = useState([]);
@@ -181,7 +182,7 @@ export default function DebtReminders() {
             const phone = customer.phone.replace(/[^0-9]/g, '');
             window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
         } else {
-            alert('لا يوجد رقم هاتف مسجل للعميل');
+            safeAlert('لا يوجد رقم هاتف مسجل للعميل');
         }
     };
 
@@ -483,3 +484,4 @@ export default function DebtReminders() {
         </div>
     );
 }
+

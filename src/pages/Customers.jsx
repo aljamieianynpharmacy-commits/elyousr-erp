@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
@@ -632,7 +633,7 @@ export default function Customers() {
 
         if (result.error) {
           console.error('Error updating customer:', result.error);
-          alert(result.error);
+          safeAlert(result.error);
           return;
         }
         
@@ -642,7 +643,7 @@ export default function Customers() {
 
         if (result.error) {
           console.error('Error adding customer:', result.error);
-          alert(result.error);
+          safeAlert(result.error);
           return;
         }
         
@@ -655,7 +656,7 @@ export default function Customers() {
       setEditingCustomer(null);
     } catch (err) {
       console.error('Exception saving customer:', err);
-      alert('خطأ في حفظ البيانات: ' + err.message);
+      safeAlert('خطأ في حفظ البيانات: ' + err.message);
     }
   };
 
@@ -705,14 +706,14 @@ export default function Customers() {
 
       if (result.error) {
         console.error('Error deleting customer:', result.error);
-        alert('خطأ في الحذف');
+        safeAlert('خطأ في الحذف');
       } else {
         setAllCustomers(prev => prev.filter(c => c.id !== id));
-        alert('تم الحذف بنجاح');
+        safeAlert('تم الحذف بنجاح');
       }
     } catch (err) {
       console.error('Exception deleting customer:', err);
-      alert('خطأ في الحذف');
+      safeAlert('خطأ في الحذف');
     }
   };
 
@@ -726,7 +727,7 @@ export default function Customers() {
     const paymentAmount = parseFloat(paymentFormData.amount);
     
     if (isNaN(paymentAmount) || paymentAmount === 0) {
-      alert('الرجاء إدخال مبلغ صالح (غير صفر)');
+      safeAlert('الرجاء إدخال مبلغ صالح (غير صفر)');
       return;
     }
 
@@ -762,7 +763,7 @@ export default function Customers() {
       return result;
     } catch (err) {
       console.error('Exception submitting payment:', err);
-      alert('خطأ في التسجيل: ' + err.message);
+      safeAlert('خطأ في التسجيل: ' + err.message);
     } finally {
       setPaymentSubmitting(false);
     }
@@ -845,14 +846,14 @@ export default function Customers() {
 
         if (result.error) {
           console.error('Error deleting customer:', result.error);
-          alert('خطأ في الحذف');
+          safeAlert('خطأ في الحذف');
         } else {
           setAllCustomers(prev => prev.filter(c => c.id !== id));
-          alert('تم الحذف بنجاح');
+          safeAlert('تم الحذف بنجاح');
         }
       } catch (err) {
         console.error('Exception deleting customer:', err);
-        alert('خطأ في الحذف');
+        safeAlert('خطأ في الحذف');
       }
     }
   }, []);
@@ -1315,7 +1316,7 @@ export default function Customers() {
       case 'selected':
         report = generateSelectedCustomersReport();
         if (!report) {
-          alert('لا توجد عملاء مطابقة للبحث');
+          safeAlert('لا توجد عملاء مطابقة للبحث');
           return;
         }
         break;
@@ -2094,3 +2095,4 @@ export default function Customers() {
     </div >
   );
 }
+

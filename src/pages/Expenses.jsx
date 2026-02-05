@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
@@ -31,7 +32,7 @@ export default function Expenses() {
       setShowModal(false);
       setFormData({ title: '', amount: '' });
     } catch (err) {
-      alert('خطأ في حفظ المصروف');
+      safeAlert('خطأ في حفظ المصروف');
     }
   };
 
@@ -41,7 +42,7 @@ export default function Expenses() {
         await window.api.deleteExpense(id);
         loadExpenses();
       } catch (err) {
-        alert('خطأ في الحذف');
+        safeAlert('خطأ في الحذف');
       }
     }
   };
@@ -231,3 +232,4 @@ export default function Expenses() {
     </div>
   );
 }
+

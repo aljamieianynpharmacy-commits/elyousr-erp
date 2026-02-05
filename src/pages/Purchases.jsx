@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function Purchases() {
     const [purchases, setPurchases] = useState([]);
@@ -116,7 +117,7 @@ export default function Purchases() {
 
     const handleSubmit = async () => {
         if (cart.length === 0) {
-            alert('السلة فارغة');
+            safeAlert('السلة فارغة');
             return;
         }
 
@@ -134,9 +135,9 @@ export default function Purchases() {
         try {
             const result = await window.api.createPurchase(purchaseData);
             if (result.error) {
-                alert('خطأ: ' + result.error);
+                safeAlert('خطأ: ' + result.error);
             } else {
-                alert('✅ تم حفظ فاتورة المشتريات بنجاح');
+                safeAlert('✅ تم حفظ فاتورة المشتريات بنجاح');
                 setCart([]);
                 setSelectedSupplier(null);
                 setPaidAmount('');
@@ -144,7 +145,7 @@ export default function Purchases() {
                 loadData();
             }
         } catch (err) {
-            alert('خطأ في الاتصال');
+            safeAlert('خطأ في الاتصال');
         }
     };
 
@@ -433,3 +434,4 @@ export default function Purchases() {
         </div>
     );
 }
+

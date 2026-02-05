@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function Returns() {
     const [returns, setReturns] = useState([]);
@@ -84,7 +85,7 @@ export default function Returns() {
         const itemsToReturn = returnItems.filter(item => item.quantity > 0);
 
         if (itemsToReturn.length === 0) {
-            alert('لم يتم تحديد أي كميات للمرتجع');
+            safeAlert('لم يتم تحديد أي كميات للمرتجع');
             return;
         }
 
@@ -103,9 +104,9 @@ export default function Returns() {
         try {
             const result = await window.api.createReturn(returnData);
             if (result.error) {
-                alert('خطأ: ' + result.error);
+                safeAlert('خطأ: ' + result.error);
             } else {
-                alert('✅ تم حفظ المرتجع بنجاح');
+                safeAlert('✅ تم حفظ المرتجع بنجاح');
                 setShowModal(false);
                 setSelectedSale(null);
                 setSelectedCustomer(null);
@@ -114,7 +115,7 @@ export default function Returns() {
                 loadData();
             }
         } catch (err) {
-            alert('خطأ في الاتصال');
+            safeAlert('خطأ في الاتصال');
         }
     };
 
@@ -367,3 +368,4 @@ export default function Returns() {
         </div>
     );
 }
+

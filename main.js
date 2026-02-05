@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const jwt = require('jsonwebtoken');
@@ -54,6 +54,27 @@ app.on('activate', () => {
 });
 
 // ==================== IPC Handlers ====================
+
+// UI dialogs (replace window.alert)
+ipcMain.handle('ui:messageBox', async (event, options = {}) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const message = typeof options.message === 'string'
+    ? options.message
+    : String(options.message ?? '');
+  const safeOptions = {
+    type: options.type || 'info',
+    buttons: Array.isArray(options.buttons) && options.buttons.length ? options.buttons : ['OK'],
+    defaultId: Number.isInteger(options.defaultId) ? options.defaultId : 0,
+    title: options.title || app.getName(),
+    message
+  };
+
+  if (options.detail) {
+    safeOptions.detail = String(options.detail);
+  }
+
+  return dialog.showMessageBox(targetWindow, safeOptions);
+});
 
 // 🔐 Authentication
 ipcMain.handle('auth:login', async (event, { username, password }) => {

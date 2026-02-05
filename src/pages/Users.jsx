@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { safeAlert } from '../utils/safeAlert';
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -44,7 +45,7 @@ export default function Users() {
       setFormData({ name: '', username: '', password: '', role: 'CASHIER' });
       setEditingUser(null);
     } catch (err) {
-      alert('خطأ في حفظ البيانات');
+      safeAlert('خطأ في حفظ البيانات');
     }
   };
 
@@ -60,7 +61,7 @@ export default function Users() {
         await window.api.deleteUser(id);
         loadUsers();
       } catch (err) {
-        alert('خطأ في الحذف');
+        safeAlert('خطأ في الحذف');
       }
     }
   };
@@ -308,3 +309,4 @@ export default function Users() {
     </div>
   );
 }
+

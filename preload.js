@@ -33,5 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   createExpense: (token, data) => ipcRenderer.invoke('expenses:create', { token, data }),
 
   // Dashboard
-  getDashboardStats: (token) => ipcRenderer.invoke('dashboard:stats', token)
+  getDashboardStats: (token) => ipcRenderer.invoke('dashboard:stats', token),
+
+  // UI
+  showMessageBox: (options) => ipcRenderer.invoke('ui:messageBox', options)
 });

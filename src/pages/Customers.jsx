@@ -419,6 +419,7 @@ const CustomersTable = memo(function CustomersTable({
           <List
             ref={listRef}
             className="customers-list"
+            direction="rtl"
             height={listHeight}
             itemCount={customers.length}
             itemSize={ROW_HEIGHT}

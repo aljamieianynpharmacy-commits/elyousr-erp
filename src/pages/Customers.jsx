@@ -126,7 +126,7 @@ const CustomerRow = memo(function CustomerRow({
             borderRadius: '4px',
             fontSize: '15px'
           }}>
-            {customer.balance.toFixed(2)}
+            {(customer.balance || 0).toFixed(2)}
           </span>
         </td>
       )}
@@ -1025,7 +1025,7 @@ export default function Customers() {
         lastPayment: lastPaymentDate.toLocaleDateString('ar-EG'),
         daysInactive,
         inactivityStatus: daysInactive > 180 ? '🔴 خطير' : daysInactive > 90 ? '🟠 تحذير' : '🟢 نشط',
-        currentBalance: customer.balance.toFixed(2)
+        currentBalance: (customer.balance || 0).toFixed(2)
       };
     }).filter(c => c.daysInactive > 30).sort((a, b) => b.daysInactive - a.daysInactive);
 

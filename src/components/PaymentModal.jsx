@@ -12,7 +12,7 @@ import { X, Printer, Save, FileText } from "lucide-react";
 const DEFAULT_PAYMENT_METHODS = [
     { id: 1, name: "كاش", code: "cash" },
     { id: 2, name: "فودافون كاش", code: "vodafone" },
-    { id: 3, name: "انستابي", code: "instapay" },
+    { id: 3, name: "انستاباي", code: "instapay" },
 ];
 
 export default function PaymentModal({

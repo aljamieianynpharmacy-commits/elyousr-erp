@@ -370,6 +370,7 @@ const tooltipStyle = {
         {/* Buttons */}
         <div style={{ display: "flex", gap: "10px", marginTop: "25px" }}>
           <button
+            type="button"
             onClick={onSave}
             disabled={!customer.name || phoneError || phone2Error || !!duplicateNameError}
             style={{
@@ -386,6 +387,7 @@ const tooltipStyle = {
             حفظ
           </button>
           <button
+            type="button"
             onClick={handleCancelClick}
             style={{
               flex: 1,

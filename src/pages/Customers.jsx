@@ -1,46 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
-import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
 
-// دالة مساعدة لإضافة timestamp
-const logWithTime = (message, data = null) => {
-  const timestamp = new Date().toLocaleTimeString('ar-EG', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3
-  });
-  const logMessage = `[${timestamp}] ${message}`;
-  if (data) {
-    console.log(logMessage, data);
-  } else {
-    console.log(logMessage);
-  }
-};
-
-const logErrorWithTime = (message, data = null) => {
-  const timestamp = new Date().toLocaleTimeString('ar-EG', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3
-  });
-  const logMessage = `[${timestamp}] ${message}`;
-  if (data) {
-    console.error(logMessage, data);
-  } else {
-    console.error(logMessage);
-  }
-};
-
-// ============= OPTIMIZED CUSTOMER ROW COMPONENT =============
-const CustomerRow = memo(({ 
-  customer, 
-  index, 
+// مكون صف العميل المُحسّن - يتجنب إعادة الرندر غير الضرورية
+const CustomerRow = memo(function CustomerRow({
+  customer,
+  index,
   isSelected,
   visibleColumns,
   overdueThreshold,
@@ -61,11 +28,6 @@ const CustomerRow = memo(({
     const isOverdue = customer.isOverdue !== undefined ? customer.isOverdue : lastPaymentDays > overdueThreshold;
     const lastOperationType = customer.lastOperationType || 'فاتورة';
 
-    // Log for debugging
-    if (index < 3) {
-      console.log(`[CustomerRow] ${customer.name}: Days=${lastPaymentDays}, Threshold=${overdueThreshold}, Overdue=${isOverdue}`);
-    }
-
     return {
       lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
       daysAgo: lastPaymentDays,
@@ -74,199 +36,191 @@ const CustomerRow = memo(({
     };
   }, [customer.lastPaymentDays, customer.isOverdue, customer.lastOperationType, overdueThreshold, index, customer.name]);
 
-  const { isOverdue } = paymentInfo;
   const rowBgColor = isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb';
 
   return (
     <tr
-      className="customer-row"
       style={{
         borderBottom: '1px solid #e5e7eb',
-        backgroundColor: rowBgColor
+        backgroundColor: rowBgColor,
+        transition: 'background-color 0.2s'
       }}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = rowBgColor}
     >
-      {visibleColumns.id && (
-        <td style={{ padding: '12px 15px', fontSize: '14px', color: '#6b7280' }}>
-          {customer.id}
-        </td>
-      )}
-      
+      {visibleColumns.id && <td style={{ padding: '15px' }}>{customer.id}</td>}
       {visibleColumns.name && (
-        <td style={{ padding: '12px 15px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {isOverdue && (
+        <td style={{ padding: '15px', fontWeight: 'bold', color: '#1f2937' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+            {paymentInfo.isOverdue && (
               <div
                 style={{
-                  width: '10px',
-                  height: '10px',
+                  width: '12px',
+                  height: '12px',
                   borderRadius: '50%',
                   backgroundColor: '#dc2626',
+                  cursor: 'pointer',
                   flexShrink: 0
                 }}
-                title={`متأخر ${customer.lastPaymentDays} يوم`}
+                title={`🔴 لم يدفع منذ ${paymentInfo.daysAgo} يوم`}
               />
             )}
-            <span style={{ fontWeight: '600', color: '#1f2937' }}>
-              {customer.name}
-            </span>
+            <span>{customer.name}</span>
           </div>
         </td>
       )}
-
       {visibleColumns.type && (
-        <td style={{ padding: '12px 15px' }}>
+        <td style={{ padding: '15px' }}>
           <span style={{
-            padding: '4px 12px',
+            padding: '4px 8px',
             borderRadius: '12px',
             fontSize: '12px',
-            fontWeight: '600',
-            backgroundColor: getCustomerTypeColor(customer.customerType) + '15',
+            fontWeight: 'bold',
+            backgroundColor: getCustomerTypeColor(customer.customerType) + '20',
             color: getCustomerTypeColor(customer.customerType)
           }}>
             {customer.customerType}
           </span>
         </td>
       )}
-
-      {visibleColumns.phone && (
-        <td style={{ padding: '12px 15px', color: '#6b7280', fontSize: '14px' }}>
-          {customer.phone || '-'}
-        </td>
-      )}
-
+      {visibleColumns.phone && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone || '-'}</td>}
+      {visibleColumns.phone2 && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone2 || '-'}</td>}
+      {visibleColumns.address && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || '-'}</td>}
+      {visibleColumns.city && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.city || '-'}</td>}
+      {visibleColumns.district && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.district || '-'}</td>}
+      {visibleColumns.notes && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.notes || '-'}</td>}
+      {visibleColumns.creditLimit && <td style={{ padding: '15px', color: '#6b7280', fontWeight: 'bold' }}>{(customer.creditLimit || 0).toFixed(2)}</td>}
       {visibleColumns.balance && (
-        <td style={{ padding: '12px 15px' }}>
+        <td style={{ padding: '15px' }}>
           <span style={{
             fontWeight: 'bold',
             color: customer.balance > 0 ? '#ef4444' : customer.balance < 0 ? '#10b981' : '#6b7280',
+            padding: '4px 8px',
+            borderRadius: '4px',
             fontSize: '15px'
           }}>
-            {formatCurrency(customer.balance)}
+            {customer.balance.toFixed(2)}
           </span>
         </td>
       )}
-
       {visibleColumns.actions && (
-        <td style={{ padding: '8px 12px' }}>
-          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-            <button
-              onClick={() => onShowLedger(customer.id)}
-              title="كشف الحساب"
-              className="action-btn"
-              style={{
-                padding: '6px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'background 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#eff6ff'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <FileText size={18} color="#3b82f6" />
-            </button>
-
-            <button
-              onClick={() => onPayment(customer)}
-              title="تسجيل دفعة"
-              className="action-btn"
-              style={{
-                padding: '6px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'background 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#f0fdf4'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <DollarSign size={18} color="#10b981" />
-            </button>
-
-            <button
-              onClick={() => onEdit(customer)}
-              title="تعديل"
-              className="action-btn"
-              style={{
-                padding: '6px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'background 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#fffbeb'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <Edit2 size={18} color="#f59e0b" />
-            </button>
-
-            <button
-              onClick={() => onDelete(customer.id)}
-              title="حذف"
-              className="action-btn"
-              style={{
-                padding: '6px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'background 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#fef2f2'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              <Trash2 size={18} color="#ef4444" />
-            </button>
-          </div>
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onShowLedger(customer.id)}
+            title="كشف الحساب"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <FileText size={16} color="#0307c9ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onPayment(customer)}
+            title="تسجيل دفعة"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <DollarSign size={16} color="#177400ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onEdit(customer)}
+            title="تعديل"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <Edit2 size={16} color="#f78c00ff" />
+          </button>
+        </td>
+      )}
+      {visibleColumns.actions && (
+        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+          <button
+            onClick={() => onDelete(customer.id)}
+            title="حذف"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '3px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px'
+            }}
+          >
+            <Trash2 size={16} color="#dc2626" />
+          </button>
         </td>
       )}
     </tr>
   );
-}, (prevProps, nextProps) => {
-  // Custom comparison للتحكم في إعادة الرندر
-  return (
-    prevProps.customer.id === nextProps.customer.id &&
-    prevProps.customer.balance === nextProps.customer.balance &&
-    prevProps.customer.lastPaymentDays === nextProps.customer.lastPaymentDays &&
-    prevProps.overdueThreshold === nextProps.overdueThreshold &&
-    JSON.stringify(prevProps.visibleColumns) === JSON.stringify(nextProps.visibleColumns)
-  );
 });
 
-CustomerRow.displayName = 'CustomerRow';
-
-// ============= MAIN COMPONENT =============
 export default function Customers() {
-  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [showLedger, setShowLedger] = useState(false);
-  const [showNewCustomer, setShowNewCustomer] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showLedger, setShowLedger] = useState(null);
   const [editingCustomer, setEditingCustomer] = useState(null);
-  const [customerFormData, setCustomerFormData] = useState({
-    name: '',
-    phone: '',
-    phone2: '',
-    address: '',
-    city: '',
-    district: '',
-    notes: '',
-    creditLimit: 0,
-    customerType: 'عادي'
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all'); // all, VIP, عادي, تاجر جملة
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
+  const paymentInputRef = useRef(null);
+  const [showReports, setShowReports] = useState(false);
+  const [selectedReportType, setSelectedReportType] = useState('debts');
+  const [visibleColumns, setVisibleColumns] = useState({
+    id: true,
+    name: true,
+    type: true,
+    phone: true,
+    phone2: false,
+    address: false,
+    city: true,
+    district: false,
+    notes: false,
+    creditLimit: false,
+    balance: true,
+    actions: true,
   });
   const [formData, setFormData] = useState({
     name: '',
@@ -279,75 +233,42 @@ export default function Customers() {
     creditLimit: 0,
     customerType: 'عادي'
   });
-  const [overdueThreshold, setOverdueThreshold] = useState(30);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showReports, setShowReports] = useState(false);
-  const [filterType, setFilterType] = useState('all');
   const [paymentData, setPaymentData] = useState({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
-  const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
-  const [visibleColumns, setVisibleColumns] = useState({
-    id: true,
-    name: true,
-    type: true,
-    phone: true,
-    phone2: false,
-    address: false,
-    city: false,
-    district: false,
-    notes: false,
-    creditLimit: false,
-    balance: true,
-    actions: true
+  const [showSettings, setShowSettings] = useState(false);
+  const [overdueThreshold, setOverdueThreshold] = useState(() => {
+    const saved = localStorage.getItem('overdueThreshold');
+    return saved ? parseInt(saved) : 30;
   });
+  const [tempThreshold, setTempThreshold] = useState(overdueThreshold);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const latestRequestIdRef = useRef(0);
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
 
   useEffect(() => {
     const handler = setTimeout(() => {
-      const startTime = performance.now();
       const trimmed = searchTerm.trim();
 
       if (trimmed !== debouncedSearch) {
-        logWithTime('⏰ [FRONTEND] Debounced Search بدأ - القيمة الأصلية: ' + searchTerm + ' | القيمة المعالجة: ' + trimmed);
-
         setDebouncedSearch(trimmed);
         setCurrentPage(1);
-
-        const endTime = performance.now();
-        logWithTime('🏁 [FRONTEND] Debounced Search انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
       }
-    }, 50); // 50ms للبحث المحلي - سريع!
+    }, 150);
 
     return () => clearTimeout(handler);
   }, [searchTerm, debouncedSearch]);
 
   useEffect(() => {
-    logWithTime('🔄 [FRONTEND] تغيير فلتر النوع إلى: ' + filterType);
     setCurrentPage(1);
   }, [filterType]);
 
   // State لتخزين كل العملاء (للبحث المحلي)
   const [allCustomers, setAllCustomers] = useState([]);
-  const [customersLoaded, setCustomersLoaded] = useState(false);
 
-  useEffect(() => {
-    // تحميل كل العملاء مرة واحدة فقط
-    if (!customersLoaded) {
-      loadAllCustomers();
-    }
-  }, []);
-
-  const loadAllCustomers = async () => {
-    const startTime = performance.now();
+  const loadAllCustomers = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -359,61 +280,35 @@ export default function Customers() {
         overdueThreshold: overdueThreshold // تمرير حد التأخير للإعدادات
       });
 
-      const endTime = performance.now();
-      const duration = (endTime - startTime).toFixed(2);
-
-      logWithTime('📦 [BACKEND] استجابة الداتابيز', result);
-      logWithTime('📊 [BACKEND] عدد العملاء المستلمة: ' + (result.data?.length || 0));
-      logWithTime('⏱️ [FRONTEND] وقت استجابة الداتابيز: ' + duration + 'ms');
-
       if (!result.error) {
         setAllCustomers(result.data || []);
-        setCustomersLoaded(true);
-        logWithTime('✅ [FRONTEND] تم تحميل العملاء بنجاح');
-        // تطبيق الفلترة الحالية
-        applyFilters();
       } else {
-        logErrorWithTime('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
+        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
       }
     } catch (err) {
-      const endTime = performance.now();
-      const duration = (endTime - startTime).toFixed(2);
-      logErrorWithTime('💥 [FRONTEND] استثناء في تحميل العملاء (بعد ' + duration + 'ms):', err);
+      console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
     } finally {
       setLoading(false);
-      const endTime = performance.now();
-      const totalDuration = (endTime - startTime).toFixed(2);
-      logWithTime('🏁 [FRONTEND] انتهاء عملية التحميل - الإجمالي: ' + totalDuration + 'ms');
     }
-  };
+  }, [overdueThreshold]);
 
-  const applyFilters = () => {
-    const startTime = performance.now();
+  useEffect(() => {
+    loadAllCustomers();
+  }, [loadAllCustomers]);
 
-    logWithTime('🔍 [FRONTEND] applyFilters بدأ - البحث: "' + debouncedSearch + '" | النوع: ' + filterType);
-    logWithTime('📊 [FRONTEND] عدد العملاء الأصلي: ' + allCustomers.length);
+  const filteredCustomers = useMemo(() => {
+    let filtered = allCustomers;
 
-    let filtered = [...allCustomers];
-
-    // تطبيق فلتر البحث العالمي
     if (debouncedSearch.trim().length > 0) {
       const searchLower = debouncedSearch.toLowerCase();
-      const searchStartTime = performance.now();
-
       filtered = filtered.filter(customer => {
-        const nameMatch = customer.name.toLowerCase().includes(searchLower);
+        const nameMatch = customer.name?.toLowerCase().includes(searchLower);
         const phoneMatch = customer.phone?.includes(debouncedSearch);
         const cityMatch = customer.city?.toLowerCase().includes(searchLower);
         return nameMatch || phoneMatch || cityMatch;
       });
-
-      const searchEndTime = performance.now();
-      const searchDuration = (searchEndTime - searchStartTime).toFixed(2);
-
-      logWithTime('📈 [FRONTEND] البحث اكتمل - النتائج: ' + filtered.length + ' (استغرق ' + searchDuration + 'ms)');
     }
 
-    // تطبيق فلتر الأعمدة
     const activeColumnFilters = Object.entries(columnSearch).filter(([_, value]) => value && value.trim() !== '');
     if (activeColumnFilters.length > 0) {
       filtered = filtered.filter(customer => {
@@ -432,55 +327,15 @@ export default function Customers() {
       });
     }
 
-    // تطبيق فلتر النوع
     if (filterType && filterType !== 'all') {
-      const beforeTypeFilter = filtered.length;
-      const typeStartTime = performance.now();
-
       filtered = filtered.filter(customer => customer.customerType === filterType);
-
-      const typeEndTime = performance.now();
-      const typeDuration = (typeEndTime - typeStartTime).toFixed(2);
-
-      logWithTime('📊 [FRONTEND] فلترة النوع اكتملت - النتائج: ' + filtered.length + ' من ' + beforeTypeFilter + ' (استغرق ' + typeDuration + 'ms)');
     }
 
-    // تحديث الـ state
-    setCustomers(filtered);
-    setTotalPages(1);
-    setTotalItems(filtered.length);
+    return filtered;
+  }, [allCustomers, debouncedSearch, filterType, columnSearch]);
 
-    const endTime = performance.now();
-    const totalDuration = (endTime - startTime).toFixed(2);
-
-    logWithTime('🎯 [FRONTEND] applyFilters انتهت - النتائج النهائية: ' + filtered.length + ' عميل (الإجمالي: ' + totalDuration + 'ms)');
-  };
-
-  useEffect(() => {
-    const startTime = performance.now();
-    logWithTime('🎯 [FRONTEND] useEffect للفلاتر بدأ - هل العملاء محملين؟ ' + customersLoaded);
-    logWithTime('🔍 [FRONTEND] البحث الحالي: "' + debouncedSearch + '" | النوع الحالي: ' + filterType);
-
-    // Step 1: التحقق من تحميل العملاء
-    const step1Time = performance.now();
-    if (customersLoaded && allCustomers.length > 0) {
-      logWithTime('✅ [FRONTEND] Step 1: العملاء محملين - تطبيق الفلاتر (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
-
-      // Step 2: استدعاء applyFilters
-      const step2Time = performance.now();
-      applyFilters();
-      logWithTime('🔧 [FRONTEND] Step 2: تم استدعاء applyFilters (استغرق ' + (step2Time - step1Time).toFixed(2) + 'ms)');
-    } else {
-      logWithTime('⏳ [FRONTEND] Step 1: العملاء لم يتم تحميلهم بعد (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
-    }
-
-    const endTime = performance.now();
-    logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
-  }, [debouncedSearch, filterType, customersLoaded, columnSearch, overdueThreshold]);
-
-  const loadCustomers = async (isBackground = false) => {
-    // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
-  };
+  const totalItems = filteredCustomers.length;
+  const totalPages = 1;
 
   const resetCustomerForm = () => {
     setFormData({
@@ -513,7 +368,6 @@ export default function Customers() {
         }
         // تحديث العميل في allCustomers محلياً
         setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
-        setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
         console.log('✅ [FRONTEND] تم تحديث العميل محلياً');
       } else {
         console.log('➕ [FRONTEND] إضافة عميل جديد');
@@ -529,8 +383,6 @@ export default function Customers() {
         const newCustomer = { id: result.id || Date.now(), ...formData };
         setAllCustomers(prev => [...prev, newCustomer]);
         console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
-        // تطبيق الفلاتر تاني عشان يظهر العميل الجديد
-        applyFilters();
       }
       setShowModal(false);
       resetCustomerForm();
@@ -600,7 +452,6 @@ export default function Customers() {
             console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
             return prev.filter(c => c.id !== id);
           });
-          setCustomers(prev => prev.filter(c => c.id !== id));
           console.log('✅ [FRONTEND] تم حذف العميل محلياً');
           alert('تم الحذف بنجاح');
         }
@@ -667,13 +518,6 @@ export default function Customers() {
             : c
         ));
 
-        // تحديث رصيد العميل في customers (العرض الحالي) مباشرة
-        setCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id
-            ? { ...c, balance: newBalance }
-            : c
-        ));
-
         // clear local paymentData so modal fields reset when closed
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
         console.log('🎉 [FRONTEND] انتهت عملية الدفعة بنجاح');
@@ -692,69 +536,74 @@ export default function Customers() {
     }
   };
 
-  const getTotalDebt = () => {
-    return customers.reduce((sum, customer) => sum + Math.max(0, customer.balance), 0);
-  };
-
-  // دوال مساعدة
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('ar-EG', {
-      style: 'currency',
-      currency: 'EGP',
-      minimumFractionDigits: 2
-    }).format(amount);
-  };
-
-  const getCustomerTypeColor = (type) => {
-    switch (type) {
-      case 'VIP':
-        return '#f59e0b';
-      case 'تاجر جملة':
-        return '#8b5cf6';
-      case 'عادي':
-      default:
-        return '#3b82f6';
-    }
-  };
-
   const customerStats = useMemo(() => {
     let vipCount = 0;
     let debtedCount = 0;
     let compliantCount = 0;
     let totalDebt = 0;
     let overdueCount = 0;
-    let total = customers.length;
 
-    for (const c of customers) {
+    for (const c of filteredCustomers) {
       if (c.customerType === 'VIP') vipCount += 1;
       if (c.balance > 0) {
         debtedCount += 1;
         totalDebt += c.balance;
       } else {
-        compliantCount++;
+        compliantCount += 1;
       }
-      if ((c.lastPaymentDays || 0) > overdueThreshold) {
-        overdueCount++;
+
+      // حساب حالة التأخر محلياً لضمان سرعة الاستجابة عند تغيير الإعدادات
+      // نستخدم قيمة lastPaymentDays المستلمة من الباك اند
+      const isOverdue = (c.lastPaymentDays !== undefined ? c.lastPaymentDays : 0) > overdueThreshold;
+      if (isOverdue) {
+        overdueCount += 1;
       }
     }
 
-    return { vipCount, debtedCount, compliantCount, totalDebt, overdueCount, total };
-  }, [customers, overdueThreshold]);
+    return { vipCount, debtedCount, compliantCount, totalDebt, overdueCount };
+  }, [filteredCustomers, overdueThreshold]);
 
-  // ===== EVENT HANDLERS =====
+  // Auto-focus على مربع الدفع عند فتح الموديل
+  useEffect(() => {
+    if (showPaymentModal && paymentInputRef.current) {
+      setTimeout(() => paymentInputRef.current?.focus(), 0);
+    }
+  }, [showPaymentModal]);
+
+  const getCustomerTypeColor = useCallback((type) => {
+    const colors = {
+      'عادي': '#6b7280',
+      'VIP': '#f59e0b',
+      'تاجر جملة': '#8b5cf6'
+    };
+    return colors[type] || '#6b7280';
+  }, []);
+
+  // مساعدة لتنسيق العملة
+  const formatCurrency = useCallback((value) => {
+    try {
+      const num = typeof value === 'string' ? parseFloat(value || 0) : (value || 0);
+      return new Intl.NumberFormat('ar-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(num);
+    } catch (e) {
+      return value;
+    }
+  }, []);
+
+  // Callbacks للأزرار - تمنع إعادة إنشاء الدوال في كل render
   const handleShowLedger = useCallback((customerId) => {
-    setSelectedCustomer(customerId);
-    setShowLedger(true);
+    setShowLedger(customerId);
   }, []);
 
   const handlePaymentCallback = useCallback((customer) => {
     setSelectedCustomer(customer);
-    setShowPayment(true);
+    setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
+    setShowPaymentModal(true);
   }, []);
 
   const handleEditCallback = useCallback((customer) => {
-    setCustomerFormData({
-      name: customer.name || '',
+    setEditingCustomer(customer);
+    setFormData({
+      name: customer.name,
       phone: customer.phone || '',
       phone2: customer.phone2 || '',
       address: customer.address || '',
@@ -764,36 +613,38 @@ export default function Customers() {
       creditLimit: customer.creditLimit || 0,
       customerType: customer.customerType || 'عادي'
     });
-    setEditingCustomer(customer);
-    setShowNewCustomer(true);
+    setShowModal(true);
   }, []);
 
-  const handleDeleteCallback = useCallback(async (customerId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا العميل؟')) return;
+  const handleDeleteCallback = useCallback(async (id) => {
+    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
 
-    try {
-      console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
-      const result = await window.api.deleteCustomer(customerId);
-      console.log('📦 [BACKEND] نتيجة الحذف:', result);
+    if (confirm('هل أنت متأكد من الحذف؟')) {
+      try {
+        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
+        const result = await window.api.deleteCustomer(id);
+        console.log('📦 [BACKEND] نتيجة الحذف:', result);
 
-      if (result.error) {
-        console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
+        if (result.error) {
+          console.error('❌ [BACKEND] خطأ في الحذف:', result.error);
+          alert('خطأ في الحذف');
+        } else {
+          // حذف العميل من allCustomers محلياً
+          setAllCustomers(prev => {
+            const beforeDelete = prev.length;
+            const afterDelete = prev.filter(c => c.id !== id).length;
+            console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
+            return prev.filter(c => c.id !== id);
+          });
+          console.log('✅ [FRONTEND] تم حذف العميل محلياً');
+          alert('تم الحذف بنجاح');
+        }
+      } catch (err) {
+        console.error('💥 [FRONTEND] استثناء في الحذف:', err);
         alert('خطأ في الحذف');
-      } else {
-        // حذف العميل من allCustomers محلياً
-        setAllCustomers(prev => {
-          const beforeDelete = prev.length;
-          const afterDelete = prev.filter(c => c.id !== customerId).length;
-          console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
-          return prev.filter(c => c.id !== customerId);
-        });
-        setCustomers(prev => prev.filter(c => c.id !== customerId));
-        console.log('✅ [FRONTEND] تم حذف العميل محلياً');
-        alert('تم الحذف بنجاح');
       }
-    } catch (err) {
-      console.error('💥 [FRONTEND] استثناء في الحذف:', err);
-      alert('خطأ في الحذف');
+    } else {
+      console.log('❌ [FRONTEND] المستخدم ألغى الحذف');
     }
   }, []);
 
@@ -849,12 +700,12 @@ export default function Customers() {
 
   // معالج الأسهم والـ Enter للتنقل في البحث
   const handleSearchKeyDown = (e) => {
-    if (customers.length === 0) return;
+    if (filteredCustomers.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedSearchIndex(prev => {
-        if (prev < customers.length - 1) {
+        if (prev < filteredCustomers.length - 1) {
           return prev + 1;
         }
         return prev;
@@ -869,105 +720,18 @@ export default function Customers() {
       });
     } else if (e.key === 'Enter' && selectedSearchIndex >= 0) {
       e.preventDefault();
-      handlePayment(customers[selectedSearchIndex]);
+      handlePayment(filteredCustomers[selectedSearchIndex]);
     }
   };
 
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
-  }, [searchTerm, filterType]);
+  }, [searchTerm, filterType, debouncedSearch, columnSearch]);
 
-  // دالة الطباعة
-  const printReport = useCallback((reportType) => {
-    let reportCustomers = [];
-    let reportTitle = '';
-    
-    switch (reportType) {
-      case 'all':
-        reportCustomers = allCustomers;
-        reportTitle = 'كشف بجميع العملاء';
-        break;
-      case 'debted':
-        reportCustomers = allCustomers.filter(c => c.balance > 0);
-        reportTitle = 'العملاء المدينين';
-        break;
-      case 'overdue':
-        reportCustomers = allCustomers.filter(c => (c.lastPaymentDays || 0) > overdueThreshold);
-        reportTitle = 'العملاء المتأخرين في الدفع';
-        break;
-      case 'compliant':
-        reportCustomers = allCustomers.filter(c => (c.lastPaymentDays || 0) <= overdueThreshold);
-        reportTitle = 'العملاء الملتزمين';
-        break;
-      default:
-        return;
-    }
-
-    // إنشاء نافذة الطباعة
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html dir="rtl">
-        <head>
-          <meta charset="UTF-8">
-          <title>${reportTitle}</title>
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; direction: rtl; padding: 20px; }
-            h1 { text-align: center; color: #1f2937; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #d1d5db; padding: 10px; text-align: right; }
-            th { background-color: #3b82f6; color: white; font-weight: bold; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .total { font-weight: bold; background-color: #dbeafe; }
-            @media print {
-              button { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>${reportTitle}</h1>
-          <p>التاريخ: ${new Date().toLocaleDateString('ar-EG')}</p>
-          <p>عدد العملاء: ${reportCustomers.length}</p>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>الرقم</th>
-                <th>اسم العميل</th>
-                <th>النوع</th>
-                <th>الهاتف</th>
-                <th>الرصيد</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${reportCustomers.map(customer => `
-                <tr>
-                  <td>${customer.id}</td>
-                  <td>${customer.name}</td>
-                  <td>${customer.customerType}</td>
-                  <td>${customer.phone || '-'}</td>
-                  <td>${formatCurrency(customer.balance)}</td>
-                </tr>
-              `).join('')}
-              <tr class="total">
-                <td colspan="4">الإجمالي</td>
-                <td>${formatCurrency(reportCustomers.reduce((sum, c) => sum + c.balance, 0))}</td>
-              </tr>
-            </tbody>
-          </table>
-          
-          <script>
-            window.onload = () => window.print();
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  }, [allCustomers, overdueThreshold, formatCurrency]);
-    const debtedCustomers = customers.filter(c => c.balance > 0);
+  // دوال التقارير
+  const generateDebtsReport = () => {
+    const debtedCustomers = filteredCustomers.filter(c => c.balance > 0);
     const totalDebt = debtedCustomers.reduce((sum, c) => sum + c.balance, 0);
 
     const reportData = debtedCustomers.map(c => ({
@@ -993,7 +757,7 @@ export default function Customers() {
   const generateCustomerTypesReport = () => {
     const types = ['عادي', 'VIP', 'تاجر جملة'];
     const reportData = types.map(type => {
-      const typeCustomers = customers.filter(c => c.customerType === type);
+      const typeCustomers = filteredCustomers.filter(c => c.customerType === type);
       const totalBalance = typeCustomers.reduce((sum, c) => sum + c.balance, 0);
       return {
         type,
@@ -1005,17 +769,17 @@ export default function Customers() {
 
     return {
       title: 'تقرير تصنيف العملاء',
-      subtitle: `إجمالي العملاء: ${customers.length}`,
+      subtitle: `إجمالي العملاء: ${filteredCustomers.length}`,
       summary: `تحليل حسب نوع العميل`,
       data: reportData,
       columns: ['النوع', 'عدد العملاء', 'إجمالي المديونيات', 'متوسط المديونية'],
-      totals: `إجمالي العملاء: ${customers.length}`
+      totals: `إجمالي العملاء: ${filteredCustomers.length}`
     };
   };
 
   const generateCitiesReport = () => {
     const citiesMap = {};
-    customers.forEach(c => {
+    filteredCustomers.forEach(c => {
       const city = c.city || 'بدون مدينة';
       if (!citiesMap[city]) {
         citiesMap[city] = { count: 0, totalDebt: 0, totalCredit: 0 };
@@ -1045,12 +809,12 @@ export default function Customers() {
   };
 
   const generateSelectedCustomersReport = () => {
-    if (customers.length === 0) return null;
+    if (filteredCustomers.length === 0) return null;
 
-    const totalDebt = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
-    const totalCredit = customers.reduce((sum, c) => sum + Math.min(0, -c.balance), 0);
+    const totalDebt = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+    const totalCredit = filteredCustomers.reduce((sum, c) => sum + Math.min(0, -c.balance), 0);
 
-    const reportData = customers.map((c, idx) => ({
+    const reportData = filteredCustomers.map((c, idx) => ({
       no: idx + 1,
       name: c.name,
       type: c.customerType,
@@ -1062,7 +826,7 @@ export default function Customers() {
 
     return {
       title: 'تقرير العملاء المختارين',
-      subtitle: `عدد العملاء: ${customers.length}`,
+      subtitle: `عدد العملاء: ${filteredCustomers.length}`,
       summary: `البحث: "${searchTerm}" | النوع: ${filterType === 'all' ? 'الكل' : filterType}`,
       data: reportData,
       columns: ['#', 'الاسم', 'النوع', 'الهاتف', 'المدينة', 'الرصيد', 'الحد الائتماني'],
@@ -1071,7 +835,7 @@ export default function Customers() {
   };
 
   const generateTopDebtorsReport = () => {
-    const topDebtors = customers
+    const topDebtors = filteredCustomers
       .filter(c => c.balance > 0)
       .sort((a, b) => b.balance - a.balance)
       .slice(0, 20);
@@ -1098,7 +862,7 @@ export default function Customers() {
   const generateDebtAgingReport = () => {
     // حساب أعمار الديون - نفترض أن كل عميل له آخر فاتورة (سنستخدم بيانات وهمية للآن)
     const today = new Date();
-    const debtedCustomers = customers.filter(c => c.balance > 0);
+    const debtedCustomers = filteredCustomers.filter(c => c.balance > 0);
 
     const agingBuckets = {
       '0-30': [],
@@ -1180,7 +944,7 @@ export default function Customers() {
   };
 
   const generateGoodPayersReport = () => {
-    const goodPayers = customers.filter(c => c.balance <= 0);
+    const goodPayers = filteredCustomers.filter(c => c.balance <= 0);
     const perfectPayers = goodPayers.filter(c => c.balance === 0);
     const advancePayers = goodPayers.filter(c => c.balance < 0);
 
@@ -1217,7 +981,7 @@ export default function Customers() {
 
       // حساب وهمي للمديونيات (في التطبيق الفعلي تأتي من قاعدة البيانات)
       const variation = Math.sin(i * 0.5) * 1000;
-      const baseDebt = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+      const baseDebt = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
       const monthlyDebt = Math.max(0, baseDebt + variation);
 
       monthlyData.push({
@@ -1228,7 +992,7 @@ export default function Customers() {
       });
     }
 
-    const currentTotal = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+    const currentTotal = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
     const previousTotal = currentTotal * 0.9;
     const monthlyChange = ((currentTotal - previousTotal) / previousTotal * 100).toFixed(1);
 
@@ -1247,7 +1011,7 @@ export default function Customers() {
     // هنا نعرض توليد بيانات وهمية
     const movements = [];
 
-    customers.forEach(customer => {
+    filteredCustomers.forEach(customer => {
       const invoiceCount = Math.floor(Math.random() * 5) + 1;
       const totalInvoices = customer.balance > 0 ? customer.balance + (Math.random() * 500) : Math.random() * 1000;
 
@@ -1283,7 +1047,7 @@ export default function Customers() {
 
   const generatePaymentBehaviorReport = () => {
     // تقرير سلوك الدفع
-    const behaviorData = customers.map(customer => {
+    const behaviorData = filteredCustomers.map(customer => {
       const avgPaymentDays = 15 + Math.floor(Math.random() * 45);
       const delayCount = Math.floor(Math.random() * 5);
       const avgPaymentAmount = customer.balance > 0 ? customer.balance / 2 : Math.random() * 1000;
@@ -1322,7 +1086,7 @@ export default function Customers() {
 
   const generateInactiveCustomersReport = () => {
     // تقرير العملاء غير النشطين
-    const inactiveData = customers.map(customer => {
+    const inactiveData = filteredCustomers.map(customer => {
       const daysInactive = Math.floor(Math.random() * 365);
       const lastInvoiceDate = new Date();
       lastInvoiceDate.setDate(lastInvoiceDate.getDate() - daysInactive);
@@ -1359,261 +1123,303 @@ export default function Customers() {
   const printReport = (reportType) => {
     let report;
     switch (reportType) {
-      case 'all':
-        reportCustomers = allCustomers;
-        reportTitle = 'كشف بجميع العملاء';
+      case 'debts':
+        report = generateDebtsReport();
         break;
-      case 'debted':
-        reportCustomers = allCustomers.filter(c => c.balance > 0);
-        reportTitle = 'العملاء المدينين';
+      case 'types':
+        report = generateCustomerTypesReport();
         break;
-      case 'overdue':
-        reportCustomers = allCustomers.filter(c => (c.lastPaymentDays || 0) > overdueThreshold);
-        reportTitle = 'العملاء المتأخرين في الدفع';
+      case 'cities':
+        report = generateCitiesReport();
         break;
-      case 'compliant':
-        reportCustomers = allCustomers.filter(c => (c.lastPaymentDays || 0) <= overdueThreshold);
-        reportTitle = 'العملاء الملتزمين';
+      case 'selected':
+        report = generateSelectedCustomersReport();
+        if (!report) {
+          alert('لا توجد عملاء مطابقة للبحث');
+          return;
+        }
+        break;
+      case 'topDebtors':
+        report = generateTopDebtorsReport();
+        break;
+      case 'aging':
+        report = generateDebtAgingReport();
+        break;
+      case 'goodPayers':
+        report = generateGoodPayersReport();
+        break;
+      case 'trend':
+        report = generateTrendReport();
+        break;
+      case 'movements':
+        report = generatePaymentMovementsReport();
+        break;
+      case 'behavior':
+        report = generatePaymentBehaviorReport();
+        break;
+      case 'inactive':
+        report = generateInactiveCustomersReport();
         break;
       default:
         return;
     }
 
-    // إنشاء نافذة الطباعة
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html dir="rtl">
-        <head>
-          <meta charset="UTF-8">
-          <title>${reportTitle}</title>
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; direction: rtl; padding: 20px; }
-            h1 { text-align: center; color: #1f2937; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #d1d5db; padding: 10px; text-align: right; }
-            th { background-color: #3b82f6; color: white; font-weight: bold; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .total { font-weight: bold; background-color: #dbeafe; }
-            @media print {
-              button { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>${reportTitle}</h1>
-          <p>التاريخ: ${new Date().toLocaleDateString('ar-EG')}</p>
-          <p>عدد العملاء: ${reportCustomers.length}</p>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>الرقم</th>
-                <th>اسم العميل</th>
-                <th>النوع</th>
-                <th>الهاتف</th>
-                <th>الرصيد</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${reportCustomers.map(customer => `
-                <tr>
-                  <td>${customer.id}</td>
-                  <td>${customer.name}</td>
-                  <td>${customer.customerType}</td>
-                  <td>${customer.phone || '-'}</td>
-                  <td>${formatCurrency(customer.balance)}</td>
-                </tr>
-              `).join('')}
-              <tr class="total">
-                <td colspan="4">الإجمالي</td>
-                <td>${formatCurrency(reportCustomers.reduce((sum, c) => sum + c.balance, 0))}</td>
-              </tr>
-            </tbody>
-          </table>
-          
-          <script>
-            window.onload = () => window.print();
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  }, [allCustomers, overdueThreshold, formatCurrency]);
+    const printWindow = window.open('', '', 'height=600,width=900');
 
-  // ===== RENDER =====
-  if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        fontSize: '20px',
-        color: '#6b7280'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="spinner" style={{
-            border: '4px solid #f3f4f6',
-            borderTop: '4px solid #3b82f6',
-            borderRadius: '50%',
-            width: '50px',
-            height: '50px',
-            animation: 'spin 1s linear infinite',
-            margin: '0 auto 20px'
-          }} />
-          جاري تحميل العملاء...
+    let tableRows = '';
+
+    if (report.isAging) {
+      // تنسيق خاص لتقرير أعمار الديون
+      tableRows = report.data.map((row, idx) => {
+        if (row.type === 'header') {
+          return `<tr style="background-color: #3b82f6; color: white; font-weight: bold;">
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.range} يوم</td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.count}</td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.subtotal}</td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.percentage}%</td>
+          </tr>`;
+        } else {
+          return `<tr>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;"></td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.name}</td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.debt}</td>
+            <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${row.age}</td>
+          </tr>`;
+        }
+      }).join('');
+    } else {
+      // تنسيق عادي للتقارير الأخرى
+      tableRows = report.data.map((row, idx) => {
+        const cells = report.columns.map(col => {
+          let key = col;
+          if (col === '#') key = 'id';
+          else if (col === 'الترتيب') key = 'rank';
+          else if (col === 'الاسم') key = 'name';
+          else if (col === 'النوع') key = 'type';
+          else if (col === 'الهاتف') key = 'phone';
+          else if (col === 'الهاتف 2') key = 'phone2';
+          else if (col === 'المدينة') key = 'city';
+          else if (col === 'المبلغ المدين') key = 'debt';
+          else if (col === 'النسبة') key = 'percentage';
+          else if (col === 'الرصيد') key = 'balance';
+          else if (col === 'الحد الائتماني') key = 'creditLimit';
+
+          const value = row[key] !== undefined ? row[key] : row[col.toLowerCase()] || '-';
+          return `<td style="padding: 10px; border: 1px solid #ddd; text-align: right;">${value}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
+      }).join('');
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+      <head>
+        <meta charset="UTF-8">
+        <title>${report.title}</title>
+        <style>
+          body { font-family: 'Arial', sans-serif; margin: 20px; background: white; }
+          .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #3b82f6; padding-bottom: 20px; }
+          .header h1 { margin: 0; font-size: 26px; color: #1f2937; font-weight: bold; }
+          .header p { margin: 5px 0; color: #6b7280; }
+          .summary { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 15px; margin-bottom: 20px; border-radius: 8px; border-right: 4px solid #3b82f6; }
+          .summary strong { color: #1e40af; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+          th { background: #374151; color: white; padding: 12px; text-align: right; font-weight: bold; font-size: 13px; }
+          td { padding: 10px; border: 1px solid #e5e7eb; text-align: right; }
+          tr:nth-child(even) { background: #f9fafb; }
+          tr:hover { background: #eff6ff; }
+          .footer { margin-top: 30px; text-align: center; color: #6b7280; font-size: 12px; border-top: 1px solid #e5e7eb; padding-top: 15px; }
+          .totals { background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); font-weight: bold; padding: 15px; margin-top: 20px; border-radius: 8px; border-right: 4px solid #10b981; font-size: 14px; }
+          .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+          .stat-box { padding: 15px; background: #f3f4f6; border-radius: 8px; text-align: center; border: 1px solid #d1d5db; }
+          .stat-box strong { display: block; font-size: 18px; color: #1f2937; margin-top: 5px; }
+          @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>📊 ${report.title}</h1>
+          <p>${report.subtitle}</p>
+          <p style="font-size: 12px; color: #9ca3af;">تاريخ التقرير: ${new Date().toLocaleDateString('ar-EG')} | الوقت: ${new Date().toLocaleTimeString('ar-EG')}</p>
         </div>
-      </div>
-    );
-  }
+        
+        <div class="summary">
+          <strong>ملخص:</strong> ${report.summary}
+        </div>
+
+        ${report.bucketSummary ? `
+        <div class="stats">
+          <div class="stat-box">
+            <span>0-30 يوم</span>
+            <strong>${report.bucketSummary['0-30'].count}</strong>
+            <p style="font-size: 12px; color: #6b7280; margin: 5px 0;">${report.bucketSummary['0-30'].total.toFixed(2)}</p>
+          </div>
+          <div class="stat-box">
+            <span>31-60 يوم</span>
+            <strong>${report.bucketSummary['31-60'].count}</strong>
+            <p style="font-size: 12px; color: #6b7280; margin: 5px 0;">${report.bucketSummary['31-60'].total.toFixed(2)}</p>
+          </div>
+          <div class="stat-box">
+            <span>61-90 يوم</span>
+            <strong>${report.bucketSummary['61-90'].count}</strong>
+            <p style="font-size: 12px; color: #6b7280; margin: 5px 0;">${report.bucketSummary['61-90'].total.toFixed(2)}</p>
+          </div>
+          <div class="stat-box">
+            <span>+90 يوم</span>
+            <strong>${report.bucketSummary['+90'].count}</strong>
+            <p style="font-size: 12px; color: #6b7280; margin: 5px 0;">${report.bucketSummary['+90'].total.toFixed(2)}</p>
+          </div>
+        </div>
+        ` : ''}
+
+        <table>
+          <thead>
+            <tr>
+              ${report.columns.map(col => `<th>${col}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="totals">
+          ${report.totals}
+        </div>
+
+        <div class="footer">
+          <p>🔐 تقرير سري - نظام إدارة ERP الحديث</p>
+          <p style="margin-top: 10px;">تم الإنشاء بواسطة: نظام العملاء | ${new Date().toLocaleString('ar-EG')}</p>
+          <button class="no-print" onclick="window.print()" style="padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; margin-top: 20px; font-size: 14px; font-weight: bold;">🖨️ طباعة</button>
+          <button class="no-print" onclick="window.close()" style="padding: 10px 20px; background: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; margin-top: 20px; margin-right: 10px; font-size: 14px;">✕ إغلاق</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  if (loading) return <div>جاري التحميل...</div>;
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
-      {/* HEADER */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '25px',
-        backgroundColor: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-      }}>
-        <div>
-          <h1 style={{ margin: 0, color: '#1f2937', fontSize: '28px' }}>
-            إدارة العملاء
-          </h1>
-          <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '14px' }}>
-            إجمالي العملاء: {customerStats.total} | 
-            المدينين: {customerStats.overdueCount} | 
-            الملتزمين: {customerStats.compliantCount}
-          </p>
-        </div>
-
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1>👥 إدارة العملاء</h1>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
-            onClick={() => setShowSettings(true)}
+            onClick={() => setShowReports(true)}
             style={{
-              padding: '10px 20px',
-              backgroundColor: '#6b7280',
+              backgroundColor: '#8b5cf6',
               color: 'white',
+              padding: '10px 16px',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '6px',
               cursor: 'pointer',
+              fontWeight: 'bold',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontWeight: '600',
-              transition: 'background 0.2s'
+              gap: '6px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#4b5563'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#6b7280'}
+          >
+            <Printer size={18} />
+            التقارير والطباعة
+          </button>
+          <button
+            onClick={openSettings}
+            style={{
+              backgroundColor: '#6366f1',
+              color: 'white',
+              padding: '10px 16px',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
           >
             <Settings size={18} />
             الإعدادات
           </button>
-
-          <button
-            onClick={() => setShowReports(true)}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#8b5cf6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: '600',
-              transition: 'background 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#7c3aed'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#8b5cf6'}
-          >
-            <Printer size={18} />
-            التقارير
-          </button>
-
           <button
             onClick={() => {
-              setCustomerFormData({
-                name: '',
-                phone: '',
-                phone2: '',
-                address: '',
-                city: '',
-                district: '',
-                notes: '',
-                creditLimit: 0,
-                customerType: 'عادي'
-              });
-              setEditingCustomer(null);
-              setShowNewCustomer(true);
+              openNewCustomerModal();
             }}
             style={{
-              padding: '10px 20px',
-              backgroundColor: '#3b82f6',
+              backgroundColor: '#10b981',
               color: 'white',
+              padding: '10px 16px',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '6px',
               cursor: 'pointer',
+              fontWeight: 'bold',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontWeight: '600',
-              fontSize: '16px',
-              transition: 'background 0.2s'
+              gap: '6px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
           >
-            <Plus size={20} />
-            عميل جديد
+            <Plus size={18} />
+            إضافة عميل جديد
           </button>
         </div>
       </div>
 
-      {/* SEARCH BAR */}
+      {/* البحث والفلترة والأعمدة */}
       <div style={{
-        backgroundColor: 'white',
-        padding: '15px 20px',
-        borderRadius: '12px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr auto',
+        gap: '15px',
         marginBottom: '20px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        alignItems: 'center'
       }}>
-        <div style={{ position: 'relative', maxWidth: '500px' }}>
-          <Search
-            size={20}
-            style={{
-              position: 'absolute',
-              right: '15px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: '#9ca3af'
-            }}
-          />
+        {/* البحث */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <Search size={18} color="#6b7280" style={{ marginLeft: '-32px', zIndex: 1, pointerEvents: 'none' }} />
           <input
             type="text"
-            placeholder="ابحث عن عميل (الاسم، الهاتف، النوع...)"
+            placeholder="إبحث عن عميل (الاسم، الهاتف، المدينة)... "
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             style={{
-              width: '100%',
-              padding: '12px 45px 12px 15px',
-              border: '2px solid #e5e7eb',
+              flex: 1,
+              padding: '10px 30px 10px 35px',
               borderRadius: '8px',
-              fontSize: '15px',
-              outline: 'none',
-              transition: 'border-color 0.2s'
+              border: '1px solid #d1d5db',
+              fontSize: '14px'
             }}
-            onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-            onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
           />
         </div>
-      </div>
+
+        {/* الفلترة حسب النوع */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {['all', 'عادي', 'VIP', 'تاجر جملة'].map(type => (
+            <button
+              key={type}
+              onClick={() => setFilterType(type)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: filterType === type ? '#3b82f6' : '#e5e7eb',
+                color: filterType === type ? 'white' : '#6b7280',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                transition: 'all 0.2s'
+              }}
+            >
+              {type === 'all' ? '📊 الكل' : type}
+            </button>
+          ))}
+        </div>
 
         {/* تبديل الأعمدة */}
         <div style={{ position: 'relative' }}>
@@ -1738,7 +1544,7 @@ export default function Customers() {
         </div>
         <div style={{ padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
           <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>نتائج البحث</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{customers.length}</div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{filteredCustomers.length}</div>
         </div>
       </div>
 
@@ -1784,14 +1590,14 @@ export default function Customers() {
             )}
           </thead>
           <tbody>
-            {customers.length === 0 ? (
+            {filteredCustomers.length === 0 ? (
               <tr>
                 <td colSpan="20" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af' }}>
                   لا توجد عملاء مطابقة للبحث
                 </td>
               </tr>
             ) : (
-              customers.map((customer, index) => (
+              filteredCustomers.map((customer, index) => (
                 <CustomerRow
                   key={customer.id}
                   customer={customer}
@@ -1812,93 +1618,37 @@ export default function Customers() {
         </table>
       </div>
 
-            {/* PAGINATION */}
-            {totalPages > 1 && (
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '20px',
-                borderTop: '1px solid #e5e7eb'
-              }}>
-                <div style={{ color: '#6b7280', fontSize: '14px' }}>
-                  عرض {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredCustomers.length)} من {filteredCustomers.length}
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1}
-                    style={{
-                      padding: '8px 12px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      backgroundColor: currentPage === 1 ? '#f9fafb' : 'white',
-                      cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      opacity: currentPage === 1 ? 0.5 : 1
-                    }}
-                  >
-                    <ChevronRight size={18} />
-                  </button>
-
-                  {[...Array(totalPages)].map((_, i) => {
-                    const pageNum = i + 1;
-                    // Show only nearby pages
-                    if (
-                      pageNum === 1 ||
-                      pageNum === totalPages ||
-                      (pageNum >= currentPage - 2 && pageNum <= currentPage + 2)
-                    ) {
-                      return (
-                        <button
-                          key={pageNum}
-                          onClick={() => handlePageChange(pageNum)}
-                          style={{
-                            padding: '8px 12px',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: '6px',
-                            backgroundColor: currentPage === pageNum ? '#3b82f6' : 'white',
-                            color: currentPage === pageNum ? 'white' : '#374151',
-                            cursor: 'pointer',
-                            fontWeight: currentPage === pageNum ? '600' : '400',
-                            minWidth: '40px'
-                          }}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    } else if (
-                      pageNum === currentPage - 3 ||
-                      pageNum === currentPage + 3
-                    ) {
-                      return <span key={pageNum} style={{ padding: '8px 4px' }}>...</span>;
-                    }
-                    return null;
-                  })}
-
-                  <button
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages}
-                    style={{
-                      padding: '8px 12px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      backgroundColor: currentPage === totalPages ? '#f9fafb' : 'white',
-                      cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      opacity: currentPage === totalPages ? 0.5 : 1
-                    }}
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
+      {/* Pagination Controls */}
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', gap: '20px', borderTop: '1px solid #e5e7eb', marginTop: '20px' }}>
+        <button
+          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+          disabled={currentPage === 1}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '6px',
+            border: '1px solid #d1d5db',
+            backgroundColor: currentPage === 1 ? '#f3f4f6' : 'white',
+            cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+            opacity: currentPage === 1 ? 0.5 : 1
+          }}
+        >
+          السابق
+        </button>
+        <span style={{ fontWeight: 'bold' }}>صفحة {currentPage} من {totalPages} (إجمالي {totalItems})</span>
+        <button
+          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+          disabled={currentPage === totalPages}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '6px',
+            border: '1px solid #d1d5db',
+            backgroundColor: currentPage === totalPages ? '#f3f4f6' : 'white',
+            cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+            opacity: currentPage === totalPages ? 0.5 : 1
+          }}
+        >
+          التالي
+        </button>
       </div>
 
       <NewCustomerModal
@@ -1906,7 +1656,7 @@ export default function Customers() {
         customer={formData}
         onChange={setFormData}
         onSave={saveCustomer}
-        existingCustomers={customers}
+        existingCustomers={allCustomers}
         editingCustomerId={editingCustomer?.id}
         isEditMode={!!editingCustomer}
         onClose={closeCustomerModal}
@@ -1932,243 +1682,286 @@ export default function Customers() {
             customerId={showLedger}
             onClose={() => {
               setShowLedger(null);
-              loadCustomers(true);
+              loadAllCustomers();
             }}
           />
         )
       }
 
-      {/* SETTINGS MODAL */}
-      {showSettings && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
-          onClick={() => setShowSettings(false)}
-        >
+      {/* Reports Modal */}
+      {
+        showReports && (
           <div
             style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '30px',
-              width: '500px',
-              maxWidth: '90%'
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1300
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={() => setShowReports(false)}
           >
-            <h2 style={{ marginBottom: '25px', color: '#1f2937' }}>⚙️ الإعدادات</h2>
+            <div
+              style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '30px',
+                width: '500px',
+                maxHeight: '80vh',
+                overflow: 'auto'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>📊 التقارير والطباعة</h2>
 
-            <div style={{
-              marginBottom: '25px',
-              padding: '20px',
-              backgroundColor: '#f0f9ff',
-              borderRadius: '8px',
-              border: '2px solid #3b82f6'
-            }}>
-              <label style={{ display: 'block', marginBottom: '15px', fontWeight: '600', color: '#1e40af' }}>
-                🔴 عتبة التأخير في الدفع (بالأيام)
-              </label>
-              <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-                <input
-                  type="range"
-                  min="7"
-                  max="90"
-                  step="1"
-                  value={overdueThreshold}
-                  onChange={(e) => setOverdueThreshold(parseInt(e.target.value))}
-                  style={{
-                    flex: 1,
-                    height: '8px',
-                    accentColor: '#3b82f6'
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                <button
+                  onClick={() => {
+                    printReport('debts');
+                    setShowReports(false);
                   }}
-                />
-                <div style={{
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  fontWeight: 'bold',
-                  minWidth: '80px',
-                  textAlign: 'center'
-                }}>
-                  {overdueThreshold} يوم
-                </div>
-              </div>
-              <p style={{ marginTop: '10px', fontSize: '12px', color: '#1e40af' }}>
-                ℹ️ النقطة الحمراء تظهر عند تجاوز {overdueThreshold} يوم بدون دفع
-              </p>
-            </div>
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fee2e2',
+                    border: '2px solid #dc2626',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fecaca';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fee2e2';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>💳 تقرير المديونيات</div>
+                  <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '5px' }}>عملاء مدينين بفترات</div>
+                </button>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => {
-                  localStorage.setItem('overdueThreshold', overdueThreshold.toString());
-                  setShowSettings(false);
-                }}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                ✅ حفظ
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#6b7280',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                ✕ إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <button
+                  onClick={() => {
+                    printReport('topDebtors');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fef3c7',
+                    border: '2px solid #f59e0b',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fde68a';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fef3c7';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#f59e0b', fontSize: '16px' }}>🏆 أكبر المدينين</div>
+                  <div style={{ fontSize: '12px', color: '#92400e', marginTop: '5px' }}>أكبر 20 عميل مدين</div>
+                </button>
 
-      {/* REPORTS MODAL */}
-      {showReports && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
-          onClick={() => setShowReports(false)}
-        >
-          <div
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '30px',
-              width: '600px',
-              maxWidth: '90%'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ marginBottom: '25px', color: '#1f2937' }}>📊 التقارير</h2>
+                <button
+                  onClick={() => {
+                    printReport('types');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#dbeafe',
+                    border: '2px solid #2563eb',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bfdbfe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#dbeafe';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#2563eb', fontSize: '16px' }}>📋 تصنيف العملاء</div>
+                  <div style={{ fontSize: '12px', color: '#1e40af', marginTop: '5px' }}>عادي / VIP / جملة</div>
+                </button>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <button
-                onClick={() => {
-                  printReport('all');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '20px',
-                  backgroundColor: '#dbeafe',
-                  border: '2px solid #3b82f6',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#bfdbfe';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#dbeafe';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#1e40af', fontSize: '16px' }}>
-                  📋 جميع العملاء
-                </div>
-                <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '5px' }}>
-                  {customerStats.total} عميل
-                </div>
-              </button>
+                <button
+                  onClick={() => {
+                    printReport('cities');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#d1fae5',
+                    border: '2px solid #10b981',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#a7f3d0';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1fae5';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '16px' }}>🗺️ التوزيع الجغرافي</div>
+                  <div style={{ fontSize: '12px', color: '#065f46', marginTop: '5px' }}>العملاء حسب المدينة</div>
+                </button>
 
-              <button
-                onClick={() => {
-                  printReport('debted');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '20px',
-                  backgroundColor: '#fee2e2',
-                  border: '2px solid #ef4444',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fecaca';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fee2e2';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>
-                  💰 العملاء المدينين
-                </div>
-                <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '5px' }}>
-                  {formatCurrency(customerStats.totalDebt)}
-                </div>
-              </button>
+                <button
+                  onClick={() => {
+                    printReport('selected');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#e9d5ff',
+                    border: '2px solid #a855f7',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d8b4fe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#e9d5ff';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#a855f7', fontSize: '16px' }}>🔍 التقرير المخصص</div>
+                  <div style={{ fontSize: '12px', color: '#581c87', marginTop: '5px' }}>بناءً على البحث الحالي</div>
+                </button>
 
-              <button
-                onClick={() => {
-                  printReport('overdue');
-                  setShowReports(false);
-                }}
-                style={{
-                  padding: '20px',
-                  backgroundColor: '#fef3c7',
-                  border: '2px solid #f59e0b',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  textAlign: 'right',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fde68a';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fef3c7';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <div style={{ fontWeight: 'bold', color: '#d97706', fontSize: '16px' }}>
-                  ⚠️ المتأخرين
-                </div>
-                <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '5px' }}>
-                  {customerStats.overdueCount} عميل
-                </div>
-              </button>
+                <button
+                  onClick={() => {
+                    printReport('aging');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fecdd3',
+                    border: '2px solid #f43f5e',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fbcfe8';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fecdd3';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#f43f5e', fontSize: '16px' }}>⏳ أعمار الديون</div>
+                  <div style={{ fontSize: '12px', color: '#be123c', marginTop: '5px' }}>0-30 / 31-60 / +90 يوم</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('goodPayers');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#d1f2eb',
+                    border: '2px solid #14b8a6',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#99f6e4';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1f2eb';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#14b8a6', fontSize: '16px' }}>💸 العملاء الملتزمون</div>
+                  <div style={{ fontSize: '12px', color: '#0d9488', marginTop: '5px' }}>صفر دين أو دفعات مقدمة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('trend');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#fef08a',
+                    border: '2px solid #eab308',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#facc15';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fef08a';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#eab308', fontSize: '16px' }}>📈 تطور المديونية</div>
+                  <div style={{ fontSize: '12px', color: '#a16207', marginTop: '5px' }}>12 شهر الأخيرة</div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    printReport('movements');
+                    setShowReports(false);
+                  }}
+                  style={{
+                    padding: '15px',
+                    backgroundColor: '#e0e7ff',
+                    border: '2px solid #6366f1',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'right',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#c7d2fe';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#e0e7ff';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', color: '#6366f1', fontSize: '16px' }}>🧾 الحركات المالية</div>
+                  <div style={{ fontSize: '12px', color: '#3730a3', marginTop: '5px' }}>فواتير و دفعات</div>
+                </button>
 
                 <button
                   onClick={() => {
@@ -2238,49 +2031,157 @@ export default function Customers() {
                 >
                   <div style={{ fontWeight: 'bold', color: '#374151', fontSize: '14px' }}>📈 معلومات سريعة</div>
                   <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                    <div>إجمالي العملاء: {customers.length}</div>
+                    <div>إجمالي العملاء: {filteredCustomers.length}</div>
                     <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
                     <div style={{ color: '#dc2626' }}>عملاء متأخرين: {customerStats.overdueCount}</div>
                   </div>
                 </div>
+              </div>
+
+              <button
+                onClick={() => setShowReports(false)}
+                style={{
+                  width: '100%',
+                  marginTop: '20px',
+                  padding: '10px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                إغلاق
               </button>
             </div>
-
-            <button
-              onClick={() => setShowReports(false)}
-              style={{
-                width: '100%',
-                marginTop: '20px',
-                padding: '12px',
-                backgroundColor: '#6b7280',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '600'
-              }}
-            >
-              إغلاق
-            </button>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {/* CSS ANIMATIONS */}
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
+      {/* Settings Modal */}
+      {
+        showSettings && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1400
+            }}
+            onClick={() => setShowSettings(false)}
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '30px',
+                width: '500px'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 style={{ marginBottom: '30px', color: '#1f2937' }}>⚙️ الإعدادات</h2>
 
-        .customer-row:hover {
-          background-color: #eff6ff !important;
-        }
+              <div style={{ marginBottom: '30px', borderRadius: '8px', backgroundColor: '#f0f9ff', padding: '20px', border: '2px solid #3b82f6' }}>
+                <label style={{ display: 'block', marginBottom: '15px', fontWeight: 'bold', color: '#1e40af' }}>
+                  🔴 عدد أيام عدم الدفع (حتى تظهر النقطة الحمراء)
+                </label>
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min="7"
+                    max="90"
+                    step="1"
+                    value={tempThreshold}
+                    onChange={(e) => setTempThreshold(parseInt(e.target.value))}
+                    style={{
+                      flex: 1,
+                      height: '8px',
+                      borderRadius: '5px',
+                      outline: 'none',
+                      accentColor: '#3b82f6'
+                    }}
+                  />
+                  <div
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      fontWeight: 'bold',
+                      minWidth: '80px',
+                      textAlign: 'center'
+                    }}
+                  >
+                    {tempThreshold} يوم
+                  </div>
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#1e40af' }}>
+                  ℹ️ النقطة الحمراء ستظهر عندما يمر {tempThreshold} يوم بدون دفع أو فاتورة
+                </div>
+              </div>
 
-        .action-btn:hover {
-          transform: scale(1.1);
-        }
-      `}</style>
-    </div>
+              <div style={{ marginBottom: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
+                <h3 style={{ margin: '0 0 10px 0', color: '#374151' }}>📊 معلومات سريعة:</h3>
+                <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                  <div>• إجمالي العملاء: <strong>{allCustomers.length}</strong></div>
+                  <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
+                  <div style={{ marginTop: '8px', color: '#dc2626', fontWeight: 'bold' }}>
+                    • عملاء متأخرين الآن: <strong>{allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length}</strong>
+                  </div>
+                  <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('overdueThreshold', tempThreshold.toString());
+                    setOverdueThreshold(tempThreshold);
+                    setShowSettings(false);
+                    loadAllCustomers(); // إعادة تحميل بشبكة الأيام الجديدة
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  ✅ حفظ الإعدادات
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#6b7280',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  ✕ إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+    </div >
   );
 }

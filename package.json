@@ -8,7 +8,8 @@
     "build": "vite build",
     "electron": "electron .",
     "start": "npm run dev",
-    "app": "electron ."
+    "app": "electron .",
+    "seed": "node prisma/seed.js"
   },
   "keywords": [],
   "author": "",

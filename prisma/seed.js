@@ -102,42 +102,73 @@ async function main() {
         createdCategories.push(category);
     }
 
-    // 4. إنشاء عملاء (50 عميل)
-    console.log('👥 إنشاء العملاء (50 عميل)...');
-    const customerNames = [
-        'أحمد محمد', 'محمود علي', 'خالد حسن', 'عمر إبراهيم', 'يوسف عبدالله',
-        'فاطمة أحمد', 'عائشة محمد', 'مريم خالد', 'نور الدين', 'سارة علي',
-        'حسن محمود', 'طارق سعيد', 'ياسر عبدالرحمن', 'كريم فتحي', 'وليد صلاح',
-        'منى حسين', 'هدى عادل', 'ليلى كامل', 'داليا إبراهيم', 'رنا محمد',
-        'محمد سمير', 'أحمد حسام', 'علي عصام', 'عبدالله رمضان', 'إبراهيم شعبان',
-        'ريهام أحمد', 'إيمان محمد', 'نهى علي', 'شيماء حسن', 'دعاء محمود',
-        'مصطفى أحمد', 'أمير محمد', 'سامح علي', 'هاني حسن', 'شريف محمود',
-        'نادية أحمد', 'سعاد محمد', 'سميرة علي', 'كريمة حسن', 'زينب محمود',
-        'حسام الدين', 'صلاح الدين', 'عماد الدين', 'جمال الدين', 'كمال الدين',
-        'لبنى أحمد', 'سلمى محمد', 'ندى علي', 'هبة حسن', 'آية محمود'
+    // 4. إنشاء عملاء (900 عميل)
+    console.log('👥 إنشاء العملاء (900 عميل)...');
+    
+    // أسماء أولى متنوعة
+    const firstNames = [
+        'أحمد', 'محمود', 'خالد', 'عمر', 'يوسف', 'فاطمة', 'عائشة', 'مريم', 'نور', 'سارة',
+        'حسن', 'طارق', 'ياسر', 'كريم', 'وليد', 'منى', 'هدى', 'ليلى', 'داليا', 'رنا',
+        'محمد', 'أحمد', 'علي', 'عبدالله', 'إبراهيم', 'ريهام', 'إيمان', 'نهى', 'شيماء', 'دعاء',
+        'مصطفى', 'أمير', 'سامح', 'هاني', 'شريف', 'نادية', 'سعاد', 'سميرة', 'كريمة', 'زينب',
+        'حسام', 'صلاح', 'عماد', 'جمال', 'كمال', 'لبنى', 'سلمى', 'ندى', 'هبة', 'آية'
     ];
 
-    const cities = ['القاهرة', 'الجيزة', 'الإسكندرية', 'المنصورة', 'طنطا', 'أسيوط', 'المنيا', 'الفيوم'];
+    // أسماء عائلية متنوعة
+    const lastNames = [
+        'محمد', 'علي', 'حسن', 'إبراهيم', 'عبدالله', 'أحمد', 'محمود', 'خالد', 'عمر', 'يوسف',
+        'سعيد', 'عبدالرحمن', 'فتحي', 'صلاح', 'حسين', 'عادل', 'كامل', 'رمضان', 'شعبان', 'سمير',
+        'حسام', 'عصام', 'شريف', 'سامح', 'هاني', 'طارق', 'ياسر', 'كريم', 'وليد', 'مصطفى',
+        'أمير', 'نور', 'ضياء', 'نجم', 'قمر', 'نسيم', 'ريح', 'موج', 'بحر', 'نهر',
+        'جبل', 'وادي', 'صحراء', 'غابة', 'حقل', 'بستان', 'روضة', 'جنة', 'نعيم', 'سلام'
+    ];
+
+    const cities = ['القاهرة', 'الجيزة', 'الإسكندرية', 'المنصورة', 'طنطا', 'أسيوط', 'المنيا', 'الفيوم', 'بني سويف', 'السويس', 'الإسماعيلية', 'بورسعيد', 'دمياط', 'كفر الشيخ', 'الغربية', 'المنوفية', 'القليوبية', 'الشرقية', 'البحيرة', 'مطروح'];
     const types = ['عادي', 'VIP', 'تاجر جملة'];
+    const streets = ['شارع النيل', 'شارع التحرير', 'شارع الهرم', 'شارع الأهرام', 'شارع الكورنيش', 'شارع الجمهورية', 'شارع الثورة', 'شارع النيل', 'شارع الملك فيصل', 'شارع الملك عبدالعزيز'];
+    const districts = ['حي شرق', 'حي غرب', 'حي أول', 'حي ثاني', 'حي ثالث', 'حي رابع', 'حي خامس', 'حي سادس'];
+    const notes = ['عميل ممتاز', 'يفضل التوصيل', 'عميل منتظم', 'دفع فوري', 'يشتري بكميات كبيرة', 'عميل جديد', 'عميل قديم', 'يفضل الدفع الآجل', null];
 
     const createdCustomers = [];
-    for (let i = 0; i < customerNames.length; i++) {
-        const customer = await prisma.customer.create({
-            data: {
-                name: customerNames[i],
-                phone: `0${Math.floor(1000000000 + Math.random() * 900000000)}`,
-                phone2: Math.random() > 0.5 ? `0${Math.floor(1000000000 + Math.random() * 900000000)}` : null,
-                address: Math.random() > 0.3 ? `شارع ${Math.floor(Math.random() * 100)} - ${randomChoice(['وسط البلد', 'شبرا', 'المعادي', 'مدينة نصر', 'الدقي'])}` : null,
-                city: randomChoice(cities),
-                district: Math.random() > 0.5 ? randomChoice(['حي شرق', 'حي غرب', 'حي أول', 'حي ثاني']) : null,
-                notes: Math.random() > 0.7 ? randomChoice(['عميل ممتاز', 'يفضل التوصيل', 'عميل منتظم', 'دفع فوري']) : null,
-                creditLimit: i < 10 ? 0 : Math.floor(Math.random() * 20000) + 5000,
-                customerType: i < 10 ? 'عادي' : randomChoice(types),
-                rating: Math.random() * 5
-            }
+    
+    // استخدام batch insert لتحسين الأداء
+    const customerBatch = [];
+    for (let i = 0; i < 900; i++) {
+        customerBatch.push({
+            name: `${randomChoice(firstNames)} ${randomChoice(lastNames)}`,
+            phone: `0${Math.floor(1000000000 + Math.random() * 900000000)}`,
+            phone2: Math.random() > 0.5 ? `0${Math.floor(1000000000 + Math.random() * 900000000)}` : null,
+            address: Math.random() > 0.3 ? `${randomChoice(streets)} ${Math.floor(Math.random() * 100)}` : null,
+            city: randomChoice(cities),
+            district: Math.random() > 0.5 ? randomChoice(districts) : null,
+            notes: Math.random() > 0.6 ? randomChoice(notes) : null,
+            creditLimit: i < 50 ? 0 : Math.floor(Math.random() * 30000) + 5000,
+            customerType: i < 50 ? 'عادي' : randomChoice(types),
+            rating: Math.random() * 5
         });
-        createdCustomers.push(customer);
     }
+
+    // إدراج العملاء على دفعات (100 عميل في كل دفعة)
+    for (let i = 0; i < customerBatch.length; i += 100) {
+        const batch = customerBatch.slice(i, i + 100);
+        const created = await prisma.customer.createMany({
+            data: batch,
+            skipDuplicates: true
+        });
+        
+        // جلب العملاء المُنشأة
+        const customers = await prisma.customer.findMany({
+            skip: i,
+            take: 100
+        });
+        createdCustomers.push(...customers);
+        
+        if ((i + 100) % 300 === 0) {
+            console.log(`   ✓ تم إنشاء ${Math.min(i + 100, 900)} عميل...`);
+        }
+    }
+    
+    console.log(`   ✓ تم إنشاء ${createdCustomers.length} عميل بنجاح`);
 
     // 5. إنشاء موردين (15 مورد)
     console.log('🏭 إنشاء الموردين (15 مورد)...');
@@ -189,13 +220,14 @@ async function main() {
 
         for (let p = 0; p < 10; p++) { // 10 منتج لكل فئة = 100 منتج
             const productName = randomChoice(products);
+            const uniqueBarcode = `BAR${Date.now()}${productCounter}`;
             const product = await prisma.product.create({
                 data: {
                     name: `${productName} ${p + 1}`,
                     description: `وصف تفصيلي لـ ${productName}`,
                     categoryId: category.id,
                     brand: randomChoice(['Nike', 'Adidas', 'Zara', 'H&M', 'LC Waikiki', 'Defacto', null, null]),
-                    barcode: `BAR${String(productCounter).padStart(10, '0')}`,
+                    barcode: uniqueBarcode,
                     sku: `SKU${String(productCounter).padStart(8, '0')}`,
                     basePrice: Math.floor(Math.random() * 500) + 100
                 }
@@ -204,6 +236,7 @@ async function main() {
             // إنشاء 3-5 variants لكل منتج
             const variantCount = Math.floor(Math.random() * 3) + 3;
             for (let v = 0; v < variantCount; v++) {
+                const uniqueVariantBarcode = `VAR${Date.now()}${productCounter}${v}`;
                 await prisma.variant.create({
                     data: {
                         productId: product.id,
@@ -212,7 +245,7 @@ async function main() {
                         price: product.basePrice + Math.floor(Math.random() * 100),
                         cost: product.basePrice * 0.6 + Math.floor(Math.random() * 50),
                         quantity: Math.floor(Math.random() * 50) + 10,
-                        barcode: `VAR${String(productCounter * 10 + v).padStart(12, '0')}`
+                        barcode: uniqueVariantBarcode
                     }
                 });
             }
@@ -272,9 +305,9 @@ async function main() {
         }
     }
 
-    // 8. إنشاء فواتير بيع (100 فاتورة)
-    console.log('🛒 إنشاء فواتير البيع (100 فاتورة)...');
-    for (let i = 0; i < 100; i++) {
+    // 8. إنشاء فواتير بيع (500 فاتورة)
+    console.log('🛒 إنشاء فواتير البيع (500 فاتورة)...');
+    for (let i = 0; i < 500; i++) {
         const customer = i % 3 === 0 ? null : randomChoice(createdCustomers);
         const itemCount = Math.floor(Math.random() * 5) + 1;
 
@@ -342,11 +375,15 @@ async function main() {
                 }
             });
         }
+
+        if ((i + 1) % 100 === 0) {
+            console.log(`   ✓ تم إنشاء ${i + 1} فاتورة بيع...`);
+        }
     }
 
-    // 9. إنشاء دفعات العملاء (80 دفعة)
-    console.log('💰 إنشاء دفعات العملاء (80 دفعة)...');
-    for (let i = 0; i < 80; i++) {
+    // 9. إنشاء دفعات العملاء (400 دفعة)
+    console.log('💰 إنشاء دفعات العملاء (400 دفعة)...');
+    for (let i = 0; i < 400; i++) {
         const customer = randomChoice(createdCustomers.filter(c => c.creditLimit > 0));
         const paymentMethod = randomChoice(createdPaymentMethods);
         const amount = Math.floor(Math.random() * 5000) + 500;
@@ -374,6 +411,10 @@ async function main() {
                 notes: `دفعة #${payment.id}`
             }
         });
+
+        if ((i + 1) % 100 === 0) {
+            console.log(`   ✓ تم إنشاء ${i + 1} دفعة...`);
+        }
     }
 
     // 10. إنشاء مرتجعات (15 مرتجع)
@@ -474,9 +515,9 @@ async function main() {
 
         const sale = await prisma.sale.create({
             data: {
-                customerId: overdueCustomer.id,
+                customer: { connect: { id: overdueCustomer.id } },
                 total: 1000,
-                status: 'COMPLETED',
+                saleType: 'آجل',
                 invoiceDate: oldDate,
                 createdAt: oldDate,
                 items: {
@@ -523,7 +564,7 @@ async function main() {
             data: {
                 customerId: goodCustomer.id,
                 total: 500,
-                status: 'COMPLETED',
+                saleType: 'نقدي',
                 invoiceDate: recentDate,
                 createdAt: recentDate,
                 items: {
@@ -573,7 +614,7 @@ async function main() {
             data: {
                 customerId: paidCustomer.id,
                 total: 2000,
-                status: 'COMPLETED',
+                saleType: 'آجل',
                 invoiceDate: oldDate,
                 createdAt: oldDate,
                 items: {
@@ -633,8 +674,8 @@ async function main() {
     console.log(`   • ${createdCustomers.length} عميل`);
     console.log(`   • ${createdSuppliers.length} مورد`);
     console.log(`   • 30 فاتورة مشتريات`);
-    console.log(`   • 100 فاتورة بيع`);
-    console.log(`   • 80 دفعة عملاء`);
+    console.log(`   • 500 فاتورة بيع`);
+    console.log(`   • 400 دفعة عملاء`);
     console.log(`   • 15 فاتورة مرتجعات`);
     console.log(`   • 50 مصروف`);
     console.log('\n📋 معلومات تسجيل الدخول:');

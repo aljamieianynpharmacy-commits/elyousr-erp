@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-export default function CustomerLedger({ customerId, onClose, onDataChanged }) {
+export default function CustomerLedger({ customerId, onClose, onCustomerUpdated }) {
     const [customer, setCustomer] = useState(null);
     const [sales, setSales] = useState([]);
     const [returns, setReturns] = useState([]);
@@ -556,19 +556,26 @@ export default function CustomerLedger({ customerId, onClose, onDataChanged }) {
                                                             ✏️
                                                         </button>
                                                         <button
-                                                            onClick={() => {
+                                                            onClick={async () => {
                                                                 if (window.confirm(`هل تريد حذف فاتورة رقم ${transaction.details.id}؟`)) {
-                                                                    window.api.deleteSale(transaction.details.id).then(result => {
+                                                                    try {
+                                                                        const result = await window.api.deleteSale(transaction.details.id);
                                                                         if (result.error) {
                                                                             alert('خطأ: ' + result.error);
                                                                         } else {
+                                                                            // إعادة تحميل بيانات العميل أولاً للحصول على الرصيد المحدث
+                                                                            const updatedCustomer = await window.api.getCustomer(customerId);
+                                                                            if (!updatedCustomer.error) {
+                                                                                setCustomer(updatedCustomer);
+                                                                                // إرسال الرصيد المحدث للصفحة الرئيسية
+                                                                                onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
+                                                                            }
                                                                             alert('✅ تم حذف الفاتورة بنجاح');
-                                                                            loadCustomerData();
-                                                                            onDataChanged && onDataChanged(); // إشعار الصفحة الرئيسية بالتغيير
+                                                                            loadCustomerData(); // إعادة تحميل المعاملات
                                                                         }
-                                                                    }).catch(err => {
+                                                                    } catch (err) {
                                                                         alert('خطأ في الحذف: ' + err.message);
-                                                                    });
+                                                                    }
                                                                 }
                                                             }}
                                                             title="حذف الفاتورة"
@@ -604,19 +611,26 @@ export default function CustomerLedger({ customerId, onClose, onDataChanged }) {
                                                             🖨️
                                                         </button>
                                                         <button
-                                                            onClick={() => {
+                                                            onClick={async () => {
                                                                 if (window.confirm(`هل تريد حذف الدفعة رقم ${transaction.details.id}؟`)) {
-                                                                    window.api.deleteCustomerPayment(transaction.details.id).then(result => {
+                                                                    try {
+                                                                        const result = await window.api.deleteCustomerPayment(transaction.details.id);
                                                                         if (result.error) {
                                                                             alert('خطأ: ' + result.error);
                                                                         } else {
+                                                                            // إعادة تحميل بيانات العميل أولاً للحصول على الرصيد المحدث
+                                                                            const updatedCustomer = await window.api.getCustomer(customerId);
+                                                                            if (!updatedCustomer.error) {
+                                                                                setCustomer(updatedCustomer);
+                                                                                // إرسال الرصيد المحدث للصفحة الرئيسية
+                                                                                onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
+                                                                            }
                                                                             alert('✅ تم حذف الدفعة بنجاح');
-                                                                            loadCustomerData();
-                                                                            onDataChanged && onDataChanged(); // إشعار الصفحة الرئيسية بالتغيير
+                                                                            loadCustomerData(); // إعادة تحميل المعاملات
                                                                         }
-                                                                    }).catch(err => {
+                                                                    } catch (err) {
                                                                         alert('خطأ في الحذف: ' + err.message);
-                                                                    });
+                                                                    }
                                                                 }
                                                             }}
                                                             title="حذف الدفعة"

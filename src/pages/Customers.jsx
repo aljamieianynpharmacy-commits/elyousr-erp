@@ -121,7 +121,7 @@ const CustomerRow = memo(function CustomerRow({
         <td style={{ padding: '15px' }}>
           <span style={{
             fontWeight: 'bold',
-            color: customer.balance > 0 ? '#ef4444' : customer.balance < 0 ? '#10b981' : '#6b7280',
+            color: (customer.balance || 0) > 0 ? '#ef4444' : (customer.balance || 0) < 0 ? '#10b981' : '#6b7280',
             padding: '4px 8px',
             borderRadius: '4px',
             fontSize: '15px'

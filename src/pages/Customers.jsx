@@ -4,38 +4,8 @@ import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
 
-// دالة مساعدة لإضافة timestamp
-const logWithTime = (message, data = null) => {
-  const timestamp = new Date().toLocaleTimeString('ar-EG', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3
-  });
-  const logMessage = `[${timestamp}] ${message}`;
-  if (data) {
-    console.log(logMessage, data);
-  } else {
-    console.log(logMessage);
-  }
-};
-
-const logErrorWithTime = (message, data = null) => {
-  const timestamp = new Date().toLocaleTimeString('ar-EG', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3
-  });
-  const logMessage = `[${timestamp}] ${message}`;
-  if (data) {
-    console.error(logMessage, data);
-  } else {
-    console.error(logMessage);
-  }
-};
+const ITEMS_PER_PAGE = 50;
+const DEBOUNCE_DELAY = 150;
 
 // مكون صف العميل المُحسّن - يتجنب إعادة الرندر غير الضرورية
 const CustomerRow = memo(function CustomerRow({
@@ -60,11 +30,6 @@ const CustomerRow = memo(function CustomerRow({
     // استخدام قيمة الباك اند إذا وجدت، وإلا الحساب المحلي
     const isOverdue = customer.isOverdue !== undefined ? customer.isOverdue : lastPaymentDays > overdueThreshold;
     const lastOperationType = customer.lastOperationType || 'فاتورة';
-
-    // Log for debugging
-    if (index < 3) {
-      console.log(`[CustomerRow] ${customer.name}: Days=${lastPaymentDays}, Threshold=${overdueThreshold}, Overdue=${isOverdue}`);
-    }
 
     return {
       lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
@@ -234,7 +199,6 @@ const CustomerRow = memo(function CustomerRow({
 });
 
 export default function Customers() {
-  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -283,52 +247,36 @@ export default function Customers() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const latestRequestIdRef = useRef(0);
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
 
   useEffect(() => {
     const handler = setTimeout(() => {
-      const startTime = performance.now();
       const trimmed = searchTerm.trim();
 
       if (trimmed !== debouncedSearch) {
-        logWithTime('⏰ [FRONTEND] Debounced Search بدأ - القيمة الأصلية: ' + searchTerm + ' | القيمة المعالجة: ' + trimmed);
-
         setDebouncedSearch(trimmed);
         setCurrentPage(1);
-
-        const endTime = performance.now();
-        logWithTime('🏁 [FRONTEND] Debounced Search انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
       }
-    }, 50); // 50ms للبحث المحلي - سريع!
+    }, DEBOUNCE_DELAY);
 
     return () => clearTimeout(handler);
   }, [searchTerm, debouncedSearch]);
 
   useEffect(() => {
-    logWithTime('🔄 [FRONTEND] تغيير فلتر النوع إلى: ' + filterType);
     setCurrentPage(1);
   }, [filterType]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [columnSearch]);
+
   // State لتخزين كل العملاء (للبحث المحلي)
   const [allCustomers, setAllCustomers] = useState([]);
-  const [customersLoaded, setCustomersLoaded] = useState(false);
 
-  useEffect(() => {
-    // تحميل كل العملاء مرة واحدة فقط
-    if (!customersLoaded) {
-      loadAllCustomers();
-    }
-  }, []);
-
-  const loadAllCustomers = async () => {
-    const startTime = performance.now();
+  const loadAllCustomers = useCallback(async () => {
     try {
-      logWithTime('🚀 [FRONTEND] بدء تحميل كل العملاء من الداتابيز...');
       setLoading(true);
 
       const result = await window.api.getCustomers({
@@ -339,61 +287,35 @@ export default function Customers() {
         overdueThreshold: overdueThreshold // تمرير حد التأخير للإعدادات
       });
 
-      const endTime = performance.now();
-      const duration = (endTime - startTime).toFixed(2);
-
-      logWithTime('📦 [BACKEND] استجابة الداتابيز', result);
-      logWithTime('📊 [BACKEND] عدد العملاء المستلمة: ' + (result.data?.length || 0));
-      logWithTime('⏱️ [FRONTEND] وقت استجابة الداتابيز: ' + duration + 'ms');
-
       if (!result.error) {
         setAllCustomers(result.data || []);
-        setCustomersLoaded(true);
-        logWithTime('✅ [FRONTEND] تم تحميل العملاء بنجاح');
-        // تطبيق الفلترة الحالية
-        applyFilters();
       } else {
-        logErrorWithTime('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
+        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
       }
     } catch (err) {
-      const endTime = performance.now();
-      const duration = (endTime - startTime).toFixed(2);
-      logErrorWithTime('💥 [FRONTEND] استثناء في تحميل العملاء (بعد ' + duration + 'ms):', err);
+      console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
     } finally {
       setLoading(false);
-      const endTime = performance.now();
-      const totalDuration = (endTime - startTime).toFixed(2);
-      logWithTime('🏁 [FRONTEND] انتهاء عملية التحميل - الإجمالي: ' + totalDuration + 'ms');
     }
-  };
+  }, [overdueThreshold]);
 
-  const applyFilters = () => {
-    const startTime = performance.now();
+  useEffect(() => {
+    loadAllCustomers();
+  }, [loadAllCustomers]);
 
-    logWithTime('🔍 [FRONTEND] applyFilters بدأ - البحث: "' + debouncedSearch + '" | النوع: ' + filterType);
-    logWithTime('📊 [FRONTEND] عدد العملاء الأصلي: ' + allCustomers.length);
+  const filteredCustomers = useMemo(() => {
+    let filtered = allCustomers;
 
-    let filtered = [...allCustomers];
-
-    // تطبيق فلتر البحث العالمي
     if (debouncedSearch.trim().length > 0) {
       const searchLower = debouncedSearch.toLowerCase();
-      const searchStartTime = performance.now();
-
       filtered = filtered.filter(customer => {
-        const nameMatch = customer.name.toLowerCase().includes(searchLower);
+        const nameMatch = customer.name?.toLowerCase().includes(searchLower);
         const phoneMatch = customer.phone?.includes(debouncedSearch);
         const cityMatch = customer.city?.toLowerCase().includes(searchLower);
         return nameMatch || phoneMatch || cityMatch;
       });
-
-      const searchEndTime = performance.now();
-      const searchDuration = (searchEndTime - searchStartTime).toFixed(2);
-
-      logWithTime('📈 [FRONTEND] البحث اكتمل - النتائج: ' + filtered.length + ' (استغرق ' + searchDuration + 'ms)');
     }
 
-    // تطبيق فلتر الأعمدة
     const activeColumnFilters = Object.entries(columnSearch).filter(([_, value]) => value && value.trim() !== '');
     if (activeColumnFilters.length > 0) {
       filtered = filtered.filter(customer => {
@@ -412,55 +334,27 @@ export default function Customers() {
       });
     }
 
-    // تطبيق فلتر النوع
     if (filterType && filterType !== 'all') {
-      const beforeTypeFilter = filtered.length;
-      const typeStartTime = performance.now();
-
       filtered = filtered.filter(customer => customer.customerType === filterType);
-
-      const typeEndTime = performance.now();
-      const typeDuration = (typeEndTime - typeStartTime).toFixed(2);
-
-      logWithTime('📊 [FRONTEND] فلترة النوع اكتملت - النتائج: ' + filtered.length + ' من ' + beforeTypeFilter + ' (استغرق ' + typeDuration + 'ms)');
     }
 
-    // تحديث الـ state
-    setCustomers(filtered);
-    setTotalPages(1);
-    setTotalItems(filtered.length);
+    return filtered;
+  }, [allCustomers, debouncedSearch, filterType, columnSearch]);
 
-    const endTime = performance.now();
-    const totalDuration = (endTime - startTime).toFixed(2);
-
-    logWithTime('🎯 [FRONTEND] applyFilters انتهت - النتائج النهائية: ' + filtered.length + ' عميل (الإجمالي: ' + totalDuration + 'ms)');
-  };
+  const totalItems = filteredCustomers.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
 
   useEffect(() => {
-    const startTime = performance.now();
-    logWithTime('🎯 [FRONTEND] useEffect للفلاتر بدأ - هل العملاء محملين؟ ' + customersLoaded);
-    logWithTime('🔍 [FRONTEND] البحث الحالي: "' + debouncedSearch + '" | النوع الحالي: ' + filterType);
-
-    // Step 1: التحقق من تحميل العملاء
-    const step1Time = performance.now();
-    if (customersLoaded && allCustomers.length > 0) {
-      logWithTime('✅ [FRONTEND] Step 1: العملاء محملين - تطبيق الفلاتر (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
-
-      // Step 2: استدعاء applyFilters
-      const step2Time = performance.now();
-      applyFilters();
-      logWithTime('🔧 [FRONTEND] Step 2: تم استدعاء applyFilters (استغرق ' + (step2Time - step1Time).toFixed(2) + 'ms)');
-    } else {
-      logWithTime('⏳ [FRONTEND] Step 1: العملاء لم يتم تحميلهم بعد (استغرق ' + (step1Time - startTime).toFixed(2) + 'ms)');
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
     }
+  }, [currentPage, totalPages]);
 
-    const endTime = performance.now();
-    logWithTime('🏁 [FRONTEND] useEffect للفلاتر انتهى - الإجمالي: ' + (endTime - startTime).toFixed(2) + 'ms');
-  }, [debouncedSearch, filterType, customersLoaded, columnSearch, overdueThreshold]);
-
-  const loadCustomers = async (isBackground = false) => {
-    // هذه الدالة مش هتتستخدم تاني - بنستخدم loadAllCustomers و applyFilters
-  };
+  const paginatedCustomers = useMemo(() => {
+    if (ITEMS_PER_PAGE <= 0) return filteredCustomers;
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredCustomers.slice(start, start + ITEMS_PER_PAGE);
+  }, [currentPage, filteredCustomers]);
 
   const resetCustomerForm = () => {
     setFormData({
@@ -493,7 +387,6 @@ export default function Customers() {
         }
         // تحديث العميل في allCustomers محلياً
         setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
-        setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
         console.log('✅ [FRONTEND] تم تحديث العميل محلياً');
       } else {
         console.log('➕ [FRONTEND] إضافة عميل جديد');
@@ -509,8 +402,6 @@ export default function Customers() {
         const newCustomer = { id: result.id || Date.now(), ...formData };
         setAllCustomers(prev => [...prev, newCustomer]);
         console.log('✅ [FRONTEND] تم إضافة العميل محلياً:', newCustomer);
-        // تطبيق الفلاتر تاني عشان يظهر العميل الجديد
-        applyFilters();
       }
       setShowModal(false);
       resetCustomerForm();
@@ -580,7 +471,6 @@ export default function Customers() {
             console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
             return prev.filter(c => c.id !== id);
           });
-          setCustomers(prev => prev.filter(c => c.id !== id));
           console.log('✅ [FRONTEND] تم حذف العميل محلياً');
           alert('تم الحذف بنجاح');
         }
@@ -647,13 +537,6 @@ export default function Customers() {
             : c
         ));
 
-        // تحديث رصيد العميل في customers (العرض الحالي) مباشرة
-        setCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id
-            ? { ...c, balance: newBalance }
-            : c
-        ));
-
         // clear local paymentData so modal fields reset when closed
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
         console.log('🎉 [FRONTEND] انتهت عملية الدفعة بنجاح');
@@ -672,10 +555,6 @@ export default function Customers() {
     }
   };
 
-  const getTotalDebt = () => {
-    return customers.reduce((sum, customer) => sum + Math.max(0, customer.balance), 0);
-  };
-
   const customerStats = useMemo(() => {
     let vipCount = 0;
     let debtedCount = 0;
@@ -683,7 +562,7 @@ export default function Customers() {
     let totalDebt = 0;
     let overdueCount = 0;
 
-    for (const c of customers) {
+    for (const c of filteredCustomers) {
       if (c.customerType === 'VIP') vipCount += 1;
       if (c.balance > 0) {
         debtedCount += 1;
@@ -701,7 +580,7 @@ export default function Customers() {
     }
 
     return { vipCount, debtedCount, compliantCount, totalDebt, overdueCount };
-  }, [customers, overdueThreshold]);
+  }, [filteredCustomers, overdueThreshold]);
 
   // Auto-focus على مربع الدفع عند فتح الموديل
   useEffect(() => {
@@ -776,7 +655,6 @@ export default function Customers() {
             console.log('📊 [FRONTEND] عدد العملاء قبل الحذف:', beforeDelete, 'بعد الحذف:', afterDelete);
             return prev.filter(c => c.id !== id);
           });
-          setCustomers(prev => prev.filter(c => c.id !== id));
           console.log('✅ [FRONTEND] تم حذف العميل محلياً');
           alert('تم الحذف بنجاح');
         }
@@ -841,12 +719,12 @@ export default function Customers() {
 
   // معالج الأسهم والـ Enter للتنقل في البحث
   const handleSearchKeyDown = (e) => {
-    if (customers.length === 0) return;
+    if (paginatedCustomers.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedSearchIndex(prev => {
-        if (prev < customers.length - 1) {
+        if (prev < paginatedCustomers.length - 1) {
           return prev + 1;
         }
         return prev;
@@ -861,18 +739,18 @@ export default function Customers() {
       });
     } else if (e.key === 'Enter' && selectedSearchIndex >= 0) {
       e.preventDefault();
-      handlePayment(customers[selectedSearchIndex]);
+      handlePayment(paginatedCustomers[selectedSearchIndex]);
     }
   };
 
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
-  }, [searchTerm, filterType]);
+  }, [searchTerm, filterType, debouncedSearch, columnSearch, currentPage]);
 
   // دوال التقارير
   const generateDebtsReport = () => {
-    const debtedCustomers = customers.filter(c => c.balance > 0);
+    const debtedCustomers = filteredCustomers.filter(c => c.balance > 0);
     const totalDebt = debtedCustomers.reduce((sum, c) => sum + c.balance, 0);
 
     const reportData = debtedCustomers.map(c => ({
@@ -898,7 +776,7 @@ export default function Customers() {
   const generateCustomerTypesReport = () => {
     const types = ['عادي', 'VIP', 'تاجر جملة'];
     const reportData = types.map(type => {
-      const typeCustomers = customers.filter(c => c.customerType === type);
+      const typeCustomers = filteredCustomers.filter(c => c.customerType === type);
       const totalBalance = typeCustomers.reduce((sum, c) => sum + c.balance, 0);
       return {
         type,
@@ -910,17 +788,17 @@ export default function Customers() {
 
     return {
       title: 'تقرير تصنيف العملاء',
-      subtitle: `إجمالي العملاء: ${customers.length}`,
+      subtitle: `إجمالي العملاء: ${filteredCustomers.length}`,
       summary: `تحليل حسب نوع العميل`,
       data: reportData,
       columns: ['النوع', 'عدد العملاء', 'إجمالي المديونيات', 'متوسط المديونية'],
-      totals: `إجمالي العملاء: ${customers.length}`
+      totals: `إجمالي العملاء: ${filteredCustomers.length}`
     };
   };
 
   const generateCitiesReport = () => {
     const citiesMap = {};
-    customers.forEach(c => {
+    filteredCustomers.forEach(c => {
       const city = c.city || 'بدون مدينة';
       if (!citiesMap[city]) {
         citiesMap[city] = { count: 0, totalDebt: 0, totalCredit: 0 };
@@ -950,12 +828,12 @@ export default function Customers() {
   };
 
   const generateSelectedCustomersReport = () => {
-    if (customers.length === 0) return null;
+    if (filteredCustomers.length === 0) return null;
 
-    const totalDebt = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
-    const totalCredit = customers.reduce((sum, c) => sum + Math.min(0, -c.balance), 0);
+    const totalDebt = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+    const totalCredit = filteredCustomers.reduce((sum, c) => sum + Math.min(0, -c.balance), 0);
 
-    const reportData = customers.map((c, idx) => ({
+    const reportData = filteredCustomers.map((c, idx) => ({
       no: idx + 1,
       name: c.name,
       type: c.customerType,
@@ -967,7 +845,7 @@ export default function Customers() {
 
     return {
       title: 'تقرير العملاء المختارين',
-      subtitle: `عدد العملاء: ${customers.length}`,
+      subtitle: `عدد العملاء: ${filteredCustomers.length}`,
       summary: `البحث: "${searchTerm}" | النوع: ${filterType === 'all' ? 'الكل' : filterType}`,
       data: reportData,
       columns: ['#', 'الاسم', 'النوع', 'الهاتف', 'المدينة', 'الرصيد', 'الحد الائتماني'],
@@ -976,7 +854,7 @@ export default function Customers() {
   };
 
   const generateTopDebtorsReport = () => {
-    const topDebtors = customers
+    const topDebtors = filteredCustomers
       .filter(c => c.balance > 0)
       .sort((a, b) => b.balance - a.balance)
       .slice(0, 20);
@@ -1003,7 +881,7 @@ export default function Customers() {
   const generateDebtAgingReport = () => {
     // حساب أعمار الديون - نفترض أن كل عميل له آخر فاتورة (سنستخدم بيانات وهمية للآن)
     const today = new Date();
-    const debtedCustomers = customers.filter(c => c.balance > 0);
+    const debtedCustomers = filteredCustomers.filter(c => c.balance > 0);
 
     const agingBuckets = {
       '0-30': [],
@@ -1085,7 +963,7 @@ export default function Customers() {
   };
 
   const generateGoodPayersReport = () => {
-    const goodPayers = customers.filter(c => c.balance <= 0);
+    const goodPayers = filteredCustomers.filter(c => c.balance <= 0);
     const perfectPayers = goodPayers.filter(c => c.balance === 0);
     const advancePayers = goodPayers.filter(c => c.balance < 0);
 
@@ -1122,7 +1000,7 @@ export default function Customers() {
 
       // حساب وهمي للمديونيات (في التطبيق الفعلي تأتي من قاعدة البيانات)
       const variation = Math.sin(i * 0.5) * 1000;
-      const baseDebt = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+      const baseDebt = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
       const monthlyDebt = Math.max(0, baseDebt + variation);
 
       monthlyData.push({
@@ -1133,7 +1011,7 @@ export default function Customers() {
       });
     }
 
-    const currentTotal = customers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
+    const currentTotal = filteredCustomers.reduce((sum, c) => sum + Math.max(0, c.balance), 0);
     const previousTotal = currentTotal * 0.9;
     const monthlyChange = ((currentTotal - previousTotal) / previousTotal * 100).toFixed(1);
 
@@ -1152,7 +1030,7 @@ export default function Customers() {
     // هنا نعرض توليد بيانات وهمية
     const movements = [];
 
-    customers.forEach(customer => {
+    filteredCustomers.forEach(customer => {
       const invoiceCount = Math.floor(Math.random() * 5) + 1;
       const totalInvoices = customer.balance > 0 ? customer.balance + (Math.random() * 500) : Math.random() * 1000;
 
@@ -1188,7 +1066,7 @@ export default function Customers() {
 
   const generatePaymentBehaviorReport = () => {
     // تقرير سلوك الدفع
-    const behaviorData = customers.map(customer => {
+    const behaviorData = filteredCustomers.map(customer => {
       const avgPaymentDays = 15 + Math.floor(Math.random() * 45);
       const delayCount = Math.floor(Math.random() * 5);
       const avgPaymentAmount = customer.balance > 0 ? customer.balance / 2 : Math.random() * 1000;
@@ -1227,7 +1105,7 @@ export default function Customers() {
 
   const generateInactiveCustomersReport = () => {
     // تقرير العملاء غير النشطين
-    const inactiveData = customers.map(customer => {
+    const inactiveData = filteredCustomers.map(customer => {
       const daysInactive = Math.floor(Math.random() * 365);
       const lastInvoiceDate = new Date();
       lastInvoiceDate.setDate(lastInvoiceDate.getDate() - daysInactive);
@@ -1685,7 +1563,7 @@ export default function Customers() {
         </div>
         <div style={{ padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
           <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>نتائج البحث</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{customers.length}</div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{filteredCustomers.length}</div>
         </div>
       </div>
 
@@ -1731,14 +1609,14 @@ export default function Customers() {
             )}
           </thead>
           <tbody>
-            {customers.length === 0 ? (
+            {filteredCustomers.length === 0 ? (
               <tr>
                 <td colSpan="20" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af' }}>
                   لا توجد عملاء مطابقة للبحث
                 </td>
               </tr>
             ) : (
-              customers.map((customer, index) => (
+              paginatedCustomers.map((customer, index) => (
                 <CustomerRow
                   key={customer.id}
                   customer={customer}
@@ -1797,7 +1675,7 @@ export default function Customers() {
         customer={formData}
         onChange={setFormData}
         onSave={saveCustomer}
-        existingCustomers={customers}
+        existingCustomers={allCustomers}
         editingCustomerId={editingCustomer?.id}
         isEditMode={!!editingCustomer}
         onClose={closeCustomerModal}
@@ -1823,7 +1701,7 @@ export default function Customers() {
             customerId={showLedger}
             onClose={() => {
               setShowLedger(null);
-              loadCustomers(true);
+              loadAllCustomers();
             }}
           />
         )
@@ -2172,7 +2050,7 @@ export default function Customers() {
                 >
                   <div style={{ fontWeight: 'bold', color: '#374151', fontSize: '14px' }}>📈 معلومات سريعة</div>
                   <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                    <div>إجمالي العملاء: {customers.length}</div>
+                    <div>إجمالي العملاء: {filteredCustomers.length}</div>
                     <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
                     <div style={{ color: '#dc2626' }}>عملاء متأخرين: {customerStats.overdueCount}</div>
                   </div>

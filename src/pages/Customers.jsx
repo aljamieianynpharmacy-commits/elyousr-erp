@@ -1,17 +1,92 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { FixedSizeList as List, areEqual } from 'react-window';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
+import './Customers.css';
 
 // Utility functions - moved outside component for better performance
-const getCustomerTypeColor = (type) => {
-  const colors = {
-    'عادي': '#6b7280',
-    'VIP': '#f59e0b',
-    'تاجر جملة': '#8b5cf6'
-  };
-  return colors[type] || '#6b7280';
+const ROW_HEIGHT = 56;
+const MAX_LIST_HEIGHT = 520;
+
+const COLUMN_SPECS = {
+  id: { minWidth: 70 },
+  name: { minWidth: 180 },
+  type: { minWidth: 120 },
+  phone: { minWidth: 140 },
+  phone2: { minWidth: 140 },
+  address: { minWidth: 220 },
+  city: { minWidth: 140 },
+  district: { minWidth: 140 },
+  notes: { minWidth: 200 },
+  creditLimit: { minWidth: 140 },
+  balance: { minWidth: 120 },
+  action_ledger: { width: 36 },
+  action_payment: { width: 36 },
+  action_edit: { width: 36 },
+  action_delete: { width: 36 }
+};
+
+const getVisibleColumnOrder = (visibleColumns) => {
+  const order = [];
+  if (visibleColumns.id) order.push('id');
+  if (visibleColumns.name) order.push('name');
+  if (visibleColumns.type) order.push('type');
+  if (visibleColumns.phone) order.push('phone');
+  if (visibleColumns.phone2) order.push('phone2');
+  if (visibleColumns.address) order.push('address');
+  if (visibleColumns.city) order.push('city');
+  if (visibleColumns.district) order.push('district');
+  if (visibleColumns.notes) order.push('notes');
+  if (visibleColumns.creditLimit) order.push('creditLimit');
+  if (visibleColumns.balance) order.push('balance');
+  if (visibleColumns.actions) {
+    order.push('action_ledger', 'action_payment', 'action_edit', 'action_delete');
+  }
+  return order;
+};
+
+const getCustomerTypeClass = (type) => {
+  if (type === 'VIP') return 'customers-type-vip';
+  if (type === 'تاجر جملة') return 'customers-type-wholesale';
+  return 'customers-type-regular';
+};
+
+const getBalanceClass = (balance) => {
+  if (balance > 0) return 'customers-balance-positive';
+  if (balance < 0) return 'customers-balance-negative';
+  return 'customers-balance-zero';
+};
+
+const normalizeSearchValue = (value) => String(value ?? '').toLowerCase().trim();
+
+const buildSearchIndex = (customer) => (
+  [
+    customer.id,
+    customer.name,
+    customer.phone,
+    customer.phone2,
+    customer.city,
+    customer.district,
+    customer.address,
+    customer.notes,
+    customer.customerType
+  ]
+    .filter((value) => value !== undefined && value !== null && value !== '')
+    .map(normalizeSearchValue)
+    .join(' ')
+);
+
+const useDebouncedValue = (value, delayMs) => {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
 };
 
 const formatCurrency = (value) => {
@@ -27,198 +102,370 @@ const formatCurrency = (value) => {
   }
 };
 
-// مكون صف العميل المُحسّن - يتجنب إعادة الرندر غير الضرورية
-const CustomerRow = memo(function CustomerRow({
-  customer,
-  index,
-  isSelected,
-  visibleColumns,
-  overdueThreshold,
-  onShowLedger,
-  onPayment,
-  onEdit,
-  onDelete
-}) {
-  // حساب معلومات آخر دفعة - optimized dependencies
-  const paymentInfo = useMemo(() => {
-    const lastPaymentDays = customer.lastPaymentDays || 0;
-    const isOverdue = customer.isOverdue !== undefined 
-      ? customer.isOverdue 
-      : lastPaymentDays > overdueThreshold;
+const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, style, data }) {
+  const {
+    customers,
+    visibleColumns,
+    selectedIndex,
+    overdueThreshold,
+    onShowLedger,
+    onPayment,
+    onEdit,
+    onDelete
+  } = data;
+  const customer = customers[index];
 
-    return {
-      daysAgo: lastPaymentDays,
-      isOverdue
-    };
-  }, [customer.lastPaymentDays, customer.isOverdue, overdueThreshold]);
+  if (!customer) {
+    return null;
+  }
 
-  const rowBgColor = useMemo(() => 
-    isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb',
-    [isSelected, index]
-  );
+  const isSelected = selectedIndex === index;
+  const lastPaymentDays = customer.lastPaymentDays || 0;
+  const isOverdue = customer.isOverdue !== undefined
+    ? customer.isOverdue
+    : lastPaymentDays > overdueThreshold;
+  const balance = customer.balance || 0;
 
-  const handleMouseEnter = useCallback((e) => {
-    e.currentTarget.style.backgroundColor = '#eff6ff';
-  }, []);
-
-  const handleMouseLeave = useCallback((e) => {
-    e.currentTarget.style.backgroundColor = rowBgColor;
-  }, [rowBgColor]);
+  const rowClassName = [
+    'customers-row',
+    index % 2 === 0 ? 'is-even' : 'is-odd',
+    isSelected ? 'is-selected' : ''
+  ].filter(Boolean).join(' ');
 
   return (
-    <tr
-      style={{
-        borderBottom: '1px solid #e5e7eb',
-        backgroundColor: rowBgColor,
-        transition: 'background-color 0.2s'
-      }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      {visibleColumns.id && <td style={{ padding: '15px' }}>{customer.id}</td>}
+    <div className={rowClassName} style={style} role="row">
+      {visibleColumns.id && <div className="customers-cell" role="cell">{customer.id}</div>}
       {visibleColumns.name && (
-        <td style={{ padding: '15px', fontWeight: 'bold', color: '#1f2937' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
-            {paymentInfo.isOverdue && (
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  backgroundColor: '#dc2626',
-                  cursor: 'pointer',
-                  flexShrink: 0
-                }}
-                title={`🔴 لم يدفع منذ ${paymentInfo.daysAgo} يوم`}
+        <div className="customers-cell customers-name-cell" role="cell">
+          <div className="customers-name-content">
+            {isOverdue && (
+              <span
+                className="customers-overdue-dot"
+                title={`🔴 لم يدفع منذ ${lastPaymentDays} يوم`}
               />
             )}
             <span>{customer.name}</span>
           </div>
-        </td>
+        </div>
       )}
       {visibleColumns.type && (
-        <td style={{ padding: '15px' }}>
-          <span style={{
-            padding: '4px 8px',
-            borderRadius: '12px',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            backgroundColor: getCustomerTypeColor(customer.customerType) + '20',
-            color: getCustomerTypeColor(customer.customerType)
-          }}>
+        <div className="customers-cell" role="cell">
+          <span className={`customers-type-badge ${getCustomerTypeClass(customer.customerType)}`}>
             {customer.customerType}
           </span>
-        </td>
+        </div>
       )}
-      {visibleColumns.phone && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone || '-'}</td>}
-      {visibleColumns.phone2 && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.phone2 || '-'}</td>}
-      {visibleColumns.address && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || '-'}</td>}
-      {visibleColumns.city && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.city || '-'}</td>}
-      {visibleColumns.district && <td style={{ padding: '15px', color: '#6b7280' }}>{customer.district || '-'}</td>}
-      {visibleColumns.notes && <td style={{ padding: '15px', color: '#6b7280', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.notes || '-'}</td>}
-      {visibleColumns.creditLimit && <td style={{ padding: '15px', color: '#6b7280', fontWeight: 'bold' }}>{(customer.creditLimit || 0).toFixed(2)}</td>}
+      {visibleColumns.phone && <div className="customers-cell customers-muted" role="cell">{customer.phone || '-'}</div>}
+      {visibleColumns.phone2 && <div className="customers-cell customers-muted" role="cell">{customer.phone2 || '-'}</div>}
+      {visibleColumns.address && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.address || '-'}</div>}
+      {visibleColumns.city && <div className="customers-cell customers-muted" role="cell">{customer.city || '-'}</div>}
+      {visibleColumns.district && <div className="customers-cell customers-muted" role="cell">{customer.district || '-'}</div>}
+      {visibleColumns.notes && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.notes || '-'}</div>}
+      {visibleColumns.creditLimit && (
+        <div className="customers-cell customers-muted customers-bold" role="cell">
+          {(customer.creditLimit || 0).toFixed(2)}
+        </div>
+      )}
       {visibleColumns.balance && (
-        <td style={{ padding: '15px' }}>
-          <span style={{
-            fontWeight: 'bold',
-            color: (customer.balance || 0) > 0 ? '#ef4444' : (customer.balance || 0) < 0 ? '#10b981' : '#6b7280',
-            padding: '4px 8px',
-            borderRadius: '4px',
-            fontSize: '15px'
-          }}>
-            {(customer.balance || 0).toFixed(2)}
+        <div className="customers-cell" role="cell">
+          <span className={`customers-balance ${getBalanceClass(balance)}`}>
+            {balance.toFixed(2)}
           </span>
-        </td>
+        </div>
       )}
       {visibleColumns.actions && (
-        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+        <div className="customers-cell customers-action-cell" role="cell">
           <button
             onClick={() => onShowLedger(customer.id)}
             title="كشف الحساب"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px',
-              borderRadius: '3px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '24px',
-              height: '24px'
-            }}
+            className="customers-action-button"
           >
             <FileText size={16} color="#0307c9ff" />
           </button>
-        </td>
+        </div>
       )}
       {visibleColumns.actions && (
-        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+        <div className="customers-cell customers-action-cell" role="cell">
           <button
             onClick={() => onPayment(customer)}
             title="تسجيل دفعة"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px',
-              borderRadius: '3px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '24px',
-              height: '24px'
-            }}
+            className="customers-action-button"
           >
             <DollarSign size={16} color="#177400ff" />
           </button>
-        </td>
+        </div>
       )}
       {visibleColumns.actions && (
-        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+        <div className="customers-cell customers-action-cell" role="cell">
           <button
             onClick={() => onEdit(customer)}
             title="تعديل"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px',
-              borderRadius: '3px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '24px',
-              height: '24px'
-            }}
+            className="customers-action-button"
           >
             <Edit2 size={16} color="#f78c00ff" />
           </button>
-        </td>
+        </div>
       )}
       {visibleColumns.actions && (
-        <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+        <div className="customers-cell customers-action-cell" role="cell">
           <button
             onClick={() => onDelete(customer.id)}
             title="حذف"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px',
-              borderRadius: '3px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '24px',
-              height: '24px'
-            }}
+            className="customers-action-button"
           >
             <Trash2 size={16} color="#dc2626" />
           </button>
-        </td>
+        </div>
       )}
-    </tr>
+    </div>
+  );
+}, areEqual);
+
+const CustomersTable = memo(function CustomersTable({
+  customers,
+  visibleColumns,
+  showSearchRow,
+  columnSearch,
+  onColumnSearchChange,
+  selectedIndex,
+  overdueThreshold,
+  onShowLedger,
+  onPayment,
+  onEdit,
+  onDelete,
+  listRef
+}) {
+  const columnOrder = useMemo(() => getVisibleColumnOrder(visibleColumns), [visibleColumns]);
+
+  const gridTemplateColumns = useMemo(() => {
+    if (columnOrder.length === 0) {
+      return '1fr';
+    }
+    return columnOrder.map((key) => {
+      const spec = COLUMN_SPECS[key] || {};
+      if (spec.width) return `${spec.width}px`;
+      const minWidth = spec.minWidth || 120;
+      return `minmax(${minWidth}px, 1fr)`;
+    }).join(' ');
+  }, [columnOrder]);
+
+  const tableMinWidth = useMemo(() => {
+    if (columnOrder.length === 0) return 300;
+    return columnOrder.reduce((sum, key) => {
+      const spec = COLUMN_SPECS[key] || {};
+      return sum + (spec.width || spec.minWidth || 120);
+    }, 0);
+  }, [columnOrder]);
+
+  const listHeight = useMemo(() => {
+    if (customers.length === 0) return ROW_HEIGHT * 2;
+    return Math.min(MAX_LIST_HEIGHT, Math.max(ROW_HEIGHT, customers.length * ROW_HEIGHT));
+  }, [customers.length]);
+
+  const itemData = useMemo(() => ({
+    customers,
+    visibleColumns,
+    selectedIndex,
+    overdueThreshold,
+    onShowLedger,
+    onPayment,
+    onEdit,
+    onDelete
+  }), [customers, visibleColumns, selectedIndex, overdueThreshold, onShowLedger, onPayment, onEdit, onDelete]);
+
+  return (
+    <div className="customers-table-scroll">
+      <div className="customers-table" style={{ '--customers-grid': gridTemplateColumns, minWidth: tableMinWidth }}>
+        <div className="customers-table-header" role="row">
+          {visibleColumns.id && <div className="customers-header-cell" role="columnheader">#</div>}
+          {visibleColumns.name && <div className="customers-header-cell" role="columnheader">الاسم</div>}
+          {visibleColumns.type && <div className="customers-header-cell" role="columnheader">النوع</div>}
+          {visibleColumns.phone && <div className="customers-header-cell" role="columnheader">الهاتف</div>}
+          {visibleColumns.phone2 && <div className="customers-header-cell" role="columnheader">الهاتف 2</div>}
+          {visibleColumns.address && <div className="customers-header-cell" role="columnheader">العنوان</div>}
+          {visibleColumns.city && <div className="customers-header-cell" role="columnheader">المدينة</div>}
+          {visibleColumns.district && <div className="customers-header-cell" role="columnheader">المنطقة</div>}
+          {visibleColumns.notes && <div className="customers-header-cell" role="columnheader">الملاحظات</div>}
+          {visibleColumns.creditLimit && <div className="customers-header-cell" role="columnheader">الحد الائتماني</div>}
+          {visibleColumns.balance && <div className="customers-header-cell" role="columnheader">الرصيد</div>}
+          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">عرض</div>}
+          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">دفع</div>}
+          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">تعديل</div>}
+          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">حذف</div>}
+        </div>
+
+        {showSearchRow && (
+          <div className="customers-table-search" role="row">
+            {visibleColumns.id && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.id || ''}
+                  onChange={(e) => onColumnSearchChange('id', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.name && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.name || ''}
+                  onChange={(e) => onColumnSearchChange('name', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.type && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.type || ''}
+                  onChange={(e) => onColumnSearchChange('type', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.phone && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.phone || ''}
+                  onChange={(e) => onColumnSearchChange('phone', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.phone2 && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.phone2 || ''}
+                  onChange={(e) => onColumnSearchChange('phone2', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.address && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.address || ''}
+                  onChange={(e) => onColumnSearchChange('address', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.city && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.city || ''}
+                  onChange={(e) => onColumnSearchChange('city', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.district && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.district || ''}
+                  onChange={(e) => onColumnSearchChange('district', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.notes && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.notes || ''}
+                  onChange={(e) => onColumnSearchChange('notes', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.creditLimit && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.creditLimit || ''}
+                  onChange={(e) => onColumnSearchChange('creditLimit', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.balance && (
+              <div className="customers-search-cell">
+                <input
+                  className="customers-search-input"
+                  placeholder="بحث..."
+                  value={columnSearch.balance || ''}
+                  onChange={(e) => onColumnSearchChange('balance', e.target.value)}
+                />
+              </div>
+            )}
+            {visibleColumns.actions && <div className="customers-search-cell" />}
+            {visibleColumns.actions && <div className="customers-search-cell" />}
+            {visibleColumns.actions && <div className="customers-search-cell" />}
+            {visibleColumns.actions && <div className="customers-search-cell" />}
+          </div>
+        )}
+
+        {customers.length === 0 ? (
+          <div className="customers-empty">لا توجد عملاء مطابقة للبحث</div>
+        ) : (
+          <List
+            ref={listRef}
+            className="customers-list"
+            height={listHeight}
+            itemCount={customers.length}
+            itemSize={ROW_HEIGHT}
+            width="100%"
+            itemData={itemData}
+            overscanCount={6}
+            itemKey={(index, data) => data.customers[index]?.id ?? index}
+          >
+            {VirtualizedCustomerRow}
+          </List>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const CustomersQuickStats = memo(function CustomersQuickStats({
+  totalCount,
+  vipCount,
+  overdueCount,
+  overdueThreshold,
+  filteredCount
+}) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginBottom: '20px' }}>
+      <div style={{ padding: '15px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>إجمالي العملاء</div>
+        <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>{totalCount}</div>
+      </div>
+      <div style={{ padding: '15px', backgroundColor: '#fffbeb', borderRadius: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>عملاء VIP</div>
+        <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#f59e0b' }}>
+          {vipCount}
+        </div>
+      </div>
+      <div style={{ padding: '15px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center', border: '1px solid #fee2e2' }}>
+        <div style={{ fontSize: '12px', color: '#991b1b', marginBottom: '5px' }}>🔴 عملاء متأخرين</div>
+        <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#dc2626' }}>
+          {overdueCount}
+        </div>
+        <div style={{ fontSize: '10px', color: '#ef4444' }}>مضى {overdueThreshold} يوم</div>
+      </div>
+      <div style={{ padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>نتائج البحث</div>
+        <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{filteredCount}</div>
+      </div>
+    </div>
   );
 });
 
@@ -233,6 +480,7 @@ export default function Customers() {
   const [filterType, setFilterType] = useState('all'); // all, VIP, عادي, تاجر جملة
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
   const paymentInputRef = useRef(null);
+  const listRef = useRef(null);
   const [showReports, setShowReports] = useState(false);
   const [selectedReportType, setSelectedReportType] = useState('debts');
   const [visibleColumns, setVisibleColumns] = useState({
@@ -271,22 +519,13 @@ export default function Customers() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
+  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 250);
 
   useEffect(() => {
-    const handler = setTimeout(() => {
-      const trimmed = searchTerm.trim();
-
-      if (trimmed !== debouncedSearch) {
-        setDebouncedSearch(trimmed);
-        setCurrentPage(1);
-      }
-    }, 150);
-
-    return () => clearTimeout(handler);
-  }, [searchTerm, debouncedSearch]);
+    setCurrentPage(1);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -323,43 +562,50 @@ export default function Customers() {
     loadAllCustomers();
   }, [loadAllCustomers]);
 
-  const filteredCustomers = useMemo(() => {
-    let filtered = allCustomers;
+  const indexedCustomers = useMemo(() => (
+    allCustomers.map((customer) => ({
+      ...customer,
+      _search: buildSearchIndex(customer)
+    }))
+  ), [allCustomers]);
 
-    if (debouncedSearch.trim().length > 0) {
-      const searchLower = debouncedSearch.toLowerCase();
-      filtered = filtered.filter(customer => {
-        const nameMatch = customer.name?.toLowerCase().includes(searchLower);
-        const phoneMatch = customer.phone?.includes(debouncedSearch);
-        const cityMatch = customer.city?.toLowerCase().includes(searchLower);
-        return nameMatch || phoneMatch || cityMatch;
-      });
+  const normalizedSearch = useMemo(() => normalizeSearchValue(debouncedSearch), [debouncedSearch]);
+
+  const activeColumnFilters = useMemo(() => (
+    Object.entries(columnSearch)
+      .filter(([, value]) => value && value.trim() !== '')
+      .map(([key, value]) => [key, normalizeSearchValue(value)])
+  ), [columnSearch]);
+
+  const filteredCustomers = useMemo(() => {
+    let filtered = indexedCustomers;
+
+    if (normalizedSearch.length > 0) {
+      filtered = filtered.filter((customer) => customer._search.includes(normalizedSearch));
     }
 
-    const activeColumnFilters = Object.entries(columnSearch).filter(([_, value]) => value && value.trim() !== '');
     if (activeColumnFilters.length > 0) {
-      filtered = filtered.filter(customer => {
-        return activeColumnFilters.every(([key, value]) => {
+      filtered = filtered.filter((customer) => (
+        activeColumnFilters.every(([key, value]) => {
           if (!value) return true;
-          const searchValue = value.toLowerCase();
           let itemValue = '';
 
           if (key === 'type') itemValue = customer.customerType || '';
-          else if (key === 'balance') itemValue = (customer.balance || 0).toString();
-          else if (key === 'creditLimit') itemValue = (customer.creditLimit || 0).toString();
+          else if (key === 'balance') itemValue = customer.balance || 0;
+          else if (key === 'creditLimit') itemValue = customer.creditLimit || 0;
           else itemValue = customer[key] || '';
 
-          return String(itemValue).toLowerCase().includes(searchValue);
-        });
-      });
+          return normalizeSearchValue(itemValue).includes(value);
+        })
+      ));
     }
 
     if (filterType && filterType !== 'all') {
-      filtered = filtered.filter(customer => customer.customerType === filterType);
+      filtered = filtered.filter((customer) => customer.customerType === filterType);
     }
 
     return filtered;
-  }, [allCustomers, debouncedSearch, filterType, columnSearch]);
+  }, [indexedCustomers, normalizedSearch, filterType, activeColumnFilters]);
 
   const totalItems = filteredCustomers.length;
   const totalPages = 1;
@@ -548,6 +794,11 @@ export default function Customers() {
     return { vipCount, debtedCount, compliantCount, totalDebt, overdueCount };
   }, [filteredCustomers, overdueThreshold]);
 
+  const overduePreviewCount = useMemo(
+    () => allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length,
+    [allCustomers, tempThreshold]
+  );
+
   // Auto-focus على مربع الدفع عند فتح الموديل
   useEffect(() => {
     if (showPaymentModal && paymentInputRef.current) {
@@ -606,22 +857,22 @@ export default function Customers() {
   }, []);
 
   // البحث والفلترة
-  const handleColumnSearchChange = (field, value) => {
+  const handleColumnSearchChange = useCallback((field, value) => {
     setColumnSearch(prev => ({
       ...prev,
       [field]: value
     }));
-  };
+  }, []);
 
-  const toggleColumn = (column) => {
+  const toggleColumn = useCallback((column) => {
     setVisibleColumns(prev => ({
       ...prev,
       [column]: !prev[column]
     }));
-  };
+  }, []);
 
   // معالج الأسهم والـ Enter للتنقل في البحث
-  const handleSearchKeyDown = (e) => {
+  const handleSearchKeyDown = useCallback((e) => {
     if (filteredCustomers.length === 0) return;
 
     if (e.key === 'ArrowDown') {
@@ -642,14 +893,20 @@ export default function Customers() {
       });
     } else if (e.key === 'Enter' && selectedSearchIndex >= 0) {
       e.preventDefault();
-      handlePayment(filteredCustomers[selectedSearchIndex]);
+      handlePaymentCallback(filteredCustomers[selectedSearchIndex]);
     }
-  };
+  }, [filteredCustomers, selectedSearchIndex, handlePaymentCallback]);
 
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
   }, [searchTerm, filterType, debouncedSearch, columnSearch]);
+
+  useEffect(() => {
+    if (selectedSearchIndex >= 0 && listRef.current) {
+      listRef.current.scrollToItem(selectedSearchIndex, 'smart');
+    }
+  }, [selectedSearchIndex]);
 
   // دوال التقارير
   const generateDebtsReport = () => {
@@ -1380,27 +1637,11 @@ export default function Customers() {
               maxHeight: '400px',
               overflowY: 'auto'
             }}>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '10px 12px',
-                cursor: 'pointer',
-                gap: '10px',
-                borderBottom: '1px solid #f3f4f6',
-                marginBottom: '5px',
-                fontWeight: 'bold',
-                color: '#3b82f6',
-                borderRadius: '8px',
-                transition: 'background-color 0.2s',
-              }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-              >
+              <label className="customers-column-toggle customers-column-toggle-primary">
                 <input
                   type="checkbox"
                   checked={showSearchRow}
                   onChange={(e) => setShowSearchRow(e.target.checked)}
-                  style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#3b82f6' }}
                 />
                 <span>🔍 إظهار صف البحث</span>
               </label>
@@ -1417,25 +1658,11 @@ export default function Customers() {
                 creditLimit: 'الحد الائتماني',
                 balance: 'الرصيد',
               }).map(([key, label]) => (
-                <label key={key} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  gap: '10px',
-                  borderRadius: '8px',
-                  transition: 'background-color 0.2s',
-                  color: '#374151',
-                  fontSize: '14px'
-                }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
+                <label key={key} className="customers-column-toggle">
                   <input
                     type="checkbox"
                     checked={visibleColumns[key] || false}
                     onChange={() => toggleColumn(key)}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#3b82f6' }}
                   />
                   <span>{label}</span>
                 </label>
@@ -1446,98 +1673,29 @@ export default function Customers() {
       </div>
 
       {/* إحصائيات سريعة */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginBottom: '20px' }}>
-        <div style={{ padding: '15px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>إجمالي العملاء</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>{allCustomers.length}</div>
-        </div>
-        <div style={{ padding: '15px', backgroundColor: '#fffbeb', borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>عملاء VIP</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#f59e0b' }}>
-            {customerStats.vipCount}
-          </div>
-        </div>
-        <div style={{ padding: '15px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center', border: '1px solid #fee2e2' }}>
-          <div style={{ fontSize: '12px', color: '#991b1b', marginBottom: '5px' }}>🔴 عملاء متأخرين</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#dc2626' }}>
-            {customerStats.overdueCount}
-          </div>
-          <div style={{ fontSize: '10px', color: '#ef4444' }}>مضى {overdueThreshold} يوم</div>
-        </div>
-        <div style={{ padding: '15px', backgroundColor: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '5px' }}>نتائج البحث</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>{filteredCustomers.length}</div>
-        </div>
-      </div>
+      <CustomersQuickStats
+        totalCount={allCustomers.length}
+        vipCount={customerStats.vipCount}
+        overdueCount={customerStats.overdueCount}
+        overdueThreshold={overdueThreshold}
+        filteredCount={filteredCustomers.length}
+      />
 
-      <div className="card" style={{ padding: 0, overflow: 'auto', borderRadius: '8px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white' }}>
-          <thead style={{ backgroundColor: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
-            <tr>
-              {visibleColumns.id && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>#</th>}
-              {visibleColumns.name && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الاسم</th>}
-              {visibleColumns.type && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>النوع</th>}
-              {visibleColumns.phone && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الهاتف</th>}
-              {visibleColumns.phone2 && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الهاتف 2</th>}
-              {visibleColumns.address && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>العنوان</th>}
-              {visibleColumns.city && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>المدينة</th>}
-              {visibleColumns.district && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>المنطقة</th>}
-              {visibleColumns.notes && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الملاحظات</th>}
-              {visibleColumns.creditLimit && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الحد الائتماني</th>}
-              {visibleColumns.balance && <th style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#374151' }}>الرصيد</th>}
-              {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>عرض</th>}
-              {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>دفع</th>}
-              {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>تعديل</th>}
-              {visibleColumns.actions && <th style={{ padding: '4px 6px', textAlign: 'center', width: '36px' }}>حذف</th>}
-            </tr>
-            {/* صف البحث */}
-            {showSearchRow && (
-              <tr style={{ backgroundColor: '#f3f4f6' }}>
-                {visibleColumns.id && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.id || ''} onChange={(e) => handleColumnSearchChange('id', e.target.value)} /></th>}
-                {visibleColumns.name && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.name || ''} onChange={(e) => handleColumnSearchChange('name', e.target.value)} /></th>}
-                {visibleColumns.type && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.type || ''} onChange={(e) => handleColumnSearchChange('type', e.target.value)} /></th>}
-                {visibleColumns.phone && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.phone || ''} onChange={(e) => handleColumnSearchChange('phone', e.target.value)} /></th>}
-                {visibleColumns.phone2 && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.phone2 || ''} onChange={(e) => handleColumnSearchChange('phone2', e.target.value)} /></th>}
-                {visibleColumns.address && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.address || ''} onChange={(e) => handleColumnSearchChange('address', e.target.value)} /></th>}
-                {visibleColumns.city && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.city || ''} onChange={(e) => handleColumnSearchChange('city', e.target.value)} /></th>}
-                {visibleColumns.district && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.district || ''} onChange={(e) => handleColumnSearchChange('district', e.target.value)} /></th>}
-                {visibleColumns.notes && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.notes || ''} onChange={(e) => handleColumnSearchChange('notes', e.target.value)} /></th>}
-                {visibleColumns.creditLimit && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.creditLimit || ''} onChange={(e) => handleColumnSearchChange('creditLimit', e.target.value)} /></th>}
-                {visibleColumns.balance && <th style={{ padding: '5px' }}><input style={{ width: '100%', padding: '4px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px' }} placeholder="بحث..." value={columnSearch.balance || ''} onChange={(e) => handleColumnSearchChange('balance', e.target.value)} /></th>}
-                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
-                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
-                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
-                {visibleColumns.actions && <th style={{ padding: '5px' }}></th>}
-              </tr>
-            )}
-          </thead>
-          <tbody>
-            {filteredCustomers.length === 0 ? (
-              <tr>
-                <td colSpan="20" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af' }}>
-                  لا توجد عملاء مطابقة للبحث
-                </td>
-              </tr>
-            ) : (
-              filteredCustomers.map((customer, index) => (
-                <CustomerRow
-                  key={customer.id}
-                  customer={customer}
-                  index={index}
-                  isSelected={selectedSearchIndex === index}
-                  visibleColumns={visibleColumns}
-                  overdueThreshold={overdueThreshold}
-                  onShowLedger={handleShowLedger}
-                  onPayment={handlePaymentCallback}
-                  onEdit={handleEditCallback}
-                  onDelete={handleDeleteCallback}
-                  getCustomerTypeColor={getCustomerTypeColor}
-                  formatCurrency={formatCurrency}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="card customers-table-card">
+        <CustomersTable
+          customers={filteredCustomers}
+          visibleColumns={visibleColumns}
+          showSearchRow={showSearchRow}
+          columnSearch={columnSearch}
+          onColumnSearchChange={handleColumnSearchChange}
+          selectedIndex={selectedSearchIndex}
+          overdueThreshold={overdueThreshold}
+          onShowLedger={handleShowLedger}
+          onPayment={handlePaymentCallback}
+          onEdit={handleEditCallback}
+          onDelete={handleDeleteCallback}
+          listRef={listRef}
+        />
       </div>
 
       {/* Pagination Controls */}
@@ -1651,26 +1809,10 @@ export default function Customers() {
                     printReport('debts');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#fee2e2',
-                    border: '2px solid #dc2626',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fecaca';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fee2e2';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-debts"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>💳 تقرير المديونيات</div>
-                  <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '5px' }}>عملاء مدينين بفترات</div>
+                  <div className="report-title">💳 تقرير المديونيات</div>
+                  <div className="report-subtitle">عملاء مدينين بفترات</div>
                 </button>
 
                 <button
@@ -1678,26 +1820,10 @@ export default function Customers() {
                     printReport('topDebtors');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#fef3c7',
-                    border: '2px solid #f59e0b',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fde68a';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fef3c7';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-top-debtors"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#f59e0b', fontSize: '16px' }}>🏆 أكبر المدينين</div>
-                  <div style={{ fontSize: '12px', color: '#92400e', marginTop: '5px' }}>أكبر 20 عميل مدين</div>
+                  <div className="report-title">🏆 أكبر المدينين</div>
+                  <div className="report-subtitle">أكبر 20 عميل مدين</div>
                 </button>
 
                 <button
@@ -1705,26 +1831,10 @@ export default function Customers() {
                     printReport('types');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#dbeafe',
-                    border: '2px solid #2563eb',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#bfdbfe';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#dbeafe';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-types"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#2563eb', fontSize: '16px' }}>📋 تصنيف العملاء</div>
-                  <div style={{ fontSize: '12px', color: '#1e40af', marginTop: '5px' }}>عادي / VIP / جملة</div>
+                  <div className="report-title">📋 تصنيف العملاء</div>
+                  <div className="report-subtitle">عادي / VIP / جملة</div>
                 </button>
 
                 <button
@@ -1732,26 +1842,10 @@ export default function Customers() {
                     printReport('cities');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#d1fae5',
-                    border: '2px solid #10b981',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#a7f3d0';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#d1fae5';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-cities"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '16px' }}>🗺️ التوزيع الجغرافي</div>
-                  <div style={{ fontSize: '12px', color: '#065f46', marginTop: '5px' }}>العملاء حسب المدينة</div>
+                  <div className="report-title">🗺️ التوزيع الجغرافي</div>
+                  <div className="report-subtitle">العملاء حسب المدينة</div>
                 </button>
 
                 <button
@@ -1759,26 +1853,10 @@ export default function Customers() {
                     printReport('selected');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#e9d5ff',
-                    border: '2px solid #a855f7',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#d8b4fe';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#e9d5ff';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-selected"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#a855f7', fontSize: '16px' }}>🔍 التقرير المخصص</div>
-                  <div style={{ fontSize: '12px', color: '#581c87', marginTop: '5px' }}>بناءً على البحث الحالي</div>
+                  <div className="report-title">🔍 التقرير المخصص</div>
+                  <div className="report-subtitle">بناءً على البحث الحالي</div>
                 </button>
 
                 <button
@@ -1786,26 +1864,10 @@ export default function Customers() {
                     printReport('aging');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#fecdd3',
-                    border: '2px solid #f43f5e',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fbcfe8';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fecdd3';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-aging"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#f43f5e', fontSize: '16px' }}>⏳ أعمار الديون</div>
-                  <div style={{ fontSize: '12px', color: '#be123c', marginTop: '5px' }}>0-30 / 31-60 / +90 يوم</div>
+                  <div className="report-title">⏳ أعمار الديون</div>
+                  <div className="report-subtitle">0-30 / 31-60 / +90 يوم</div>
                 </button>
 
                 <button
@@ -1813,26 +1875,10 @@ export default function Customers() {
                     printReport('goodPayers');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#d1f2eb',
-                    border: '2px solid #14b8a6',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#99f6e4';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#d1f2eb';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-good-payers"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#14b8a6', fontSize: '16px' }}>💸 العملاء الملتزمون</div>
-                  <div style={{ fontSize: '12px', color: '#0d9488', marginTop: '5px' }}>صفر دين أو دفعات مقدمة</div>
+                  <div className="report-title">💸 العملاء الملتزمون</div>
+                  <div className="report-subtitle">صفر دين أو دفعات مقدمة</div>
                 </button>
 
                 <button
@@ -1840,26 +1886,10 @@ export default function Customers() {
                     printReport('trend');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#fef08a',
-                    border: '2px solid #eab308',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#facc15';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fef08a';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-trend"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#eab308', fontSize: '16px' }}>📈 تطور المديونية</div>
-                  <div style={{ fontSize: '12px', color: '#a16207', marginTop: '5px' }}>12 شهر الأخيرة</div>
+                  <div className="report-title">📈 تطور المديونية</div>
+                  <div className="report-subtitle">12 شهر الأخيرة</div>
                 </button>
 
                 <button
@@ -1867,26 +1897,10 @@ export default function Customers() {
                     printReport('movements');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#e0e7ff',
-                    border: '2px solid #6366f1',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#c7d2fe';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#e0e7ff';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-movements"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#6366f1', fontSize: '16px' }}>🧾 الحركات المالية</div>
-                  <div style={{ fontSize: '12px', color: '#3730a3', marginTop: '5px' }}>فواتير و دفعات</div>
+                  <div className="report-title">🧾 الحركات المالية</div>
+                  <div className="report-subtitle">فواتير و دفعات</div>
                 </button>
 
                 <button
@@ -1894,26 +1908,10 @@ export default function Customers() {
                     printReport('behavior');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#fda29b',
-                    border: '2px solid #ff6b6b',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fd8c7a';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#fda29b';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-behavior"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#ff6b6b', fontSize: '16px' }}>🧠 سلوك الدفع</div>
-                  <div style={{ fontSize: '12px', color: '#c92a2a', marginTop: '5px' }}>ملتزم / متوسط / متأخر</div>
+                  <div className="report-title">🧠 سلوك الدفع</div>
+                  <div className="report-subtitle">ملتزم / متوسط / متأخر</div>
                 </button>
 
                 <button
@@ -1921,26 +1919,10 @@ export default function Customers() {
                     printReport('inactive');
                     setShowReports(false);
                   }}
-                  style={{
-                    padding: '15px',
-                    backgroundColor: '#d7d7d7',
-                    border: '2px solid #737373',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    textAlign: 'right',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#c4c4c4';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#d7d7d7';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
+                  className="report-card report-inactive"
                 >
-                  <div style={{ fontWeight: 'bold', color: '#737373', fontSize: '16px' }}>🎯 العملاء غير النشطين</div>
-                  <div style={{ fontSize: '12px', color: '#525252', marginTop: '5px' }}>30+ يوم بلا حركة</div>
+                  <div className="report-title">🎯 العملاء غير النشطين</div>
+                  <div className="report-subtitle">30+ يوم بلا حركة</div>
                 </button>
 
                 <div
@@ -2059,7 +2041,7 @@ export default function Customers() {
                   <div>• إجمالي العملاء: <strong>{allCustomers.length}</strong></div>
                   <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
                   <div style={{ marginTop: '8px', color: '#dc2626', fontWeight: 'bold' }}>
-                    • عملاء متأخرين الآن: <strong>{allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length}</strong>
+                    • عملاء متأخرين الآن: <strong>{overduePreviewCount}</strong>
                   </div>
                   <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
                 </div>

@@ -30,7 +30,7 @@ export default function NewCustomerModal({
 
   // تحديث التحقق من تطابق الاسم
   useEffect(() => {
-    if (customer.name && Array.isArray(existingCustomers) && existingCustomers.length > 0) {
+    if (customer && customer.name && Array.isArray(existingCustomers) && existingCustomers.length > 0) {
       const normalizedInputName = customer.name.trim().toLowerCase();
 
       // فقط تنبيه exact match بدون اقتراحات
@@ -59,9 +59,9 @@ export default function NewCustomerModal({
     } else {
       setDuplicateNameError("");
     }
-  }, [customer.name, existingCustomers, editingCustomerId, isEditMode]);
+  }, [customer?.name, existingCustomers, editingCustomerId, isEditMode]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !customer) return null;
 
   const handlePhoneChange = (value) => {
     onChange({ ...customer, phone: value });

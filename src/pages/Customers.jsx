@@ -37,29 +37,33 @@ const CustomerRow = memo(function CustomerRow({
   onShowLedger,
   onPayment,
   onEdit,
-  onDelete,
-  getCustomerTypeColor,
-  formatCurrency
+  onDelete
 }) {
-  // حساب معلومات آخر دفعة
+  // حساب معلومات آخر دفعة - optimized dependencies
   const paymentInfo = useMemo(() => {
     const lastPaymentDays = customer.lastPaymentDays || 0;
-    const lastPaymentDate = new Date();
-    lastPaymentDate.setDate(lastPaymentDate.getDate() - lastPaymentDays);
-
-    // استخدام قيمة الباك اند إذا وجدت، وإلا الحساب المحلي
-    const isOverdue = customer.isOverdue !== undefined ? customer.isOverdue : lastPaymentDays > overdueThreshold;
-    const lastOperationType = customer.lastOperationType || 'فاتورة';
+    const isOverdue = customer.isOverdue !== undefined 
+      ? customer.isOverdue 
+      : lastPaymentDays > overdueThreshold;
 
     return {
-      lastPaymentDate: lastPaymentDate.toLocaleDateString('ar-EG'),
       daysAgo: lastPaymentDays,
-      operationType: lastOperationType,
-      isOverdue: isOverdue
+      isOverdue
     };
-  }, [customer.lastPaymentDays, customer.isOverdue, customer.lastOperationType, overdueThreshold, index, customer.name]);
+  }, [customer.lastPaymentDays, customer.isOverdue, overdueThreshold]);
 
-  const rowBgColor = isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb';
+  const rowBgColor = useMemo(() => 
+    isSelected ? '#dbeafe' : index % 2 === 0 ? 'white' : '#f9fafb',
+    [isSelected, index]
+  );
+
+  const handleMouseEnter = useCallback((e) => {
+    e.currentTarget.style.backgroundColor = '#eff6ff';
+  }, []);
+
+  const handleMouseLeave = useCallback((e) => {
+    e.currentTarget.style.backgroundColor = rowBgColor;
+  }, [rowBgColor]);
 
   return (
     <tr
@@ -68,8 +72,8 @@ const CustomerRow = memo(function CustomerRow({
         backgroundColor: rowBgColor,
         transition: 'background-color 0.2s'
       }}
-      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#eff6ff'}
-      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = rowBgColor}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {visibleColumns.id && <td style={{ padding: '15px' }}>{customer.id}</td>}
       {visibleColumns.name && (

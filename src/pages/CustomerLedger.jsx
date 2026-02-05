@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-export default function CustomerLedger({ customerId, onClose }) {
+export default function CustomerLedger({ customerId, onClose, onDataChanged }) {
     const [customer, setCustomer] = useState(null);
     const [sales, setSales] = useState([]);
     const [returns, setReturns] = useState([]);
@@ -564,6 +564,7 @@ export default function CustomerLedger({ customerId, onClose }) {
                                                                         } else {
                                                                             alert('✅ تم حذف الفاتورة بنجاح');
                                                                             loadCustomerData();
+                                                                            onDataChanged && onDataChanged(); // إشعار الصفحة الرئيسية بالتغيير
                                                                         }
                                                                     }).catch(err => {
                                                                         alert('خطأ في الحذف: ' + err.message);
@@ -611,6 +612,7 @@ export default function CustomerLedger({ customerId, onClose }) {
                                                                         } else {
                                                                             alert('✅ تم حذف الدفعة بنجاح');
                                                                             loadCustomerData();
+                                                                            onDataChanged && onDataChanged(); // إشعار الصفحة الرئيسية بالتغيير
                                                                         }
                                                                     }).catch(err => {
                                                                         alert('خطأ في الحذف: ' + err.message);

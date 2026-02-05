@@ -1682,6 +1682,10 @@ export default function Customers() {
             customerId={showLedger}
             onClose={() => {
               setShowLedger(null);
+              // لا نحتاج loadAllCustomers() هنا بعد الآن
+            }}
+            onDataChanged={() => {
+              // يتم استدعاؤها فقط عند حذف أو تعديل معاملات
               loadAllCustomers();
             }}
           />

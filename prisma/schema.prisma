@@ -110,6 +110,10 @@ model Customer {
   district     String?
   notes        String?
   creditLimit  Float    @default(0)
+  balance      Float    @default(0)
+  firstActivityDate DateTime?
+  lastPaymentDate   DateTime?
+  financialsUpdatedAt DateTime?
   customerType String   @default("عادي")
   rating       Float    @default(0)
   createdAt    DateTime @default(now())
@@ -123,6 +127,7 @@ model Customer {
   @@index([phone])
   @@index([city])
   @@index([customerType])
+  @@index([financialsUpdatedAt])
 }
 
 model CustomerTransaction {
@@ -176,6 +181,9 @@ model Sale {
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items       SaleItem[]
   returns     Return[]
+
+  @@index([customerId])
+  @@index([customerId, invoiceDate])
 }
 
 model SaleItem {
@@ -246,6 +254,9 @@ model CustomerPayment {
 
   customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([customerId])
+  @@index([customerId, paymentDate])
 }
 
 /* =========================

@@ -5,6 +5,185 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
+const DEBUG_CUSTOMERS_QUERIES = process.env.DEBUG_CUSTOMERS_QUERIES === '1';
+
+const customerQueryLog = (...args) => {
+    if (DEBUG_CUSTOMERS_QUERIES) {
+        console.log(...args);
+    }
+};
+
+let ensureCustomerFinancialSchemaPromise = null;
+const ensureCustomerFinancialSchema = async () => {
+    if (!ensureCustomerFinancialSchemaPromise) {
+        ensureCustomerFinancialSchemaPromise = (async () => {
+            try {
+                await Promise.all([
+                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "balance" DOUBLE PRECISION NOT NULL DEFAULT 0'),
+                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "firstActivityDate" TIMESTAMP(3)'),
+                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "lastPaymentDate" TIMESTAMP(3)'),
+                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "financialsUpdatedAt" TIMESTAMP(3)')
+                ]);
+                await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_financials_updated_at ON "Customer" ("financialsUpdatedAt")');
+            } catch (error) {
+                console.warn('Customer financial schema setup failed:', error?.message || error);
+            }
+        })();
+    }
+    return ensureCustomerFinancialSchemaPromise;
+};
+
+let ensureCustomerQueryIndexesPromise = null;
+const ensureCustomerQueryIndexes = async () => {
+    await ensureCustomerFinancialSchema();
+
+    if (!ensureCustomerQueryIndexesPromise) {
+        ensureCustomerQueryIndexesPromise = (async () => {
+            try {
+                await Promise.all([
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_transaction_customer_id ON "CustomerTransaction" ("customerId")'),
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_transaction_customer_date ON "CustomerTransaction" ("customerId", "date")'),
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_payment_customer_id ON "CustomerPayment" ("customerId")'),
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_payment_customer_date ON "CustomerPayment" ("customerId", "paymentDate")'),
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_sale_customer_id ON "Sale" ("customerId")'),
+                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_sale_customer_invoice_date ON "Sale" ("customerId", "invoiceDate")')
+                ]);
+            } catch (error) {
+                console.warn('Customer query index setup failed:', error?.message || error);
+            }
+        })();
+    }
+    return ensureCustomerQueryIndexesPromise;
+};
+
+const toValidDate = (value) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isFinite(date.getTime()) ? date : null;
+};
+
+const pickEarlierDate = (a, b) => {
+    const da = toValidDate(a);
+    const db = toValidDate(b);
+    if (da && db) return da < db ? da : db;
+    return da || db || null;
+};
+
+const computeCustomerPaymentStatus = (firstActivityDate, lastPaymentDate, overdueThreshold) => {
+    const start = toValidDate(firstActivityDate);
+    const lastPayment = toValidDate(lastPaymentDate);
+    const referenceDate = lastPayment || start;
+    if (!referenceDate) {
+        return { lastPaymentDays: 0, isOverdue: false };
+    }
+    const diffTime = Math.max(0, Date.now() - referenceDate.getTime());
+    const lastPaymentDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return {
+        lastPaymentDays,
+        isOverdue: lastPaymentDays > overdueThreshold
+    };
+};
+
+const syncCustomerFinancialSummaries = async (txOrClient, customerIds = []) => {
+    await ensureCustomerFinancialSchema();
+
+    const ids = [...new Set(
+        customerIds
+            .map((id) => parseInt(id, 10))
+            .filter((id) => Number.isFinite(id) && id > 0),
+    )];
+
+    if (ids.length === 0) return new Map();
+
+    const [balances, paymentStats, saleStats] = await Promise.all([
+        txOrClient.customerTransaction.groupBy({
+            by: ['customerId'],
+            _sum: {
+                debit: true,
+                credit: true
+            },
+            where: {
+                customerId: { in: ids }
+            }
+        }),
+        txOrClient.customerPayment.groupBy({
+            by: ['customerId'],
+            _max: { paymentDate: true },
+            _min: { paymentDate: true },
+            where: { customerId: { in: ids } }
+        }),
+        txOrClient.sale.groupBy({
+            by: ['customerId'],
+            _min: { invoiceDate: true },
+            where: { customerId: { in: ids } }
+        })
+    ]);
+
+    const balanceMap = new Map();
+    balances.forEach((entry) => {
+        balanceMap.set(
+            entry.customerId,
+            (entry._sum.debit || 0) - (entry._sum.credit || 0),
+        );
+    });
+
+    const paymentMap = new Map();
+    paymentStats.forEach((entry) => {
+        paymentMap.set(entry.customerId, {
+            firstPaymentDate: entry._min.paymentDate || null,
+            lastPaymentDate: entry._max.paymentDate || null
+        });
+    });
+
+    const saleMap = new Map();
+    saleStats.forEach((entry) => {
+        saleMap.set(entry.customerId, entry._min.invoiceDate || null);
+    });
+
+    const financialsUpdatedAt = new Date();
+    const updates = ids.map((customerId) => {
+        const paymentInfo = paymentMap.get(customerId);
+        const firstPaymentDate = paymentInfo?.firstPaymentDate || null;
+        const firstSaleDate = saleMap.get(customerId) || null;
+        const firstActivityDate = pickEarlierDate(firstSaleDate, firstPaymentDate);
+        const lastPaymentDate = paymentInfo?.lastPaymentDate || null;
+
+        return {
+            customerId,
+            balance: balanceMap.get(customerId) || 0,
+            firstActivityDate,
+            lastPaymentDate,
+            financialsUpdatedAt
+        };
+    });
+
+    const updateBatchSize = 50;
+    for (let i = 0; i < updates.length; i += updateBatchSize) {
+        const batch = updates.slice(i, i + updateBatchSize);
+        await Promise.all(
+            batch.map((summary) => txOrClient.customer.update({
+                where: { id: summary.customerId },
+                data: {
+                    balance: summary.balance,
+                    firstActivityDate: summary.firstActivityDate,
+                    lastPaymentDate: summary.lastPaymentDate,
+                    financialsUpdatedAt: summary.financialsUpdatedAt
+                }
+            })),
+        );
+    }
+
+    const summaryMap = new Map();
+    updates.forEach((summary) => {
+        summaryMap.set(summary.customerId, summary);
+    });
+    return summaryMap;
+};
+
+const recalculateCustomerFinancialSummary = async (txOrClient, customerId) => {
+    const summaries = await syncCustomerFinancialSummaries(txOrClient, [customerId]);
+    return summaries.get(parseInt(customerId, 10)) || null;
+};
 
 const dbService = {
     // ==================== AUTH ====================
@@ -388,6 +567,8 @@ const dbService = {
 
     async createSale(saleData) {
         try {
+            await ensureCustomerFinancialSchema();
+
             return await prisma.$transaction(async (tx) => {
                 const newSale = await tx.sale.create({
                     data: {
@@ -446,6 +627,14 @@ const dbService = {
                 }
 
                 // 🔥 نظام التقييم الذكي التلقائي
+                let customerFinancialSummary = null;
+                if (saleData.customerId) {
+                    customerFinancialSummary = await recalculateCustomerFinancialSummary(
+                        tx,
+                        parseInt(saleData.customerId),
+                    );
+                }
+
                 if (saleData.customerId) {
                     const customer = await tx.customer.findUnique({
                         where: { id: parseInt(saleData.customerId) },
@@ -477,13 +666,7 @@ const dbService = {
                         else if (salesCount >= 5) rating += 0.3;
 
                         // 3. انتظام السداد (40%) - محسوب من الـ transactions
-                        const customerTransactions = await tx.customerTransaction.findMany({
-                            where: { customerId: parseInt(saleData.customerId) }
-                        });
-
-                        const totalDebit = customerTransactions.reduce((sum, t) => sum + t.debit, 0);
-                        const totalCredit = customerTransactions.reduce((sum, t) => sum + t.credit, 0);
-                        const currentBalance = totalDebit - totalCredit;
+                        const currentBalance = customerFinancialSummary?.balance || 0;
                         const debtRatio = currentBalance / Math.max(totalPurchases, 1);
 
                         if (debtRatio < 0.1 && salesCount >= 5) rating += 2;
@@ -545,6 +728,8 @@ const dbService = {
 
     async deleteSale(saleId) {
         try {
+            await ensureCustomerFinancialSchema();
+
             return await prisma.$transaction(async (tx) => {
                 // الحصول على بيانات الفاتورة
                 const sale = await tx.sale.findUnique({
@@ -588,6 +773,10 @@ const dbService = {
                     where: { id: parseInt(saleId) }
                 });
 
+                if (sale.customerId) {
+                    await recalculateCustomerFinancialSummary(tx, sale.customerId);
+                }
+
                 return { success: true, data: deletedSale };
             });
         } catch (error) {
@@ -597,6 +786,8 @@ const dbService = {
 
     async updateSale(saleId, saleData) {
         try {
+            await ensureCustomerFinancialSchema();
+
             return await prisma.$transaction(async (tx) => {
                 // الحصول على الفاتورة الحالية
                 const currentSale = await tx.sale.findUnique({
@@ -609,6 +800,11 @@ const dbService = {
 
                 if (!currentSale) {
                     return { error: 'Sale not found' };
+                }
+
+                const affectedCustomerIds = new Set();
+                if (currentSale.customerId) {
+                    affectedCustomerIds.add(currentSale.customerId);
                 }
 
                 // استرجاع الكميات القديمة
@@ -679,6 +875,7 @@ const dbService = {
 
                 // إنشاء سجل CustomerTransaction الجديد
                 if (saleData.customerId) {
+                    affectedCustomerIds.add(parseInt(saleData.customerId));
                     const transactionAmount = parseFloat(saleData.total) - parseFloat(saleData.discount || 0);
                     await tx.customerTransaction.create({
                         data: {
@@ -694,6 +891,10 @@ const dbService = {
                             notes: `فاتورة معدلة #${updatedSale.id} - ${saleData.notes || 'بيع'}`
                         }
                     });
+                }
+
+                for (const customerId of affectedCustomerIds) {
+                    await recalculateCustomerFinancialSummary(tx, customerId);
                 }
 
                 return { success: true, data: updatedSale };
@@ -799,6 +1000,8 @@ const dbService = {
 
     async createReturn(returnData) {
         try {
+            await ensureCustomerFinancialSchema();
+
             return await prisma.$transaction(async (tx) => {
                 const newReturn = await tx.return.create({
                     data: {
@@ -845,6 +1048,8 @@ const dbService = {
                             notes: `مرتجع #${newReturn.id} - ${returnData.notes || 'مرتجع'}`
                         }
                     });
+
+                    await recalculateCustomerFinancialSummary(tx, parseInt(returnData.customerId));
                 }
 
                 return newReturn;
@@ -857,20 +1062,26 @@ const dbService = {
     // ==================== CUSTOMERS ====================
     async getCustomerBalance(customerId) {
         try {
-            const transactions = await prisma.customerTransaction.groupBy({
-                by: ['customer'],
-                where: { customer: { id: parseInt(customerId) } },
-                _sum: {
-                    debit: true,
-                    credit: true
+            await ensureCustomerFinancialSchema();
+
+            const parsedCustomerId = parseInt(customerId);
+            const customer = await prisma.customer.findUnique({
+                where: { id: parsedCustomerId },
+                select: {
+                    id: true,
+                    balance: true,
+                    financialsUpdatedAt: true
                 }
             });
 
-            const result = transactions[0];
-            if (!result) return 0;
+            if (!customer) return 0;
 
-            const balance = result._sum.debit - result._sum.credit;
-            return balance || 0;
+            if (!customer.financialsUpdatedAt) {
+                const summary = await recalculateCustomerFinancialSummary(prisma, parsedCustomerId);
+                return summary?.balance || 0;
+            }
+
+            return customer.balance || 0;
         } catch (error) {
             return { error: error.message };
         }
@@ -925,21 +1136,25 @@ const dbService = {
     },
 
     async getCustomers({ page = 1, pageSize = 50, searchTerm = '', customerType = null, sortCol = 'id', sortDir = 'desc', overdueThreshold = 30 } = {}) {
+        await ensureCustomerQueryIndexes();
+
         const startTime = performance.now();
         try {
+            const safePage = Math.max(1, parseInt(page, 10) || 1);
+            const safePageSize = Math.max(1, parseInt(pageSize, 10) || 50);
             const timestamp = new Date().toLocaleTimeString('ar-EG', {
                 hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
             });
-            console.log(`[${timestamp}] 🔍 [BACKEND] طلب getCustomers - الصفحة: ${page} | الحجم: ${pageSize}`);
-            console.log(`[${timestamp}] 🔍 [BACKEND] البحث: "${searchTerm}" | النوع: ${customerType} | حد التأخير: ${overdueThreshold} يوم`);
-            console.log(`[${timestamp}] 🔍 [BACKEND] الترتيب حسب: ${sortCol} | الاتجاه: ${sortDir}`);
+            customerQueryLog(
+                `[${timestamp}] getCustomers page=${safePage} pageSize=${safePageSize} search="${searchTerm}" type=${customerType} overdue=${overdueThreshold} sort=${sortCol}:${sortDir}`,
+            );
 
-            const skip = (page - 1) * pageSize;
+            const skip = (safePage - 1) * safePageSize;
             const where = {};
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length >= 2) {
-                console.log(`[${timestamp}] 🔎 [BACKEND] تطبيق فلتر البحث على: "${normalizedSearch}"`);
+                customerQueryLog(`[${timestamp}] apply search filter "${normalizedSearch}"`);
                 where.OR = [
                     { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
                     { phone: { startsWith: normalizedSearch } },
@@ -948,7 +1163,7 @@ const dbService = {
             }
 
             if (customerType && customerType !== 'all') {
-                console.log(`[${timestamp}] 🏷️ [BACKEND] فلترة حسب النوع: ${customerType}`);
+                customerQueryLog(`[${timestamp}] apply customer type filter: ${customerType}`);
                 where.customerType = customerType;
             }
 
@@ -958,20 +1173,20 @@ const dbService = {
             let orderBy = {};
             if (validSortCols.includes(sortCol)) {
                 orderBy = { [sortCol]: sortDir };
-                console.log(`[${timestamp}] 📊 [BACKEND] الترتيب حسب: ${sortCol} ${sortDir}`);
+                customerQueryLog(`[${timestamp}] orderBy: ${sortCol} ${sortDir}`);
             } else {
                 orderBy = { createdAt: 'desc' };
-                console.log(`[${timestamp}] 📊 [BACKEND] الترتيب الافتراضي حسب التاريخ`);
+                customerQueryLog(`[${timestamp}] orderBy fallback: createdAt desc`);
             }
 
-            console.log(`[${timestamp}] 🗄️ [BACKEND] استعلام قاعدة البيانات - where:`, where, 'orderBy:', orderBy);
+            customerQueryLog(`[${timestamp}] querying database`, where, orderBy);
 
             const dbStartTime = performance.now();
 
             const [customers, total] = await Promise.all([
                 prisma.customer.findMany({
                     skip,
-                    take: pageSize,
+                    take: safePageSize,
                     where,
                     orderBy
                 }),
@@ -981,132 +1196,71 @@ const dbService = {
             const dbEndTime = performance.now();
             const dbDuration = (dbEndTime - dbStartTime).toFixed(2);
 
-            console.log(`[${timestamp}] 📦 [BACKEND] عدد العملاء من قاعدة البيانات: ${customers.length} | الإجمالي: ${total} (استغرق ${dbDuration}ms)`);
+            customerQueryLog(`[${timestamp}] db rows=${customers.length} total=${total} took=${dbDuration}ms`);
 
-            const customerIds = customers.map(c => c.id);
-            console.log(`[${timestamp}] 💰 [BACKEND] حساب الأرصدة والمديونيات لـ ${customerIds.length} عميل`);
-
-            const statsStartTime = performance.now();
-
-            // 1. حساب الأرصدة
-            const balancesPromise = prisma.customerTransaction.groupBy({
-                by: ['customerId'],
-                _sum: {
-                    debit: true,
-                    credit: true
-                },
-                where: {
-                    customerId: { in: customerIds }
-                }
-            });
-
-            // 2. إحصائيات الدفعات (تاريخ أول وآخر دفعة)
-            const paymentsPromise = prisma.customerPayment.groupBy({
-                by: ['customerId'],
-                _max: { paymentDate: true },
-                _min: { paymentDate: true },
-                where: { customerId: { in: customerIds } }
-            });
-
-            // 3. إحصائيات المبيعات (تاريخ أول فاتورة)
-            const salesPromise = prisma.sale.groupBy({
-                by: ['customerId'],
-                _min: { invoiceDate: true },
-                where: { customerId: { in: customerIds } }
-            });
-
-            const [balances, paymentStats, saleStats] = await Promise.all([
-                balancesPromise,
-                paymentsPromise,
-                salesPromise
-            ]);
-
-            const statsEndTime = performance.now();
-            const statsDuration = (statsEndTime - statsStartTime).toFixed(2);
-
-            console.log(`[${timestamp}] 🧮 [BACKEND] تم حساب الإحصائيات (استغرق ${statsDuration}ms)`);
-
-            // تجهيز Maps للبحث السريع
-            const balanceMap = {};
-            balances.forEach(b => {
-                balanceMap[b.customerId] = (b._sum.debit || 0) - (b._sum.credit || 0);
-            });
-
-            const paymentMap = {};
-            paymentStats.forEach(p => {
-                paymentMap[p.customerId] = {
-                    lastPayment: p._max.paymentDate,
-                    firstPayment: p._min.paymentDate
+            if (customers.length === 0) {
+                return {
+                    data: [],
+                    total,
+                    page: safePage,
+                    totalPages: Math.ceil(total / safePageSize)
                 };
-            });
+            }
 
-            const saleMap = {};
-            saleStats.forEach(s => {
-                saleMap[s.customerId] = s._min.invoiceDate;
-            });
+            const unsyncedCustomerIds = customers
+                .filter((customer) => !customer.financialsUpdatedAt)
+                .map((customer) => customer.id);
 
-            // دمج كل البيانات
-            const now = new Date();
-            const customersWithDetails = customers.map(customer => {
-                const balance = balanceMap[customer.id] || 0;
+            let syncedFinancialsMap = new Map();
+            if (unsyncedCustomerIds.length > 0) {
+                const statsStartTime = performance.now();
+                syncedFinancialsMap = await syncCustomerFinancialSummaries(prisma, unsyncedCustomerIds);
+                const statsEndTime = performance.now();
+                const statsDuration = (statsEndTime - statsStartTime).toFixed(2);
+                customerQueryLog(
+                    `[${timestamp}] synced missing customer financials (${unsyncedCustomerIds.length}) in ${statsDuration}ms`,
+                );
+            }
 
-                const pStats = paymentMap[customer.id];
-                const lastPaymentDate = pStats?.lastPayment || null;
-                const firstPaymentDate = pStats?.firstPayment || null;
-                const firstSaleDate = saleMap[customer.id] || null;
-
-                // تحديد تاريخ بداية النشاط المالي (الأقدم بين أول فاتورة وأول دفعة)
-                let startDate = null;
-                if (firstSaleDate && firstPaymentDate) {
-                    startDate = firstSaleDate < firstPaymentDate ? firstSaleDate : firstPaymentDate;
-                } else {
-                    startDate = firstSaleDate || firstPaymentDate;
-                }
-
-                let lastPaymentDays = 0;
-                let isOverdue = false;
-
-                if (startDate) {
-                    // إذا كان هناك أي نشاط، نحسب فترة التأخير
-                    // إذا لم يدفع أبداً، نحسب من تاريخ البداية، وإلا من تاريخ آخر دفعة
-                    const referenceDate = lastPaymentDate || startDate;
-
-                    // حساب الفرق بالأيام
-                    const diffTime = Math.abs(now - referenceDate);
-                    lastPaymentDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                    // العميل يعتبر متأخر إذا تجاوز الحد المسموح
-                    isOverdue = lastPaymentDays > overdueThreshold;
-                }
-
-                // إذا لم يكن هناك نشاط (لا فواتير ولا دفعات)، لا يعتبر متأخر
+            const customersWithDetails = customers.map((customer) => {
+                const syncedFinancials = syncedFinancialsMap.get(customer.id);
+                const balance = syncedFinancials?.balance ?? (customer.balance || 0);
+                const firstActivityDate = syncedFinancials?.firstActivityDate ?? customer.firstActivityDate ?? null;
+                const lastPaymentDate = syncedFinancials?.lastPaymentDate ?? customer.lastPaymentDate ?? null;
+                const status = computeCustomerPaymentStatus(
+                    firstActivityDate,
+                    lastPaymentDate,
+                    overdueThreshold,
+                );
 
                 return {
                     ...customer,
                     balance,
+                    firstActivityDate,
                     lastPaymentDate,
-                    lastPaymentDays,
-                    isOverdue
+                    financialsUpdatedAt: syncedFinancials?.financialsUpdatedAt ?? customer.financialsUpdatedAt ?? null,
+                    lastPaymentDays: status.lastPaymentDays,
+                    isOverdue: status.isOverdue
                 };
             });
 
             // إذا كان الترتيب مطلوب حسب الرصيد
             if (sortCol === 'balance') {
-                console.log(`[${timestamp}] 📊 [BACKEND] ترتيب حسب الرصيد`);
+                customerQueryLog(`[${timestamp}] sorting by balance`);
                 customersWithDetails.sort((a, b) => sortDir === 'asc' ? a.balance - b.balance : b.balance - a.balance);
             }
 
             const result = {
                 data: customersWithDetails,
                 total,
-                page,
-                totalPages: Math.ceil(total / pageSize)
+                page: safePage,
+                totalPages: Math.ceil(total / safePageSize)
             };
 
             const endTime = performance.now();
             const totalDuration = (endTime - startTime).toFixed(2);
 
-            console.log(`[${timestamp}] ✅ [BACKEND] إرجاع النتائج - البيانات: ${result.data.length} | الإجمالي: ${result.total} (الإجمالي: ${totalDuration}ms)`);
+            customerQueryLog(`[${timestamp}] getCustomers done rows=${result.data.length} total=${result.total} totalTime=${totalDuration}ms`);
             return result;
         } catch (error) {
             const endTime = performance.now();
@@ -1114,28 +1268,39 @@ const dbService = {
             const timestamp = new Date().toLocaleTimeString('ar-EG', {
                 hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
             });
-            console.error(`[${timestamp}] 💥 [BACKEND] خطأ في getCustomers (بعد ${duration}ms):`, error);
+            console.error(`[${timestamp}] getCustomers error after ${duration}ms:`, error);
             return { error: error.message };
         }
     },
 
     async getCustomer(id) {
         try {
+            await ensureCustomerFinancialSchema();
+
+            const parsedCustomerId = parseInt(id);
             const customer = await prisma.customer.findUnique({
-                where: { id: parseInt(id) },
-                include: {
-                    transactions: { select: { debit: true, credit: true } }
-                }
+                where: { id: parsedCustomerId }
             });
 
             if (!customer) return { error: 'العميل غير موجود' };
 
-            const totalDebit = customer.transactions.reduce((sum, t) => sum + t.debit, 0);
-            const totalCredit = customer.transactions.reduce((sum, t) => sum + t.credit, 0);
-            const balance = totalDebit - totalCredit;
+            const syncedFinancials = customer.financialsUpdatedAt
+                ? null
+                : await recalculateCustomerFinancialSummary(prisma, parsedCustomerId);
 
-            const { transactions, ...data } = customer;
-            return { ...data, balance };
+            const firstActivityDate = syncedFinancials?.firstActivityDate ?? customer.firstActivityDate ?? null;
+            const lastPaymentDate = syncedFinancials?.lastPaymentDate ?? customer.lastPaymentDate ?? null;
+            const status = computeCustomerPaymentStatus(firstActivityDate, lastPaymentDate, 30);
+
+            return {
+                ...customer,
+                balance: syncedFinancials?.balance ?? customer.balance ?? 0,
+                firstActivityDate,
+                lastPaymentDate,
+                financialsUpdatedAt: syncedFinancials?.financialsUpdatedAt ?? customer.financialsUpdatedAt ?? null,
+                lastPaymentDays: status.lastPaymentDays,
+                isOverdue: status.isOverdue
+            };
         } catch (error) {
             return { error: error.message };
         }
@@ -1179,6 +1344,8 @@ const dbService = {
 
     async addCustomer(customerData) {
         try {
+            await ensureCustomerFinancialSchema();
+
             return await prisma.customer.create({
                 data: {
                     name: customerData.name,
@@ -1189,6 +1356,10 @@ const dbService = {
                     district: customerData.district || null,
                     notes: customerData.notes || null,
                     creditLimit: parseFloat(customerData.creditLimit || 0),
+                    balance: 0,
+                    firstActivityDate: null,
+                    lastPaymentDate: null,
+                    financialsUpdatedAt: new Date(),
                     customerType: customerData.customerType || 'عادي'
                 }
             });
@@ -1230,6 +1401,7 @@ const dbService = {
 
     async addCustomerPayment(paymentData) {
         try {
+            await ensureCustomerFinancialSchema();
             // تحويل التاريخ بشكل صحيح ✅
             let paymentDate = null;
 
@@ -1299,6 +1471,8 @@ const dbService = {
                     }
                 });
 
+                await recalculateCustomerFinancialSummary(tx, parseInt(paymentData.customerId));
+
                 console.log('✅ تم حفظ الدفعة بنجاح:');
                 console.log('   • ID:', payment.id);
                 console.log('   • التاريخ المحفوظ:', payment.paymentDate);
@@ -1326,6 +1500,7 @@ const dbService = {
 
     async deleteCustomerPayment(paymentId) {
         try {
+            await ensureCustomerFinancialSchema();
             return await prisma.$transaction(async (tx) => {
                 // الحصول على بيانات الدفعة
                 const payment = await tx.customerPayment.findUnique({
@@ -1350,6 +1525,8 @@ const dbService = {
                 const deletedPayment = await tx.customerPayment.delete({
                     where: { id: parseInt(paymentId) }
                 });
+
+                await recalculateCustomerFinancialSummary(tx, payment.customerId);
 
                 return { success: true, data: deletedPayment };
             });
@@ -1574,3 +1751,4 @@ const dbService = {
 };
 
 module.exports = dbService;
+

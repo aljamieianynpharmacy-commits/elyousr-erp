@@ -10,6 +10,8 @@ import './Customers.css';
 // Utility functions - moved outside component for better performance
 const ROW_HEIGHT = 56;
 const MAX_LIST_HEIGHT = 520;
+const INITIAL_CUSTOMERS_PAGE_SIZE = 300;
+const BACKGROUND_FETCH_BATCH_SIZE = 4;
 
 const COLUMN_SPECS = {
   id: { minWidth: 70 },
@@ -61,6 +63,24 @@ const getBalanceClass = (balance) => {
 };
 
 const normalizeSearchValue = (value) => String(value ?? '').toLowerCase().trim();
+const SEARCH_HIGHLIGHT_STYLE = { backgroundColor: '#fbbf24', fontWeight: 'bold' };
+
+const highlightMatch = (value, searchTerm) => {
+  const text = String(value ?? '');
+  const normalizedTerm = String(searchTerm ?? '').trim();
+
+  if (!text || !normalizedTerm) return text;
+
+  const escapedTerm = normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escapedTerm})`, 'gi');
+  const parts = text.split(regex);
+
+  return parts.map((part, index) => (
+    part.toLowerCase() === normalizedTerm.toLowerCase()
+      ? <span key={index} style={SEARCH_HIGHLIGHT_STYLE}>{part}</span>
+      : part
+  ));
+};
 
 const buildSearchIndex = (customer) => (
   [
@@ -109,6 +129,7 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
     visibleColumns,
     selectedIndex,
     overdueThreshold,
+    highlightTerm,
     onShowLedger,
     onPayment,
     onEdit,
@@ -135,7 +156,7 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
 
   return (
     <div className={rowClassName} style={style} role="row">
-      {visibleColumns.id && <div className="customers-cell" role="cell">{customer.id}</div>}
+      {visibleColumns.id && <div className="customers-cell" role="cell">{highlightMatch(customer.id, highlightTerm)}</div>}
       {visibleColumns.name && (
         <div className="customers-cell customers-name-cell" role="cell">
           <div className="customers-name-content">
@@ -145,23 +166,23 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
                 title={`🔴 لم يدفع منذ ${lastPaymentDays} يوم`}
               />
             )}
-            <span>{customer.name}</span>
+            <span>{highlightMatch(customer.name, highlightTerm)}</span>
           </div>
         </div>
       )}
       {visibleColumns.type && (
         <div className="customers-cell" role="cell">
           <span className={`customers-type-badge ${getCustomerTypeClass(customer.customerType)}`}>
-            {customer.customerType}
+            {highlightMatch(customer.customerType, highlightTerm)}
           </span>
         </div>
       )}
-      {visibleColumns.phone && <div className="customers-cell customers-muted" role="cell">{customer.phone || '-'}</div>}
-      {visibleColumns.phone2 && <div className="customers-cell customers-muted" role="cell">{customer.phone2 || '-'}</div>}
-      {visibleColumns.address && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.address || '-'}</div>}
-      {visibleColumns.city && <div className="customers-cell customers-muted" role="cell">{customer.city || '-'}</div>}
-      {visibleColumns.district && <div className="customers-cell customers-muted" role="cell">{customer.district || '-'}</div>}
-      {visibleColumns.notes && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.notes || '-'}</div>}
+      {visibleColumns.phone && <div className="customers-cell customers-muted" role="cell">{customer.phone ? highlightMatch(customer.phone, highlightTerm) : '-'}</div>}
+      {visibleColumns.phone2 && <div className="customers-cell customers-muted" role="cell">{customer.phone2 ? highlightMatch(customer.phone2, highlightTerm) : '-'}</div>}
+      {visibleColumns.address && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.address ? highlightMatch(customer.address, highlightTerm) : '-'}</div>}
+      {visibleColumns.city && <div className="customers-cell customers-muted" role="cell">{customer.city ? highlightMatch(customer.city, highlightTerm) : '-'}</div>}
+      {visibleColumns.district && <div className="customers-cell customers-muted" role="cell">{customer.district ? highlightMatch(customer.district, highlightTerm) : '-'}</div>}
+      {visibleColumns.notes && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.notes ? highlightMatch(customer.notes, highlightTerm) : '-'}</div>}
       {visibleColumns.creditLimit && (
         <div className="customers-cell customers-muted customers-bold" role="cell">
           {(customer.creditLimit || 0).toFixed(2)}
@@ -230,6 +251,7 @@ const CustomersTable = memo(function CustomersTable({
   onColumnSearchChange,
   selectedIndex,
   overdueThreshold,
+  highlightTerm,
   onShowLedger,
   onPayment,
   onEdit,
@@ -268,11 +290,12 @@ const CustomersTable = memo(function CustomersTable({
     visibleColumns,
     selectedIndex,
     overdueThreshold,
+    highlightTerm,
     onShowLedger,
     onPayment,
     onEdit,
     onDelete
-  }), [customers, visibleColumns, selectedIndex, overdueThreshold, onShowLedger, onPayment, onEdit, onDelete]);
+  }), [customers, visibleColumns, selectedIndex, overdueThreshold, highlightTerm, onShowLedger, onPayment, onEdit, onDelete]);
 
   return (
     <div className="customers-table-scroll">
@@ -473,6 +496,7 @@ const CustomersQuickStats = memo(function CustomersQuickStats({
 
 export default function Customers() {
   const [loading, setLoading] = useState(true);
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showLedger, setShowLedger] = useState(null);
@@ -483,6 +507,8 @@ export default function Customers() {
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
   const paymentInputRef = useRef(null);
   const listRef = useRef(null);
+  const loadRequestIdRef = useRef(0);
+  const allCustomersRef = useRef([]);
   const [showReports, setShowReports] = useState(false);
   const [selectedReportType, setSelectedReportType] = useState('debts');
   const [visibleColumns, setVisibleColumns] = useState({
@@ -524,6 +550,7 @@ export default function Customers() {
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
   const debouncedSearch = useDebouncedValue(searchTerm.trim(), 250);
+  const debouncedColumnSearch = useDebouncedValue(columnSearch, 180);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -536,54 +563,122 @@ export default function Customers() {
   // State لتخزين كل العملاء (للبحث المحلي)
   const [allCustomers, setAllCustomers] = useState([]);
 
+  useEffect(() => {
+    allCustomersRef.current = allCustomers;
+  }, [allCustomers]);
+
+  const buildCustomerQueryParams = useCallback((page, pageSize) => ({
+    page,
+    pageSize,
+    searchTerm: '',
+    customerType: 'all',
+    overdueThreshold
+  }), [overdueThreshold]);
+
   const loadAllCustomers = useCallback(async () => {
+    loadRequestIdRef.current += 1;
+    const requestId = loadRequestIdRef.current;
+    let initialDataLoaded = false;
+    const shouldShowLoader = allCustomersRef.current.length === 0;
+
     try {
-      setLoading(true);
+      if (shouldShowLoader) setLoading(true);
+      setIsBackgroundLoading(false);
 
-      const result = await window.api.getCustomers({
-        page: 1,
-        pageSize: 1000, // تحميل كل العملاء دفعة واحدة
-        searchTerm: '',
-        customerType: 'all',
-        overdueThreshold: overdueThreshold // تمرير حد التأخير للإعدادات
-      });
+      const firstPageResult = await window.api.getCustomers(
+        buildCustomerQueryParams(1, INITIAL_CUSTOMERS_PAGE_SIZE),
+      );
 
-      if (!result.error) {
-        setAllCustomers(result.data || []);
+      if (requestId !== loadRequestIdRef.current) return;
+
+      if (!firstPageResult.error) {
+        const firstPageData = Array.isArray(firstPageResult.data) ? firstPageResult.data : [];
+        const totalPages = Math.max(1, parseInt(firstPageResult.totalPages, 10) || 1);
+
+        setAllCustomers(firstPageData);
+        initialDataLoaded = true;
+        if (shouldShowLoader) setLoading(false);
+
+        if (totalPages > 1) {
+          setIsBackgroundLoading(true);
+
+          const restCustomers = [];
+          const pageNumbers = [];
+          for (let page = 2; page <= totalPages; page += 1) {
+            pageNumbers.push(page);
+          }
+
+          for (let i = 0; i < pageNumbers.length; i += BACKGROUND_FETCH_BATCH_SIZE) {
+            const batchPages = pageNumbers.slice(i, i + BACKGROUND_FETCH_BATCH_SIZE);
+            const batchResults = await Promise.all(
+              batchPages.map((page) => window.api.getCustomers(
+                buildCustomerQueryParams(page, INITIAL_CUSTOMERS_PAGE_SIZE),
+              )),
+            );
+
+            if (requestId !== loadRequestIdRef.current) return;
+
+            batchResults.forEach((result) => {
+              if (!result?.error && Array.isArray(result.data)) {
+                restCustomers.push(...result.data);
+              }
+            });
+          }
+
+          if (restCustomers.length > 0) {
+            const merged = [...firstPageData];
+            const ids = new Set(firstPageData.map((customer) => customer.id));
+
+            restCustomers.forEach((customer) => {
+              if (!ids.has(customer.id)) {
+                ids.add(customer.id);
+                merged.push(customer);
+              }
+            });
+
+            setAllCustomers(merged);
+          }
+        }
       } else {
-        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
+        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + firstPageResult.error);
+        setAllCustomers([]);
       }
     } catch (err) {
       console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
     } finally {
-      setLoading(false);
+      if (requestId !== loadRequestIdRef.current) return;
+      if (!initialDataLoaded && shouldShowLoader) setLoading(false);
+      setIsBackgroundLoading(false);
     }
-  }, [overdueThreshold]);
+  }, [buildCustomerQueryParams]);
 
   useEffect(() => {
     loadAllCustomers();
   }, [loadAllCustomers]);
 
-  const indexedCustomers = useMemo(() => (
-    allCustomers.map((customer) => ({
-      ...customer,
-      _search: buildSearchIndex(customer)
-    }))
-  ), [allCustomers]);
+  const customerSearchIndex = useMemo(() => {
+    const index = new Map();
+    allCustomers.forEach((customer) => {
+      index.set(customer.id, buildSearchIndex(customer));
+    });
+    return index;
+  }, [allCustomers]);
 
   const normalizedSearch = useMemo(() => normalizeSearchValue(debouncedSearch), [debouncedSearch]);
 
   const activeColumnFilters = useMemo(() => (
-    Object.entries(columnSearch)
+    Object.entries(debouncedColumnSearch)
       .filter(([, value]) => value && value.trim() !== '')
       .map(([key, value]) => [key, normalizeSearchValue(value)])
-  ), [columnSearch]);
+  ), [debouncedColumnSearch]);
 
   const filteredCustomers = useMemo(() => {
-    let filtered = indexedCustomers;
+    let filtered = allCustomers;
 
     if (normalizedSearch.length > 0) {
-      filtered = filtered.filter((customer) => customer._search.includes(normalizedSearch));
+      filtered = filtered.filter((customer) =>
+        (customerSearchIndex.get(customer.id) || '').includes(normalizedSearch),
+      );
     }
 
     if (activeColumnFilters.length > 0) {
@@ -607,7 +702,7 @@ export default function Customers() {
     }
 
     return filtered;
-  }, [indexedCustomers, normalizedSearch, filterType, activeColumnFilters]);
+  }, [allCustomers, customerSearchIndex, normalizedSearch, filterType, activeColumnFilters]);
 
   const totalItems = filteredCustomers.length;
   const totalPages = 1;
@@ -1683,6 +1778,12 @@ export default function Customers() {
         filteredCount={filteredCustomers.length}
       />
 
+      {isBackgroundLoading && (
+        <div style={{ marginBottom: '10px', fontSize: '12px', color: '#6b7280' }}>
+          جاري استكمال تحميل باقي العملاء في الخلفية...
+        </div>
+      )}
+
       <div className="card customers-table-card">
         <CustomersTable
           customers={filteredCustomers}
@@ -1692,6 +1793,7 @@ export default function Customers() {
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
+          highlightTerm={searchTerm.trim()}
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}
@@ -2055,7 +2157,6 @@ export default function Customers() {
                     localStorage.setItem('overdueThreshold', tempThreshold.toString());
                     setOverdueThreshold(tempThreshold);
                     setShowSettings(false);
-                    loadAllCustomers(); // إعادة تحميل بشبكة الأيام الجديدة
                   }}
                   style={{
                     flex: 1,

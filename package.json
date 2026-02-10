@@ -9,7 +9,12 @@
     "electron": "electron .",
     "start": "npm run dev",
     "app": "electron .",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status",
+    "rebuild:customer-financials": "node scripts/rebuild-customer-financials.js",
+    "db:legacy:customer-financial-guard": "node scripts/legacy/legacy-customer-financial-guard.js"
   },
   "keywords": [],
   "author": "",

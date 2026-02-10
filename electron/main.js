@@ -330,6 +330,15 @@ ipcMain.handle('db:getCustomerPayments', async (event, customerId) => {
 ipcMain.handle('db:deleteCustomerPayment', async (event, paymentId) => {
     return await dbService.deleteCustomerPayment(paymentId);
 });
+ipcMain.handle('db:rebuildCustomerFinancials', async (event, customerId) => {
+    return await dbService.rebuildCustomerFinancials(customerId);
+});
+ipcMain.handle('db:rebuildAllCustomersFinancials', async (event, params) => {
+    return await dbService.rebuildAllCustomersFinancials(params || {});
+});
+ipcMain.handle('db:checkCustomerFinancialsHealth', async () => {
+    return await dbService.checkCustomerFinancialsHealth();
+});
 
 // Supplier Payments
 ipcMain.handle('db:addSupplierPayment', async (event, paymentData) => {

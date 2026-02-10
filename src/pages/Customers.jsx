@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
@@ -10,8 +10,6 @@ import './Customers.css';
 // Utility functions - moved outside component for better performance
 const ROW_HEIGHT = 56;
 const MAX_LIST_HEIGHT = 520;
-const INITIAL_CUSTOMERS_PAGE_SIZE = 300;
-const BACKGROUND_FETCH_BATCH_SIZE = 4;
 
 const COLUMN_SPECS = {
   id: { minWidth: 70 },
@@ -81,23 +79,6 @@ const highlightMatch = (value, searchTerm) => {
       : part
   ));
 };
-
-const buildSearchIndex = (customer) => (
-  [
-    customer.id,
-    customer.name,
-    customer.phone,
-    customer.phone2,
-    customer.city,
-    customer.district,
-    customer.address,
-    customer.notes,
-    customer.customerType
-  ]
-    .filter((value) => value !== undefined && value !== null && value !== '')
-    .map(normalizeSearchValue)
-    .join(' ')
-);
 
 const useDebouncedValue = (value, delayMs) => {
   const [debounced, setDebounced] = useState(value);
@@ -496,7 +477,8 @@ const CustomersQuickStats = memo(function CustomersQuickStats({
 
 export default function Customers() {
   const [loading, setLoading] = useState(true);
-  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false);
+  const [customersTotalCount, setCustomersTotalCount] = useState(0);
+  const [apiTotalPages, setApiTotalPages] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showLedger, setShowLedger] = useState(null);
@@ -507,10 +489,8 @@ export default function Customers() {
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
   const paymentInputRef = useRef(null);
   const listRef = useRef(null);
-  const loadRequestIdRef = useRef(0);
-  const allCustomersRef = useRef([]);
+  const cacheRef = useRef(new Map());
   const [showReports, setShowReports] = useState(false);
-  const [selectedReportType, setSelectedReportType] = useState('debts');
   const [visibleColumns, setVisibleColumns] = useState({
     id: true,
     name: true,
@@ -547,165 +527,130 @@ export default function Customers() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(50);
+  const [sortCol, setSortCol] = useState('createdAt');
+  const [sortDir, setSortDir] = useState('desc');
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
-  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 250);
-  const debouncedColumnSearch = useDebouncedValue(columnSearch, 180);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearch]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterType]);
-
-  // State لتخزين كل العملاء (للبحث المحلي)
   const [allCustomers, setAllCustomers] = useState([]);
 
+  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 250);
+  const debouncedNameSearch = useDebouncedValue((columnSearch.name || '').trim(), 250);
+  const debouncedPhoneSearch = useDebouncedValue((columnSearch.phone || '').trim(), 250);
+  const debouncedCityFilter = useDebouncedValue((columnSearch.city || '').trim(), 250);
+  const debouncedColumnSearch = useDebouncedValue(columnSearch, 180);
+
+  const effectiveSearchTerm = debouncedSearch || debouncedNameSearch || debouncedPhoneSearch;
+
   useEffect(() => {
-    allCustomersRef.current = allCustomers;
-  }, [allCustomers]);
+    setCurrentPage(1);
+  }, [effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir]);
 
-  const buildCustomerQueryParams = useCallback((page, pageSize) => ({
-    page,
+  const cacheKey = useMemo(() => JSON.stringify({
+    page: currentPage,
     pageSize,
-    searchTerm: '',
-    customerType: 'all',
+    searchTerm: effectiveSearchTerm,
+    customerType: filterType,
+    city: debouncedCityFilter,
+    sortCol,
+    sortDir,
     overdueThreshold
-  }), [overdueThreshold]);
+  }), [currentPage, pageSize, effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir, overdueThreshold]);
 
-  const loadAllCustomers = useCallback(async () => {
-    loadRequestIdRef.current += 1;
-    const requestId = loadRequestIdRef.current;
-    let initialDataLoaded = false;
-    const shouldShowLoader = allCustomersRef.current.length === 0;
+  const loadAllCustomers = useCallback(async ({ force = false } = {}) => {
+    const CACHE_TTL_MS = 15000;
 
     try {
-      if (shouldShowLoader) setLoading(true);
-      setIsBackgroundLoading(false);
-
-      const firstPageResult = await window.api.getCustomers(
-        buildCustomerQueryParams(1, INITIAL_CUSTOMERS_PAGE_SIZE),
-      );
-
-      if (requestId !== loadRequestIdRef.current) return;
-
-      if (!firstPageResult.error) {
-        const firstPageData = Array.isArray(firstPageResult.data) ? firstPageResult.data : [];
-        const totalPages = Math.max(1, parseInt(firstPageResult.totalPages, 10) || 1);
-
-        setAllCustomers(firstPageData);
-        initialDataLoaded = true;
-        if (shouldShowLoader) setLoading(false);
-
-        if (totalPages > 1) {
-          setIsBackgroundLoading(true);
-
-          const restCustomers = [];
-          const pageNumbers = [];
-          for (let page = 2; page <= totalPages; page += 1) {
-            pageNumbers.push(page);
-          }
-
-          for (let i = 0; i < pageNumbers.length; i += BACKGROUND_FETCH_BATCH_SIZE) {
-            const batchPages = pageNumbers.slice(i, i + BACKGROUND_FETCH_BATCH_SIZE);
-            const batchResults = await Promise.all(
-              batchPages.map((page) => window.api.getCustomers(
-                buildCustomerQueryParams(page, INITIAL_CUSTOMERS_PAGE_SIZE),
-              )),
-            );
-
-            if (requestId !== loadRequestIdRef.current) return;
-
-            batchResults.forEach((result) => {
-              if (!result?.error && Array.isArray(result.data)) {
-                restCustomers.push(...result.data);
-              }
-            });
-          }
-
-          if (restCustomers.length > 0) {
-            const merged = [...firstPageData];
-            const ids = new Set(firstPageData.map((customer) => customer.id));
-
-            restCustomers.forEach((customer) => {
-              if (!ids.has(customer.id)) {
-                ids.add(customer.id);
-                merged.push(customer);
-              }
-            });
-
-            setAllCustomers(merged);
-          }
-        }
-      } else {
-        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + firstPageResult.error);
-        setAllCustomers([]);
+      const cached = cacheRef.current.get(cacheKey);
+      if (!force && cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
+        setAllCustomers(cached.data);
+        setCustomersTotalCount(cached.total);
+        setApiTotalPages(cached.totalPages);
+        setLoading(false);
+        return;
       }
+
+      setLoading(true);
+
+      const result = await window.api.getCustomers({
+        page: currentPage,
+        pageSize,
+        searchTerm: effectiveSearchTerm,
+        customerType: filterType,
+        city: debouncedCityFilter,
+        sortCol,
+        sortDir,
+        overdueThreshold
+      });
+
+      if (result?.error) {
+        console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
+        setAllCustomers([]);
+        setCustomersTotalCount(0);
+        setApiTotalPages(1);
+        return;
+      }
+
+      const data = Array.isArray(result?.data) ? result.data : [];
+      const total = Math.max(0, parseInt(result?.total, 10) || 0);
+      const pages = Math.max(1, parseInt(result?.totalPages, 10) || 1);
+
+      if (currentPage > pages) {
+        setCurrentPage(pages);
+      }
+
+      setAllCustomers(data);
+      setCustomersTotalCount(total);
+      setApiTotalPages(pages);
+      cacheRef.current.set(cacheKey, {
+        ts: Date.now(),
+        data,
+        total,
+        totalPages: pages
+      });
     } catch (err) {
       console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
+      setAllCustomers([]);
+      setCustomersTotalCount(0);
+      setApiTotalPages(1);
     } finally {
-      if (requestId !== loadRequestIdRef.current) return;
-      if (!initialDataLoaded && shouldShowLoader) setLoading(false);
-      setIsBackgroundLoading(false);
+      setLoading(false);
     }
-  }, [buildCustomerQueryParams]);
+  }, [cacheKey, currentPage, pageSize, effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir, overdueThreshold]);
+
+  const refreshCustomers = useCallback(async () => {
+    cacheRef.current.clear();
+    await loadAllCustomers({ force: true });
+  }, [loadAllCustomers]);
 
   useEffect(() => {
     loadAllCustomers();
   }, [loadAllCustomers]);
 
-  const customerSearchIndex = useMemo(() => {
-    const index = new Map();
-    allCustomers.forEach((customer) => {
-      index.set(customer.id, buildSearchIndex(customer));
-    });
-    return index;
-  }, [allCustomers]);
-
-  const normalizedSearch = useMemo(() => normalizeSearchValue(debouncedSearch), [debouncedSearch]);
-
   const activeColumnFilters = useMemo(() => (
     Object.entries(debouncedColumnSearch)
-      .filter(([, value]) => value && value.trim() !== '')
+      .filter(([, value]) => value && String(value).trim() !== '')
       .map(([key, value]) => [key, normalizeSearchValue(value)])
   ), [debouncedColumnSearch]);
 
   const filteredCustomers = useMemo(() => {
-    let filtered = allCustomers;
+    if (activeColumnFilters.length === 0) return allCustomers;
 
-    if (normalizedSearch.length > 0) {
-      filtered = filtered.filter((customer) =>
-        (customerSearchIndex.get(customer.id) || '').includes(normalizedSearch),
-      );
-    }
+    return allCustomers.filter((customer) => (
+      activeColumnFilters.every(([key, value]) => {
+        let itemValue = '';
+        if (key === 'type') itemValue = customer.customerType || '';
+        else if (key === 'balance') itemValue = customer.balance || 0;
+        else if (key === 'creditLimit') itemValue = customer.creditLimit || 0;
+        else itemValue = customer[key] || '';
 
-    if (activeColumnFilters.length > 0) {
-      filtered = filtered.filter((customer) => (
-        activeColumnFilters.every(([key, value]) => {
-          if (!value) return true;
-          let itemValue = '';
+        return normalizeSearchValue(itemValue).includes(value);
+      })
+    ));
+  }, [allCustomers, activeColumnFilters]);
 
-          if (key === 'type') itemValue = customer.customerType || '';
-          else if (key === 'balance') itemValue = customer.balance || 0;
-          else if (key === 'creditLimit') itemValue = customer.creditLimit || 0;
-          else itemValue = customer[key] || '';
-
-          return normalizeSearchValue(itemValue).includes(value);
-        })
-      ));
-    }
-
-    if (filterType && filterType !== 'all') {
-      filtered = filtered.filter((customer) => customer.customerType === filterType);
-    }
-
-    return filtered;
-  }, [allCustomers, customerSearchIndex, normalizedSearch, filterType, activeColumnFilters]);
-
-  const totalItems = filteredCustomers.length;
-  const totalPages = 1;
+  const totalItems = customersTotalCount;
+  const totalPages = apiTotalPages;
 
   const resetCustomerForm = () => {
     setFormData({
@@ -731,8 +676,6 @@ export default function Customers() {
           safeAlert(result.error);
           return;
         }
-        
-        setAllCustomers(prev => prev.map(c => c.id === editingCustomer.id ? { ...c, ...formData } : c));
       } else {
         const result = await window.api.addCustomer(formData);
 
@@ -741,14 +684,12 @@ export default function Customers() {
           safeAlert(result.error);
           return;
         }
-        
-        const newCustomer = { id: result.id || Date.now(), ...formData };
-        setAllCustomers(prev => [...prev, newCustomer]);
       }
       
       setShowModal(false);
       resetCustomerForm();
       setEditingCustomer(null);
+      await refreshCustomers();
     } catch (err) {
       console.error('Exception saving customer:', err);
       safeAlert('خطأ في حفظ البيانات: ' + err.message);
@@ -803,7 +744,7 @@ export default function Customers() {
         console.error('Error deleting customer:', result.error);
         safeAlert('خطأ في الحذف');
       } else {
-        setAllCustomers(prev => prev.filter(c => c.id !== id));
+        await refreshCustomers();
         safeAlert('تم الحذف بنجاح');
       }
     } catch (err) {
@@ -844,12 +785,7 @@ export default function Customers() {
       const result = await window.api.addCustomerPayment(payload);
 
       if (!result.error) {
-        const newBalance = (selectedCustomer.balance || 0) - paymentAmount;
-        
-        setAllCustomers(prev => prev.map(c =>
-          c.id === selectedCustomer.id ? { ...c, balance: newBalance } : c
-        ));
-
+        await refreshCustomers();
         setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
       } else {
         console.error('Error submitting payment:', result.error);
@@ -943,7 +879,7 @@ export default function Customers() {
           console.error('Error deleting customer:', result.error);
           safeAlert('خطأ في الحذف');
         } else {
-          setAllCustomers(prev => prev.filter(c => c.id !== id));
+          await refreshCustomers();
           safeAlert('تم الحذف بنجاح');
         }
       } catch (err) {
@@ -951,7 +887,7 @@ export default function Customers() {
         safeAlert('خطأ في الحذف');
       }
     }
-  }, []);
+  }, [refreshCustomers]);
 
   // البحث والفلترة
   const handleColumnSearchChange = useCallback((field, value) => {
@@ -1650,7 +1586,7 @@ export default function Customers() {
       {/* البحث والفلترة والأعمدة */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr auto',
+        gridTemplateColumns: '1fr 1fr auto auto',
         gap: '15px',
         marginBottom: '20px',
         alignItems: 'center'
@@ -1695,6 +1631,39 @@ export default function Customers() {
               {type === 'all' ? '📊 الكل' : type}
             </button>
           ))}
+        </div>
+
+        {/* الترتيب */} 
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <select
+            value={sortCol}
+            onChange={(e) => setSortCol(e.target.value)}
+            style={{
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '12px',
+              backgroundColor: 'white'
+            }}
+          >
+            <option value="createdAt">الأحدث</option>
+            <option value="balance">الرصيد</option>
+            <option value="lastPaymentDate">آخر دفعة</option>
+          </select>
+          <button
+            onClick={() => setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+            style={{
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              backgroundColor: 'white',
+              cursor: 'pointer',
+              fontSize: '12px',
+              minWidth: '62px'
+            }}
+          >
+            {sortDir === 'asc' ? 'تصاعدي' : 'تنازلي'}
+          </button>
         </div>
 
         {/* تبديل الأعمدة */}
@@ -1771,18 +1740,12 @@ export default function Customers() {
 
       {/* إحصائيات سريعة */}
       <CustomersQuickStats
-        totalCount={allCustomers.length}
+        totalCount={totalItems}
         vipCount={customerStats.vipCount}
         overdueCount={customerStats.overdueCount}
         overdueThreshold={overdueThreshold}
-        filteredCount={filteredCustomers.length}
+        filteredCount={totalItems}
       />
-
-      {isBackgroundLoading && (
-        <div style={{ marginBottom: '10px', fontSize: '12px', color: '#6b7280' }}>
-          جاري استكمال تحميل باقي العملاء في الخلفية...
-        </div>
-      )}
 
       <div className="card customers-table-card">
         <CustomersTable
@@ -1866,11 +1829,9 @@ export default function Customers() {
             customerId={showLedger}
             onClose={() => {
               setShowLedger(null);
-              // لا نحتاج loadAllCustomers() هنا بعد الآن
             }}
             onDataChanged={() => {
-              // يتم استدعاؤها فقط عند حذف أو تعديل معاملات
-              loadAllCustomers();
+              refreshCustomers();
             }}
           />
         )
@@ -2043,7 +2004,7 @@ export default function Customers() {
                 >
                   <div style={{ fontWeight: 'bold', color: '#374151', fontSize: '14px' }}>📈 معلومات سريعة</div>
                   <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                    <div>إجمالي العملاء: {filteredCustomers.length}</div>
+                    <div>إجمالي العملاء: {totalItems}</div>
                     <div>إجمالي المديونيات: {customerStats.totalDebt.toFixed(2)}</div>
                     <div style={{ color: '#dc2626' }}>عملاء متأخرين: {customerStats.overdueCount}</div>
                   </div>
@@ -2142,7 +2103,7 @@ export default function Customers() {
               <div style={{ marginBottom: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
                 <h3 style={{ margin: '0 0 10px 0', color: '#374151' }}>📊 معلومات سريعة:</h3>
                 <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                  <div>• إجمالي العملاء: <strong>{allCustomers.length}</strong></div>
+                  <div>• إجمالي العملاء: <strong>{totalItems}</strong></div>
                   <div style={{ marginTop: '8px' }}>• عملاء مدينين: <strong>{customerStats.debtedCount}</strong></div>
                   <div style={{ marginTop: '8px', color: '#dc2626', fontWeight: 'bold' }}>
                     • عملاء متأخرين الآن: <strong>{overduePreviewCount}</strong>
@@ -2196,4 +2157,5 @@ export default function Customers() {
     </div >
   );
 }
+
 

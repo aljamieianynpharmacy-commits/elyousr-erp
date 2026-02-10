@@ -6,6 +6,8 @@ const jwt = require('jsonwebtoken');
 
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 const DEBUG_CUSTOMERS_QUERIES = process.env.DEBUG_CUSTOMERS_QUERIES === '1';
+const ENABLE_PERF_LOGS = process.env.ENABLE_PERF_LOGS === '1';
+const PERF_SLOW_QUERY_MS = Math.max(0, parseInt(process.env.PERF_SLOW_QUERY_MS || '250', 10) || 250);
 
 const customerQueryLog = (...args) => {
     if (DEBUG_CUSTOMERS_QUERIES) {
@@ -13,47 +15,42 @@ const customerQueryLog = (...args) => {
     }
 };
 
-let ensureCustomerFinancialSchemaPromise = null;
-const ensureCustomerFinancialSchema = async () => {
-    if (!ensureCustomerFinancialSchemaPromise) {
-        ensureCustomerFinancialSchemaPromise = (async () => {
-            try {
-                await Promise.all([
-                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "balance" DOUBLE PRECISION NOT NULL DEFAULT 0'),
-                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "firstActivityDate" TIMESTAMP(3)'),
-                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "lastPaymentDate" TIMESTAMP(3)'),
-                    prisma.$executeRawUnsafe('ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "financialsUpdatedAt" TIMESTAMP(3)')
-                ]);
-                await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_financials_updated_at ON "Customer" ("financialsUpdatedAt")');
-            } catch (error) {
-                console.warn('Customer financial schema setup failed:', error?.message || error);
-            }
-        })();
-    }
-    return ensureCustomerFinancialSchemaPromise;
+const perfNow = () => (
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now()
+);
+
+const startPerfTimer = (endpoint, params = {}) => {
+    const startedAt = perfNow();
+    return ({ rows = null, error = null } = {}) => {
+        if (!ENABLE_PERF_LOGS) return;
+        const durationMs = Number((perfNow() - startedAt).toFixed(2));
+        if (!error && durationMs < PERF_SLOW_QUERY_MS) return;
+
+        const payload = {
+            endpoint,
+            durationMs,
+            rows,
+            params
+        };
+
+        if (error) {
+            console.warn('[PERF][ERROR]', payload, error?.message || error);
+        } else {
+            console.log('[PERF]', payload);
+        }
+    };
 };
 
-let ensureCustomerQueryIndexesPromise = null;
-const ensureCustomerQueryIndexes = async () => {
-    await ensureCustomerFinancialSchema();
+const parsePositiveInt = (value) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
-    if (!ensureCustomerQueryIndexesPromise) {
-        ensureCustomerQueryIndexesPromise = (async () => {
-            try {
-                await Promise.all([
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_transaction_customer_id ON "CustomerTransaction" ("customerId")'),
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_transaction_customer_date ON "CustomerTransaction" ("customerId", "date")'),
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_payment_customer_id ON "CustomerPayment" ("customerId")'),
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_customer_payment_customer_date ON "CustomerPayment" ("customerId", "paymentDate")'),
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_sale_customer_id ON "Sale" ("customerId")'),
-                    prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS idx_sale_customer_invoice_date ON "Sale" ("customerId", "invoiceDate")')
-                ]);
-            } catch (error) {
-                console.warn('Customer query index setup failed:', error?.message || error);
-            }
-        })();
-    }
-    return ensureCustomerQueryIndexesPromise;
+const toNumber = (value, fallback = 0) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const toValidDate = (value) => {
@@ -84,8 +81,111 @@ const computeCustomerPaymentStatus = (firstActivityDate, lastPaymentDate, overdu
     };
 };
 
-const syncCustomerFinancialSummaries = async (txOrClient, customerIds = []) => {
-    await ensureCustomerFinancialSchema();
+const isCreditSaleType = (saleType) => {
+    const normalized = String(saleType || '').trim().toLowerCase();
+    return (
+        normalized === '\u0622\u062c\u0644' || // آجل
+        normalized === '\u0627\u062c\u0644' || // اجل
+        normalized === 'ø¢ø¬ù„' || // legacy mojibake value seen in some environments
+        normalized === 'credit' ||
+        normalized === 'deferred'
+    );
+};
+
+const computeSaleOutstandingAmount = ({ total, discount = 0, paid = 0, saleType }) => {
+    const netTotal = Math.max(0, toNumber(total) - toNumber(discount));
+    const paidAmount = Math.max(0, toNumber(paid));
+    const remaining = Math.max(0, netTotal - paidAmount);
+
+    if (remaining <= 0) return 0;
+    if (isCreditSaleType(saleType)) return remaining;
+
+    // Defensive fallback: if paid amount is missing/incorrect but there is remaining, keep receivable consistent.
+    return remaining;
+};
+
+const parsePaymentDateInput = (value) => {
+    if (!value) return new Date();
+
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const parsed = new Date(`${value}T00:00:00Z`);
+        return Number.isFinite(parsed.getTime()) ? parsed : new Date();
+    }
+
+    const parsed = toValidDate(value);
+    return parsed || new Date();
+};
+
+const applyCustomerFinancialDelta = async (tx, {
+    customerId,
+    balanceDelta = 0,
+    activityDate = null,
+    paymentDate = null
+} = {}) => {
+    const parsedCustomerId = parsePositiveInt(customerId);
+    if (!parsedCustomerId) return;
+
+    const safeBalanceDelta = toNumber(balanceDelta, 0);
+    const safeActivityDate = toValidDate(activityDate);
+    const safePaymentDate = toValidDate(paymentDate);
+
+    await tx.$executeRaw`
+        UPDATE "Customer"
+        SET
+            "balance" = COALESCE("balance", 0) + ${safeBalanceDelta},
+            "firstActivityDate" = CASE
+                WHEN ${safeActivityDate} IS NULL THEN "firstActivityDate"
+                WHEN "firstActivityDate" IS NULL OR "firstActivityDate" > ${safeActivityDate} THEN ${safeActivityDate}
+                ELSE "firstActivityDate"
+            END,
+            "lastPaymentDate" = CASE
+                WHEN ${safePaymentDate} IS NULL THEN "lastPaymentDate"
+                WHEN "lastPaymentDate" IS NULL OR "lastPaymentDate" < ${safePaymentDate} THEN ${safePaymentDate}
+                ELSE "lastPaymentDate"
+            END,
+            "financialsUpdatedAt" = NOW()
+        WHERE "id" = ${parsedCustomerId}
+    `;
+};
+
+const recalculateCustomerActivityDates = async (tx, customerId) => {
+    const parsedCustomerId = parsePositiveInt(customerId);
+    if (!parsedCustomerId) return null;
+
+    const [saleAgg, paymentMinAgg, paymentMaxAgg] = await Promise.all([
+        tx.sale.aggregate({
+            where: { customerId: parsedCustomerId },
+            _min: { invoiceDate: true }
+        }),
+        tx.customerPayment.aggregate({
+            where: { customerId: parsedCustomerId },
+            _min: { paymentDate: true }
+        }),
+        tx.customerPayment.aggregate({
+            where: { customerId: parsedCustomerId },
+            _max: { paymentDate: true }
+        })
+    ]);
+
+    const firstActivityDate = pickEarlierDate(
+        saleAgg?._min?.invoiceDate || null,
+        paymentMinAgg?._min?.paymentDate || null,
+    );
+    const lastPaymentDate = paymentMaxAgg?._max?.paymentDate || null;
+
+    await tx.customer.update({
+        where: { id: parsedCustomerId },
+        data: {
+            firstActivityDate,
+            lastPaymentDate,
+            financialsUpdatedAt: new Date()
+        }
+    });
+
+    return { firstActivityDate, lastPaymentDate };
+};
+
+const calculateCustomerFinancialSummaries = async (txOrClient, customerIds = []) => {
 
     const ids = [...new Set(
         customerIds
@@ -157,6 +257,17 @@ const syncCustomerFinancialSummaries = async (txOrClient, customerIds = []) => {
         };
     });
 
+    const summaryMap = new Map();
+    updates.forEach((summary) => {
+        summaryMap.set(summary.customerId, summary);
+    });
+    return summaryMap;
+};
+
+const persistCustomerFinancialSummaries = async (txOrClient, summaryMap) => {
+    const updates = [...summaryMap.values()];
+    if (updates.length === 0) return 0;
+
     const updateBatchSize = 50;
     for (let i = 0; i < updates.length; i += updateBatchSize) {
         const batch = updates.slice(i, i + updateBatchSize);
@@ -173,16 +284,13 @@ const syncCustomerFinancialSummaries = async (txOrClient, customerIds = []) => {
         );
     }
 
-    const summaryMap = new Map();
-    updates.forEach((summary) => {
-        summaryMap.set(summary.customerId, summary);
-    });
-    return summaryMap;
+    return updates.length;
 };
 
-const recalculateCustomerFinancialSummary = async (txOrClient, customerId) => {
-    const summaries = await syncCustomerFinancialSummaries(txOrClient, [customerId]);
-    return summaries.get(parseInt(customerId, 10)) || null;
+const rebuildCustomerFinancialSummary = async (txOrClient, customerId) => {
+    const summaryMap = await calculateCustomerFinancialSummaries(txOrClient, [customerId]);
+    await persistCustomerFinancialSummaries(txOrClient, summaryMap);
+    return summaryMap.get(parseInt(customerId, 10)) || null;
 };
 
 const dbService = {
@@ -193,10 +301,10 @@ const dbService = {
                 where: { username }
             });
 
-            if (!user) return { error: 'المستخدم غير موجود' };
+            if (!user) return { error: 'Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯' };
 
             const valid = await bcrypt.compare(password, user.password);
-            if (!valid) return { error: 'كلمة المرور غير صحيحة' };
+            if (!valid) return { error: 'ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± ØµØ­ÙŠØ­Ø©' };
 
             const token = jwt.sign({ id: user.id, role: user.role }, SECRET_KEY);
             return { token, user: { id: user.id, name: user.name, role: user.role } };
@@ -230,7 +338,7 @@ const dbService = {
             const salesAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
             const expensesAmount = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-            // حساب الديون من CustomerTransaction
+            // Ø­Ø³Ø§Ø¨ Ø§Ù„Ø¯ÙŠÙˆÙ† Ù…Ù† CustomerTransaction
             const customerDebtResult = await prisma.customerTransaction.aggregate({
                 _sum: {
                     debit: true,
@@ -278,17 +386,17 @@ const dbService = {
 
             if (searchTerm) {
                 where.OR = [
-                    { name: { contains: searchTerm } }, // حذفنا mode: 'insensitive' لأنه غير مدعوم في SQLite بشكل افتراضي، إلا إذا كنت تستخدم PostgreSQL
+                    { name: { contains: searchTerm } }, // Ø­Ø°ÙÙ†Ø§ mode: 'insensitive' Ù„Ø£Ù†Ù‡ ØºÙŠØ± Ù…Ø¯Ø¹ÙˆÙ… ÙÙŠ SQLite Ø¨Ø´ÙƒÙ„ Ø§ÙØªØ±Ø§Ø¶ÙŠØŒ Ø¥Ù„Ø§ Ø¥Ø°Ø§ ÙƒÙ†Øª ØªØ³ØªØ®Ø¯Ù… PostgreSQL
                     { sku: { contains: searchTerm } },
                     { description: { contains: searchTerm } }
                 ];
-                // إذا كان البحث رقما، ابحث في الباركود
+                // Ø¥Ø°Ø§ ÙƒØ§Ù† Ø§Ù„Ø¨Ø­Ø« Ø±Ù‚Ù…Ø§ØŒ Ø§Ø¨Ø­Ø« ÙÙŠ Ø§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯
                 if (!isNaN(searchTerm)) {
                     where.OR.push({ barcode: { contains: searchTerm } });
                 }
             }
 
-            // التأكد من أن حقل الترتيب صالح
+            // Ø§Ù„ØªØ£ÙƒØ¯ Ù…Ù† Ø£Ù† Ø­Ù‚Ù„ Ø§Ù„ØªØ±ØªÙŠØ¨ ØµØ§Ù„Ø­
             const validSortCols = ['id', 'name', 'price', 'cost', 'createdAt'];
             const orderBy = validSortCols.includes(sortCol) ? { [sortCol]: sortDir } : { id: 'desc' };
 
@@ -320,7 +428,7 @@ const dbService = {
 
     async addProduct(productData) {
         try {
-            // تنظيف البيانات
+            // ØªÙ†Ø¸ÙŠÙ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
             const cleanData = {
                 name: productData.name,
                 description: productData.description || null,
@@ -346,7 +454,7 @@ const dbService = {
 
     async updateProduct(id, productData) {
         try {
-            // تنظيف البيانات
+            // ØªÙ†Ø¸ÙŠÙ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
             const cleanData = {};
             if (productData.name !== undefined) cleanData.name = productData.name;
             if (productData.description !== undefined) cleanData.description = productData.description || null;
@@ -566,18 +674,24 @@ const dbService = {
     },
 
     async createSale(saleData) {
-        try {
-            await ensureCustomerFinancialSchema();
+        const perf = startPerfTimer('db:createSale', {
+            hasCustomer: Boolean(saleData?.customerId),
+            saleType: saleData?.saleType || null,
+            itemCount: Array.isArray(saleData?.items) ? saleData.items.length : 0
+        });
 
-            return await prisma.$transaction(async (tx) => {
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedCustomerId = parsePositiveInt(saleData.customerId);
+
                 const newSale = await tx.sale.create({
                     data: {
-                        customer: saleData.customerId ? {
-                            connect: { id: parseInt(saleData.customerId) }
+                        customer: parsedCustomerId ? {
+                            connect: { id: parsedCustomerId }
                         } : undefined,
                         total: parseFloat(saleData.total),
                         discount: parseFloat(saleData.discount || 0),
-                        saleType: saleData.saleType || 'نقدي',
+                        saleType: saleData.saleType || '\u0646\u0642\u062f\u064a',
                         notes: saleData.notes || null,
                         invoiceDate: saleData.invoiceDate
                             ? new Date(saleData.invoiceDate)
@@ -585,7 +699,7 @@ const dbService = {
                     }
                 });
 
-                // إنشاء بنود الفاتورة وتحديث المخزون
+                // Ø¥Ù†Ø´Ø§Ø¡ Ø¨Ù†ÙˆØ¯ Ø§Ù„ÙØ§ØªÙˆØ±Ø© ÙˆØªØ­Ø¯ÙŠØ« Ø§Ù„Ù…Ø®Ø²ÙˆÙ†
                 for (let i = 0; i < saleData.items.length; i++) {
                     const item = saleData.items[i];
 
@@ -606,38 +720,42 @@ const dbService = {
                     });
                 }
 
-                // إنشاء سجل في CustomerTransaction للعميل
-                if (saleData.customerId) {
-                    const transactionAmount = parseFloat(saleData.total) - parseFloat(saleData.discount || 0);
+                const outstandingAmount = computeSaleOutstandingAmount({
+                    total: saleData.total,
+                    discount: saleData.discount || 0,
+                    paid: saleData.paid || 0,
+                    saleType: saleData.saleType
+                });
 
-                    await tx.customerTransaction.create({
-                        data: {
-                            customer: {
-                                connect: { id: parseInt(saleData.customerId) }
-                            },
-                            date: newSale.invoiceDate || new Date(),
-                            type: 'SALE',
-                            referenceType: 'SALE',
-                            referenceId: newSale.id,
-                            debit: transactionAmount,
-                            credit: 0,
-                            notes: `فاتورة #${newSale.id} - ${saleData.notes || 'بيع نقدي'}`
-                        }
+                // Ø¥Ù†Ø´Ø§Ø¡ Ø³Ø¬Ù„ Ø¯ÙŠÙ† ÙÙ‚Ø· Ù„Ùˆ ÙÙŠÙ‡ Ù…ØªØ¨Ù‚ÙŠ ÙØ¹Ù„ÙŠ
+                if (parsedCustomerId) {
+                    if (outstandingAmount > 0) {
+                        await tx.customerTransaction.create({
+                            data: {
+                                customer: {
+                                    connect: { id: parsedCustomerId }
+                                },
+                                date: newSale.invoiceDate || new Date(),
+                                type: 'SALE',
+                                referenceType: 'SALE',
+                                referenceId: newSale.id,
+                                debit: outstandingAmount,
+                                credit: 0,
+                                notes: `ÙØ§ØªÙˆØ±Ø© #${newSale.id} - ${saleData.notes || 'Ø¨ÙŠØ¹'}`
+                            }
+                        });
+                    }
+
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: parsedCustomerId,
+                        balanceDelta: outstandingAmount,
+                        activityDate: newSale.invoiceDate || new Date()
                     });
                 }
 
-                // 🔥 نظام التقييم الذكي التلقائي
-                let customerFinancialSummary = null;
-                if (saleData.customerId) {
-                    customerFinancialSummary = await recalculateCustomerFinancialSummary(
-                        tx,
-                        parseInt(saleData.customerId),
-                    );
-                }
-
-                if (saleData.customerId) {
+                if (parsedCustomerId) {
                     const customer = await tx.customer.findUnique({
-                        where: { id: parseInt(saleData.customerId) },
+                        where: { id: parsedCustomerId },
                         include: {
                             sales: true,
                             payments: true
@@ -645,28 +763,28 @@ const dbService = {
                     });
 
                     if (customer) {
-                        // حساب إجمالي المشتريات
+                        // Ø­Ø³Ø§Ø¨ Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª
                         const totalPurchases = customer.sales.reduce((sum, sale) => sum + sale.total, 0);
 
-                        // حساب التقييم الذكي (0-5 نجوم)
+                        // Ø­Ø³Ø§Ø¨ Ø§Ù„ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ø°ÙƒÙŠ (0-5 Ù†Ø¬ÙˆÙ…)
                         let rating = 0;
 
-                        // معايير التقييم:
-                        // 1. حجم المشتريات (40%)
+                        // Ù…Ø¹Ø§ÙŠÙŠØ± Ø§Ù„ØªÙ‚ÙŠÙŠÙ…:
+                        // 1. Ø­Ø¬Ù… Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª (40%)
                         if (totalPurchases >= 50000) rating += 2;
                         else if (totalPurchases >= 20000) rating += 1.5;
                         else if (totalPurchases >= 10000) rating += 1;
                         else if (totalPurchases >= 5000) rating += 0.5;
 
-                        // 2. عدد المعاملات (20%)
+                        // 2. Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø¹Ø§Ù…Ù„Ø§Øª (20%)
                         const salesCount = customer.sales.length;
                         if (salesCount >= 50) rating += 1;
                         else if (salesCount >= 20) rating += 0.7;
                         else if (salesCount >= 10) rating += 0.5;
                         else if (salesCount >= 5) rating += 0.3;
 
-                        // 3. انتظام السداد (40%) - محسوب من الـ transactions
-                        const currentBalance = customerFinancialSummary?.balance || 0;
+                        // 3. Ø§Ù†ØªØ¸Ø§Ù… Ø§Ù„Ø³Ø¯Ø§Ø¯ (40%) - Ù…Ù† Ø§Ù„Ø±ØµÙŠØ¯ Ø§Ù„Ù…Ù„Ø®Øµ
+                        const currentBalance = customer.balance || 0;
                         const debtRatio = currentBalance / Math.max(totalPurchases, 1);
 
                         if (debtRatio < 0.1 && salesCount >= 5) rating += 2;
@@ -674,21 +792,21 @@ const dbService = {
                         else if (debtRatio < 0.3) rating += 1;
                         else if (debtRatio < 0.5) rating += 0.5;
 
-                        rating = Math.min(5, rating); // الحد الأقصى 5 نجوم
+                        rating = Math.min(5, rating); // Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ 5 Ù†Ø¬ÙˆÙ…
 
-                        // تصنيف تلقائي للعميل
-                        let customerType = 'عادي';
+                        // ØªØµÙ†ÙŠÙ ØªÙ„Ù‚Ø§Ø¦ÙŠ Ù„Ù„Ø¹Ù…ÙŠÙ„
+                        let customerType = 'Ø¹Ø§Ø¯ÙŠ';
                         if (totalPurchases >= 50000 && rating >= 4) {
                             customerType = 'VIP';
                         } else if (totalPurchases >= 30000 && salesCount >= 10) {
-                            customerType = 'تاجر جملة';
+                            customerType = 'ØªØ§Ø¬Ø± Ø¬Ù…Ù„Ø©';
                         } else if (totalPurchases >= 20000 || rating >= 3.5) {
                             customerType = 'VIP';
                         }
 
-                        // تحديث بيانات العميل (rating و customerType فقط)
+                        // ØªØ­Ø¯ÙŠØ« Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„ (rating Ùˆ customerType ÙÙ‚Ø·)
                         await tx.customer.update({
-                            where: { id: parseInt(saleData.customerId) },
+                            where: { id: parsedCustomerId },
                             data: {
                                 rating,
                                 customerType
@@ -699,7 +817,11 @@ const dbService = {
 
                 return newSale;
             });
+
+            perf({ rows: 1 });
+            return result;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },
@@ -727,11 +849,13 @@ const dbService = {
     },
 
     async deleteSale(saleId) {
-        try {
-            await ensureCustomerFinancialSchema();
+        const perf = startPerfTimer('db:deleteSale', {
+            saleId: parseInt(saleId, 10) || null
+        });
 
-            return await prisma.$transaction(async (tx) => {
-                // الحصول على بيانات الفاتورة
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                // Ø§Ù„Ø­ØµÙˆÙ„ Ø¹Ù„Ù‰ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ÙØ§ØªÙˆØ±Ø©
                 const sale = await tx.sale.findUnique({
                     where: { id: parseInt(saleId) },
                     include: {
@@ -744,7 +868,21 @@ const dbService = {
                     return { error: 'Sale not found' };
                 }
 
-                // استرجاع الكميات للمنتجات
+                const saleTransactions = await tx.customerTransaction.findMany({
+                    where: {
+                        referenceType: 'SALE',
+                        referenceId: parseInt(saleId)
+                    },
+                    select: {
+                        debit: true,
+                        credit: true
+                    }
+                });
+                const previousSaleDelta = saleTransactions.reduce((sum, trx) => (
+                    sum + (toNumber(trx.debit) - toNumber(trx.credit))
+                ), 0);
+
+                // Ø§Ø³ØªØ±Ø¬Ø§Ø¹ Ø§Ù„ÙƒÙ…ÙŠØ§Øª Ù„Ù„Ù…Ù†ØªØ¬Ø§Øª
                 for (const item of sale.items) {
                     await tx.variant.update({
                         where: { id: item.variantId },
@@ -752,43 +890,53 @@ const dbService = {
                     });
                 }
 
-                // حذف سجل CustomerTransaction المقابل
-                if (sale.customerId) {
-                    await tx.customerTransaction.deleteMany({
-                        where: {
-                            customerId: sale.customerId,
-                            referenceType: 'SALE',
-                            referenceId: parseInt(saleId)
-                        }
-                    });
-                }
+                await tx.customerTransaction.deleteMany({
+                    where: {
+                        referenceType: 'SALE',
+                        referenceId: parseInt(saleId)
+                    }
+                });
 
-                // حذف بنود الفاتورة
+                // Ø­Ø°Ù Ø¨Ù†ÙˆØ¯ Ø§Ù„ÙØ§ØªÙˆØ±Ø©
                 await tx.saleItem.deleteMany({
                     where: { saleId: parseInt(saleId) }
                 });
 
-                // حذف الفاتورة
+                // Ø­Ø°Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©
                 const deletedSale = await tx.sale.delete({
                     where: { id: parseInt(saleId) }
                 });
 
                 if (sale.customerId) {
-                    await recalculateCustomerFinancialSummary(tx, sale.customerId);
+                    if (previousSaleDelta !== 0) {
+                        await applyCustomerFinancialDelta(tx, {
+                            customerId: sale.customerId,
+                            balanceDelta: -previousSaleDelta
+                        });
+                    }
+                    await recalculateCustomerActivityDates(tx, sale.customerId);
                 }
 
                 return { success: true, data: deletedSale };
             });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },
 
     async updateSale(saleId, saleData) {
-        try {
-            await ensureCustomerFinancialSchema();
+        const perf = startPerfTimer('db:updateSale', {
+            saleId: parseInt(saleId, 10) || null,
+            hasCustomer: Object.prototype.hasOwnProperty.call(saleData || {}, 'customerId'),
+            itemCount: Array.isArray(saleData?.items) ? saleData.items.length : 0
+        });
 
-            return await prisma.$transaction(async (tx) => {
+        try {
+            const result = await prisma.$transaction(async (tx) => {
                 // الحصول على الفاتورة الحالية
                 const currentSale = await tx.sale.findUnique({
                     where: { id: parseInt(saleId) },
@@ -802,10 +950,23 @@ const dbService = {
                     return { error: 'Sale not found' };
                 }
 
-                const affectedCustomerIds = new Set();
-                if (currentSale.customerId) {
-                    affectedCustomerIds.add(currentSale.customerId);
-                }
+                const newCustomerId = Object.prototype.hasOwnProperty.call(saleData, 'customerId')
+                    ? parsePositiveInt(saleData.customerId)
+                    : currentSale.customerId;
+
+                const oldSaleTransactions = await tx.customerTransaction.findMany({
+                    where: {
+                        referenceType: 'SALE',
+                        referenceId: parseInt(saleId)
+                    },
+                    select: {
+                        debit: true,
+                        credit: true
+                    }
+                });
+                const oldOutstanding = oldSaleTransactions.reduce((sum, trx) => (
+                    sum + (toNumber(trx.debit) - toNumber(trx.credit))
+                ), 0);
 
                 // استرجاع الكميات القديمة
                 for (const item of currentSale.items) {
@@ -815,16 +976,12 @@ const dbService = {
                     });
                 }
 
-                // حذف سجل CustomerTransaction القديم
-                if (currentSale.customerId) {
-                    await tx.customerTransaction.deleteMany({
-                        where: {
-                            customerId: currentSale.customerId,
-                            referenceType: 'SALE',
-                            referenceId: parseInt(saleId)
-                        }
-                    });
-                }
+                await tx.customerTransaction.deleteMany({
+                    where: {
+                        referenceType: 'SALE',
+                        referenceId: parseInt(saleId)
+                    }
+                });
 
                 // حذف البنود القديمة
                 await tx.saleItem.deleteMany({
@@ -847,7 +1004,6 @@ const dbService = {
                             }
                         });
 
-                        // خصم الكميات الجديدة
                         await tx.variant.update({
                             where: { id: parseInt(item.variantId) },
                             data: { quantity: { decrement: parseInt(item.quantity) } }
@@ -859,6 +1015,11 @@ const dbService = {
                 const updatedSale = await tx.sale.update({
                     where: { id: parseInt(saleId) },
                     data: {
+                        customer: Object.prototype.hasOwnProperty.call(saleData, 'customerId')
+                            ? (newCustomerId
+                                ? { connect: { id: newCustomerId } }
+                                : { disconnect: true })
+                            : undefined,
                         total: parseFloat(saleData.total),
                         discount: parseFloat(saleData.discount || 0),
                         saleType: saleData.saleType || 'نقدي',
@@ -873,33 +1034,66 @@ const dbService = {
                     }
                 });
 
+                const newOutstanding = computeSaleOutstandingAmount({
+                    total: saleData.total,
+                    discount: saleData.discount || 0,
+                    paid: saleData.paid || 0,
+                    saleType: saleData.saleType
+                });
+
                 // إنشاء سجل CustomerTransaction الجديد
-                if (saleData.customerId) {
-                    affectedCustomerIds.add(parseInt(saleData.customerId));
-                    const transactionAmount = parseFloat(saleData.total) - parseFloat(saleData.discount || 0);
+                if (newCustomerId && newOutstanding > 0) {
                     await tx.customerTransaction.create({
                         data: {
                             customer: {
-                                connect: { id: parseInt(saleData.customerId) }
+                                connect: { id: newCustomerId }
                             },
                             date: updatedSale.invoiceDate || new Date(),
                             type: 'SALE',
                             referenceType: 'SALE',
                             referenceId: updatedSale.id,
-                            debit: transactionAmount,
+                            debit: newOutstanding,
                             credit: 0,
                             notes: `فاتورة معدلة #${updatedSale.id} - ${saleData.notes || 'بيع'}`
                         }
                     });
                 }
 
-                for (const customerId of affectedCustomerIds) {
-                    await recalculateCustomerFinancialSummary(tx, customerId);
+                if (currentSale.customerId && currentSale.customerId === newCustomerId) {
+                    const delta = newOutstanding - oldOutstanding;
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: newCustomerId,
+                        balanceDelta: delta,
+                        activityDate: updatedSale.invoiceDate || new Date()
+                    });
+                    await recalculateCustomerActivityDates(tx, newCustomerId);
+                } else {
+                    if (currentSale.customerId) {
+                        if (oldOutstanding !== 0) {
+                            await applyCustomerFinancialDelta(tx, {
+                                customerId: currentSale.customerId,
+                                balanceDelta: -oldOutstanding
+                            });
+                        }
+                        await recalculateCustomerActivityDates(tx, currentSale.customerId);
+                    }
+
+                    if (newCustomerId) {
+                        await applyCustomerFinancialDelta(tx, {
+                            customerId: newCustomerId,
+                            balanceDelta: newOutstanding,
+                            activityDate: updatedSale.invoiceDate || new Date()
+                        });
+                    }
                 }
 
                 return { success: true, data: updatedSale };
             });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },
@@ -950,17 +1144,17 @@ const dbService = {
                         }
                     });
 
-                    // زيادة المخزون
+                    // Ø²ÙŠØ§Ø¯Ø© Ø§Ù„Ù…Ø®Ø²ÙˆÙ†
                     await tx.variant.update({
                         where: { id: parseInt(item.variantId) },
                         data: {
                             quantity: { increment: parseInt(item.quantity) },
-                            cost: parseFloat(item.cost) // تحديث سعر التكلفة
+                            cost: parseFloat(item.cost) // ØªØ­Ø¯ÙŠØ« Ø³Ø¹Ø± Ø§Ù„ØªÙƒÙ„ÙØ©
                         }
                     });
                 }
 
-                // تحديث رصيد المورد
+                // ØªØ­Ø¯ÙŠØ« Ø±ØµÙŠØ¯ Ø§Ù„Ù…ÙˆØ±Ø¯
                 if (purchaseData.supplierId) {
                     const remaining = parseFloat(purchaseData.total) - parseFloat(purchaseData.paid || 0);
                     await tx.supplier.update({
@@ -976,7 +1170,7 @@ const dbService = {
         }
     },
 
-    // ==================== RETURNS (المرتجعات) ====================
+    // ==================== RETURNS (Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª) ====================
     async getReturns() {
         try {
             return await prisma.return.findMany({
@@ -999,10 +1193,13 @@ const dbService = {
     },
 
     async createReturn(returnData) {
-        try {
-            await ensureCustomerFinancialSchema();
+        const perf = startPerfTimer('db:createReturn', {
+            hasCustomer: Boolean(returnData?.customerId),
+            itemCount: Array.isArray(returnData?.items) ? returnData.items.length : 0
+        });
 
-            return await prisma.$transaction(async (tx) => {
+        try {
+            const result = await prisma.$transaction(async (tx) => {
                 const newReturn = await tx.return.create({
                     data: {
                         saleId: returnData.saleId ? parseInt(returnData.saleId) : null,
@@ -1034,27 +1231,39 @@ const dbService = {
 
                 // إنشاء سجل مرتجعات في CustomerTransaction
                 if (returnData.customerId) {
+                    const parsedCustomerId = parseInt(returnData.customerId);
+                    const returnAmount = Math.max(0, toNumber(returnData.total));
+                    const returnDate = new Date();
+
                     await tx.customerTransaction.create({
                         data: {
                             customer: {
-                                connect: { id: parseInt(returnData.customerId) }
+                                connect: { id: parsedCustomerId }
                             },
-                            date: new Date(),
+                            date: returnDate,
                             type: 'RETURN',
                             referenceType: 'RETURN',
                             referenceId: newReturn.id,
                             debit: 0,
-                            credit: parseFloat(returnData.total),
+                            credit: returnAmount,
                             notes: `مرتجع #${newReturn.id} - ${returnData.notes || 'مرتجع'}`
                         }
                     });
 
-                    await recalculateCustomerFinancialSummary(tx, parseInt(returnData.customerId));
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: parsedCustomerId,
+                        balanceDelta: -returnAmount,
+                        activityDate: returnDate
+                    });
                 }
 
                 return newReturn;
             });
+
+            perf({ rows: 1 });
+            return result;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },
@@ -1062,24 +1271,16 @@ const dbService = {
     // ==================== CUSTOMERS ====================
     async getCustomerBalance(customerId) {
         try {
-            await ensureCustomerFinancialSchema();
-
             const parsedCustomerId = parseInt(customerId);
             const customer = await prisma.customer.findUnique({
                 where: { id: parsedCustomerId },
                 select: {
                     id: true,
-                    balance: true,
-                    financialsUpdatedAt: true
+                    balance: true
                 }
             });
 
             if (!customer) return 0;
-
-            if (!customer.financialsUpdatedAt) {
-                const summary = await recalculateCustomerFinancialSummary(prisma, parsedCustomerId);
-                return summary?.balance || 0;
-            }
 
             return customer.balance || 0;
         } catch (error) {
@@ -1135,148 +1336,115 @@ const dbService = {
         }
     },
 
-    async getCustomers({ page = 1, pageSize = 50, searchTerm = '', customerType = null, sortCol = 'id', sortDir = 'desc', overdueThreshold = 30 } = {}) {
-        await ensureCustomerQueryIndexes();
+    async getCustomers({
+        page = 1,
+        pageSize = 1000,
+        searchTerm = '',
+        customerType = null,
+        city = '',
+        sortCol = 'createdAt',
+        sortDir = 'desc',
+        overdueThreshold = 30
+    } = {}) {
+        const perf = startPerfTimer('db:getCustomers', {
+            page,
+            pageSize,
+            searchLength: String(searchTerm || '').trim().length,
+            customerType: customerType || 'all',
+            cityLength: String(city || '').trim().length,
+            sortCol,
+            sortDir
+        });
 
-        const startTime = performance.now();
         try {
             const safePage = Math.max(1, parseInt(page, 10) || 1);
-            const safePageSize = Math.max(1, parseInt(pageSize, 10) || 50);
-            const timestamp = new Date().toLocaleTimeString('ar-EG', {
-                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
-            });
-            customerQueryLog(
-                `[${timestamp}] getCustomers page=${safePage} pageSize=${safePageSize} search="${searchTerm}" type=${customerType} overdue=${overdueThreshold} sort=${sortCol}:${sortDir}`,
-            );
-
+            const safePageSize = Math.min(2000, Math.max(1, parseInt(pageSize, 10) || 1000));
+            const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
             const skip = (safePage - 1) * safePageSize;
-            const where = {};
 
+            const where = {};
             const normalizedSearch = String(searchTerm || '').trim();
-            if (normalizedSearch.length >= 2) {
-                customerQueryLog(`[${timestamp}] apply search filter "${normalizedSearch}"`);
+            const normalizedCity = String(city || '').trim();
+
+            if (normalizedSearch.length > 0) {
                 where.OR = [
                     { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
-                    { phone: { startsWith: normalizedSearch } },
-                    { city: { startsWith: normalizedSearch, mode: 'insensitive' } }
+                    { phone: { startsWith: normalizedSearch } }
                 ];
             }
 
             if (customerType && customerType !== 'all') {
-                customerQueryLog(`[${timestamp}] apply customer type filter: ${customerType}`);
                 where.customerType = customerType;
             }
 
-            // التعامل مع الترتيب
-            // ملاحظة: الترتيب حسب "balance" أو الحقول المحسوبة يتطلب منطق خاص
-            const validSortCols = ['id', 'name', 'phone', 'city', 'createdAt', 'creditLimit'];
-            let orderBy = {};
-            if (validSortCols.includes(sortCol)) {
-                orderBy = { [sortCol]: sortDir };
-                customerQueryLog(`[${timestamp}] orderBy: ${sortCol} ${sortDir}`);
-            } else {
-                orderBy = { createdAt: 'desc' };
-                customerQueryLog(`[${timestamp}] orderBy fallback: createdAt desc`);
+            if (normalizedCity.length > 0) {
+                where.city = { startsWith: normalizedCity, mode: 'insensitive' };
             }
 
-            customerQueryLog(`[${timestamp}] querying database`, where, orderBy);
-
-            const dbStartTime = performance.now();
+            const sortable = new Set(['balance', 'lastPaymentDate', 'createdAt', 'name', 'id']);
+            const safeSortCol = sortable.has(sortCol) ? sortCol : 'createdAt';
+            const orderBy = safeSortCol === 'lastPaymentDate'
+                ? [{ lastPaymentDate: safeSortDir }, { id: 'desc' }]
+                : { [safeSortCol]: safeSortDir };
 
             const [customers, total] = await Promise.all([
                 prisma.customer.findMany({
                     skip,
                     take: safePageSize,
                     where,
-                    orderBy
+                    orderBy,
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        phone2: true,
+                        address: true,
+                        city: true,
+                        district: true,
+                        notes: true,
+                        creditLimit: true,
+                        customerType: true,
+                        rating: true,
+                        balance: true,
+                        firstActivityDate: true,
+                        lastPaymentDate: true,
+                        createdAt: true
+                    }
                 }),
                 prisma.customer.count({ where })
             ]);
 
-            const dbEndTime = performance.now();
-            const dbDuration = (dbEndTime - dbStartTime).toFixed(2);
-
-            customerQueryLog(`[${timestamp}] db rows=${customers.length} total=${total} took=${dbDuration}ms`);
-
-            if (customers.length === 0) {
-                return {
-                    data: [],
-                    total,
-                    page: safePage,
-                    totalPages: Math.ceil(total / safePageSize)
-                };
-            }
-
-            const unsyncedCustomerIds = customers
-                .filter((customer) => !customer.financialsUpdatedAt)
-                .map((customer) => customer.id);
-
-            let syncedFinancialsMap = new Map();
-            if (unsyncedCustomerIds.length > 0) {
-                const statsStartTime = performance.now();
-                syncedFinancialsMap = await syncCustomerFinancialSummaries(prisma, unsyncedCustomerIds);
-                const statsEndTime = performance.now();
-                const statsDuration = (statsEndTime - statsStartTime).toFixed(2);
-                customerQueryLog(
-                    `[${timestamp}] synced missing customer financials (${unsyncedCustomerIds.length}) in ${statsDuration}ms`,
-                );
-            }
-
-            const customersWithDetails = customers.map((customer) => {
-                const syncedFinancials = syncedFinancialsMap.get(customer.id);
-                const balance = syncedFinancials?.balance ?? (customer.balance || 0);
-                const firstActivityDate = syncedFinancials?.firstActivityDate ?? customer.firstActivityDate ?? null;
-                const lastPaymentDate = syncedFinancials?.lastPaymentDate ?? customer.lastPaymentDate ?? null;
+            const data = customers.map((customer) => {
                 const status = computeCustomerPaymentStatus(
-                    firstActivityDate,
-                    lastPaymentDate,
+                    customer.firstActivityDate,
+                    customer.lastPaymentDate,
                     overdueThreshold,
                 );
 
                 return {
                     ...customer,
-                    balance,
-                    firstActivityDate,
-                    lastPaymentDate,
-                    financialsUpdatedAt: syncedFinancials?.financialsUpdatedAt ?? customer.financialsUpdatedAt ?? null,
+                    balance: customer.balance || 0,
                     lastPaymentDays: status.lastPaymentDays,
                     isOverdue: status.isOverdue
                 };
             });
 
-            // إذا كان الترتيب مطلوب حسب الرصيد
-            if (sortCol === 'balance') {
-                customerQueryLog(`[${timestamp}] sorting by balance`);
-                customersWithDetails.sort((a, b) => sortDir === 'asc' ? a.balance - b.balance : b.balance - a.balance);
-            }
+            perf({ rows: data.length });
 
-            const result = {
-                data: customersWithDetails,
+            return {
+                data,
                 total,
                 page: safePage,
-                totalPages: Math.ceil(total / safePageSize)
+                totalPages: Math.max(1, Math.ceil(total / safePageSize))
             };
-
-            const endTime = performance.now();
-            const totalDuration = (endTime - startTime).toFixed(2);
-
-            customerQueryLog(`[${timestamp}] getCustomers done rows=${result.data.length} total=${result.total} totalTime=${totalDuration}ms`);
-            return result;
         } catch (error) {
-            const endTime = performance.now();
-            const duration = (endTime - startTime).toFixed(2);
-            const timestamp = new Date().toLocaleTimeString('ar-EG', {
-                hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
-            });
-            console.error(`[${timestamp}] getCustomers error after ${duration}ms:`, error);
+            perf({ error });
             return { error: error.message };
         }
     },
 
     async getCustomer(id) {
         try {
-            await ensureCustomerFinancialSchema();
-
             const parsedCustomerId = parseInt(id);
             const customer = await prisma.customer.findUnique({
                 where: { id: parsedCustomerId }
@@ -1284,20 +1452,15 @@ const dbService = {
 
             if (!customer) return { error: 'العميل غير موجود' };
 
-            const syncedFinancials = customer.financialsUpdatedAt
-                ? null
-                : await recalculateCustomerFinancialSummary(prisma, parsedCustomerId);
-
-            const firstActivityDate = syncedFinancials?.firstActivityDate ?? customer.firstActivityDate ?? null;
-            const lastPaymentDate = syncedFinancials?.lastPaymentDate ?? customer.lastPaymentDate ?? null;
-            const status = computeCustomerPaymentStatus(firstActivityDate, lastPaymentDate, 30);
+            const status = computeCustomerPaymentStatus(
+                customer.firstActivityDate,
+                customer.lastPaymentDate,
+                30,
+            );
 
             return {
                 ...customer,
-                balance: syncedFinancials?.balance ?? customer.balance ?? 0,
-                firstActivityDate,
-                lastPaymentDate,
-                financialsUpdatedAt: syncedFinancials?.financialsUpdatedAt ?? customer.financialsUpdatedAt ?? null,
+                balance: customer.balance ?? 0,
                 lastPaymentDays: status.lastPaymentDays,
                 isOverdue: status.isOverdue
             };
@@ -1344,8 +1507,6 @@ const dbService = {
 
     async addCustomer(customerData) {
         try {
-            await ensureCustomerFinancialSchema();
-
             return await prisma.customer.create({
                 data: {
                     name: customerData.name,
@@ -1400,88 +1561,67 @@ const dbService = {
     },
 
     async addCustomerPayment(paymentData) {
+        const perf = startPerfTimer('db:addCustomerPayment', {
+            hasPaymentDate: Boolean(paymentData?.paymentDate)
+        });
+
         try {
-            await ensureCustomerFinancialSchema();
-            // تحويل التاريخ بشكل صحيح ✅
-            let paymentDate = null;
-
-            if (paymentData.paymentDate) {
-                const dateStr = paymentData.paymentDate;
-
-                if (typeof dateStr === 'string') {
-                    // إذا كانت بصيغة YYYY-MM-DD (مثل "2026-01-29")
-                    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                        // تحويل صحيح للتاريخ مع الحفاظ على المنطقة الزمنية
-                        const [year, month, day] = dateStr.split('-');
-                        paymentDate = new Date(`${year}-${month}-${day}T00:00:00Z`);
-                    } else {
-                        // إذا كانت صيغة أخرى (ISO, إلخ)
-                        paymentDate = new Date(dateStr);
-                    }
-                } else if (dateStr instanceof Date) {
-                    paymentDate = dateStr;
-                } else {
-                    paymentDate = new Date(dateStr);
-                }
-
-                // التحقق من صحة التاريخ
-                if (isNaN(paymentDate.getTime())) {
-                    console.warn('⚠️ تاريخ غير صحيح:', dateStr, '- سيتم استخدام اليوم الحالي');
-                    paymentDate = new Date();
-                }
-            } else {
-                // إذا لم يتم تحديد تاريخ، استخدم اليوم الحالي
-                paymentDate = new Date();
+            const customerId = parsePositiveInt(paymentData.customerId);
+            if (!customerId) {
+                return { error: 'Invalid customerId' };
             }
 
-            console.log('💾 إضافة دفعة:');
-            console.log('   • التاريخ المدخل:', paymentData.paymentDate);
-            console.log('   • التاريخ المعالج:', paymentDate);
-            console.log('   • التاريخ بصيغة ISO:', paymentDate.toISOString());
-            console.log('   • طريقة الدفع:', paymentData.paymentMethodId);
+            const paymentAmount = Math.max(0, toNumber(paymentData.amount));
+            if (paymentAmount <= 0) {
+                return { error: 'Invalid payment amount' };
+            }
 
-            return await prisma.$transaction(async (tx) => {
+            const paymentDate = parsePaymentDateInput(paymentData.paymentDate);
+
+            const result = await prisma.$transaction(async (tx) => {
                 const payment = await tx.customerPayment.create({
                     data: {
                         customer: {
-                            connect: { id: parseInt(paymentData.customerId) }
+                            connect: { id: customerId }
                         },
                         paymentMethod: {
                             connect: { id: parseInt(paymentData.paymentMethodId) || 1 }
                         },
-                        amount: parseFloat(paymentData.amount),
+                        amount: paymentAmount,
                         notes: paymentData.notes || null,
-                        paymentDate: paymentDate, // ✅ صحيح الآن
+                        paymentDate
                     }
                 });
 
-                // إنشاء سجل في CustomerTransaction
                 await tx.customerTransaction.create({
                     data: {
                         customer: {
-                            connect: { id: parseInt(paymentData.customerId) }
+                            connect: { id: customerId }
                         },
                         date: paymentDate,
                         type: 'PAYMENT',
                         referenceType: 'PAYMENT',
                         referenceId: payment.id,
                         debit: 0,
-                        credit: parseFloat(paymentData.amount),
+                        credit: paymentAmount,
                         notes: `دفعة #${payment.id} - ${paymentData.notes || 'دفعة نقدية'}`
                     }
                 });
 
-                await recalculateCustomerFinancialSummary(tx, parseInt(paymentData.customerId));
-
-                console.log('✅ تم حفظ الدفعة بنجاح:');
-                console.log('   • ID:', payment.id);
-                console.log('   • التاريخ المحفوظ:', payment.paymentDate);
-                console.log('   • طريقة الدفع ID:', payment.paymentMethodId);
+                await applyCustomerFinancialDelta(tx, {
+                    customerId,
+                    balanceDelta: -paymentAmount,
+                    activityDate: paymentDate,
+                    paymentDate
+                });
 
                 return payment;
             });
+
+            perf({ rows: 1 });
+            return result;
         } catch (error) {
-            console.error('❌ خطأ في إضافة الدفعة:', error);
+            perf({ error });
             return { error: error.message };
         }
     },
@@ -1499,20 +1639,26 @@ const dbService = {
     },
 
     async deleteCustomerPayment(paymentId) {
+        const perf = startPerfTimer('db:deleteCustomerPayment', {
+            paymentId: parseInt(paymentId, 10) || null
+        });
+
         try {
-            await ensureCustomerFinancialSchema();
             return await prisma.$transaction(async (tx) => {
-                // الحصول على بيانات الدفعة
                 const payment = await tx.customerPayment.findUnique({
                     where: { id: parseInt(paymentId) },
-                    include: { customer: true }
+                    select: {
+                        id: true,
+                        customerId: true,
+                        amount: true,
+                        paymentDate: true
+                    }
                 });
 
                 if (!payment) {
                     return { error: 'Payment not found' };
                 }
 
-                // حذف سجل CustomerTransaction المقابل
                 await tx.customerTransaction.deleteMany({
                     where: {
                         customerId: payment.customerId,
@@ -1521,17 +1667,129 @@ const dbService = {
                     }
                 });
 
-                // حذف الدفعة
                 const deletedPayment = await tx.customerPayment.delete({
                     where: { id: parseInt(paymentId) }
                 });
 
-                await recalculateCustomerFinancialSummary(tx, payment.customerId);
+                await applyCustomerFinancialDelta(tx, {
+                    customerId: payment.customerId,
+                    balanceDelta: Math.max(0, toNumber(payment.amount))
+                });
 
+                await recalculateCustomerActivityDates(tx, payment.customerId);
+
+                perf({ rows: 1 });
                 return { success: true, data: deletedPayment };
             });
         } catch (error) {
+            perf({ error });
             return { error: error.message };
+        }
+    },
+
+    async rebuildCustomerFinancials(customerId) {
+        const parsedCustomerId = parsePositiveInt(customerId);
+        if (!parsedCustomerId) {
+            return { error: 'Invalid customerId' };
+        }
+
+        const perf = startPerfTimer('db:rebuildCustomerFinancials', {
+            customerId: parsedCustomerId
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const customer = await tx.customer.findUnique({
+                    where: { id: parsedCustomerId },
+                    select: { id: true }
+                });
+
+                if (!customer) {
+                    return { error: 'Customer not found' };
+                }
+
+                const summary = await rebuildCustomerFinancialSummary(tx, parsedCustomerId);
+                return { success: true, data: summary };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async rebuildAllCustomersFinancials({ batchSize = 200, startAfterId = 0 } = {}) {
+        const safeBatchSize = Math.min(1000, Math.max(10, parseInt(batchSize, 10) || 200));
+        let cursorId = Math.max(0, parseInt(startAfterId, 10) || 0);
+
+        const perf = startPerfTimer('db:rebuildAllCustomersFinancials', {
+            batchSize: safeBatchSize,
+            startAfterId: cursorId
+        });
+
+        try {
+            let processed = 0;
+            let updated = 0;
+            let batches = 0;
+
+            while (true) {
+                const batchCustomers = await prisma.customer.findMany({
+                    where: { id: { gt: cursorId } },
+                    orderBy: { id: 'asc' },
+                    take: safeBatchSize,
+                    select: { id: true }
+                });
+
+                if (batchCustomers.length === 0) break;
+
+                const batchIds = batchCustomers.map((customer) => customer.id);
+
+                const updatedInBatch = await prisma.$transaction(async (tx) => {
+                    const summaryMap = await calculateCustomerFinancialSummaries(tx, batchIds);
+                    return persistCustomerFinancialSummaries(tx, summaryMap);
+                });
+
+                processed += batchIds.length;
+                updated += updatedInBatch;
+                batches += 1;
+                cursorId = batchIds[batchIds.length - 1];
+
+                console.log(`[REBUILD][CUSTOMERS] batch=${batches} processed=${processed} updated=${updated} cursor=${cursorId}`);
+            }
+
+            const result = {
+                success: true,
+                processed,
+                updated,
+                batches,
+                batchSize: safeBatchSize
+            };
+
+            perf({ rows: processed });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async checkCustomerFinancialsHealth() {
+        try {
+            await prisma.customer.findFirst({
+                select: {
+                    id: true,
+                    balance: true,
+                    firstActivityDate: true,
+                    lastPaymentDate: true,
+                    financialsUpdatedAt: true
+                }
+            });
+
+            return { ok: true };
+        } catch (error) {
+            return { ok: false, error: error.message };
         }
     },
 
@@ -1543,10 +1801,10 @@ const dbService = {
                 orderBy: { createdAt: 'asc' }
             });
 
-            console.log('📋 طرق الدفع:', methods);
+            console.log('ðŸ“‹ Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', methods);
             return methods;
         } catch (error) {
-            console.error('❌ خطأ في جلب طرق الدفع:', error);
+            console.error('âŒ Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', error);
             return [];
         }
     },
@@ -1568,7 +1826,7 @@ const dbService = {
                 count: method.payments.length
             }));
         } catch (error) {
-            console.error('❌ خطأ في جلب إحصائيات طرق الدفع:', error);
+            console.error('âŒ Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', error);
             return [];
         }
     },
@@ -1747,8 +2005,17 @@ const dbService = {
         } catch (error) {
             return { error: error.message };
         }
+    },
+
+    async disconnect() {
+        await prisma.$disconnect();
     }
 };
 
 module.exports = dbService;
+
+
+
+
+
 

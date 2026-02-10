@@ -18,10 +18,14 @@ export default function DebtReminders() {
 
     const loadCustomers = async () => {
         try {
-            const data = await window.api.getCustomers();
-            if (!data.error) {
+            const result = await window.api.getCustomers();
+            if (!result?.error) {
+                const customersData = Array.isArray(result)
+                    ? result
+                    : (Array.isArray(result?.data) ? result.data : []);
+
                 // ترتيب حسب الديون الأعلى
-                const debtors = data
+                const debtors = customersData
                     .filter(c => c.balance > 0)
                     .sort((a, b) => b.balance - a.balance);
                 setCustomers(debtors);

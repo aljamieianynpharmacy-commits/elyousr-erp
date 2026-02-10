@@ -44,8 +44,13 @@ export default function Returns() {
 
     const loadCustomers = async () => {
         try {
-            const data = await window.api.getCustomers();
-            if (!data.error) setCustomers(data);
+            const result = await window.api.getCustomers();
+            if (!result?.error) {
+                const customersData = Array.isArray(result)
+                    ? result
+                    : (Array.isArray(result?.data) ? result.data : []);
+                setCustomers(customersData);
+            }
         } catch (err) {
             console.error('فشل تحميل العملاء');
         }

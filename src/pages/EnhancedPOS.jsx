@@ -1165,7 +1165,7 @@ export default function EnhancedPOS() {
                     creditLimit: 0,
                     customerType: "عادي",
                 });
-                loadData();
+                loadData(true);
 
                 if (res && res.id) {
                     updateInvoice({ customer: res });

@@ -1,8 +1,14 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import CustomerLedger from "./CustomerLedger";
 import InvoicePreview from "./InvoicePreview";
 import VariantModal from "../components/VariantModal";
 import NewCustomerModal from "../components/NewCustomerModal";
+import PaymentModal from "../components/PaymentModal";
+import {
+    POS_EDITOR_REQUEST_EVENT,
+    readPosEditorRequest,
+    clearPosEditorRequest
+} from "../utils/posEditorBridge";
 
 /**
  * Toast Notification Component
@@ -139,6 +145,64 @@ const playSound = (soundType) => {
  * توليد معرّف فريد للفاتورة
  */
 const generateInvoiceId = () => `INV-${Date.now().toString().slice(-6)}`;
+const getTodayDate = () => new Date().toISOString().split("T")[0];
+
+const toNumberSafe = (value, fallback = 0) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toInputDate = (value) => {
+    if (!value) return getTodayDate();
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return getTodayDate();
+    return parsed.toISOString().split("T")[0];
+};
+
+const createEmptyInvoice = (overrides = {}) => ({
+    id: generateInvoiceId(),
+    invoiceDate: getTodayDate(),
+    cart: [],
+    customer: null,
+    discount: 0,
+    discountType: "value",
+    paidAmount: "",
+    saleType: "نقدي",
+    paymentMethod: "Cash",
+    notes: "",
+    editorMode: "sale",
+    isEditMode: false,
+    sourceSaleId: null,
+    sourcePaymentId: null,
+    paymentEdit: null,
+    ...overrides,
+});
+
+const normalizeStoredInvoice = (invoice = {}) => {
+    const normalizedPaymentEdit = invoice?.paymentEdit
+        ? {
+            ...invoice.paymentEdit,
+            amount: toNumberSafe(invoice.paymentEdit.amount, 0),
+            paymentDate: toInputDate(invoice.paymentEdit.paymentDate),
+            paymentMethodId: parseInt(invoice.paymentEdit.paymentMethodId, 10) || 1,
+        }
+        : null;
+
+    return createEmptyInvoice({
+        ...invoice,
+        id: invoice.id || generateInvoiceId(),
+        invoiceDate: toInputDate(invoice.invoiceDate),
+        cart: Array.isArray(invoice.cart) ? invoice.cart : [],
+        customer: invoice.customer || null,
+        paymentEdit: normalizedPaymentEdit,
+    });
+};
+
+const isCreditSaleType = (saleType) => {
+    const normalized = String(saleType || "").trim().toLowerCase();
+    return normalized === "آجل" || normalized === "اجل" || normalized === "credit" || normalized === "deferred";
+};
 
 /**
  * ============================================
@@ -150,40 +214,47 @@ const generateInvoiceId = () => `INV-${Date.now().toString().slice(-6)}`;
  * عنصان تبويب الفاتورة
  * يعرض اسم العميل أو رقم الفاتورة
  */
-const InvoiceTab = ({ invoice, isActive, onSelect, onClose, canClose }) => (
-    <div
-        onClick={onSelect}
-        style={{
-            padding: "8px 15px",
-            backgroundColor: isActive ? "#2563eb" : "#e5e7eb",
-            color: isActive ? "white" : "#374151",
-            borderRadius: "8px",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            minWidth: "120px",
-            justifyContent: "space-between",
-            boxShadow: isActive ? "0 4px 6px -1px rgba(37, 99, 235, 0.3)" : "none",
-            transition: "all 0.2s",
-        }}
-    >
-        <span>
-            {invoice.customer ? `👤 ${invoice.customer.name}` : `🧾 ${invoice.id}`}
-        </span>
-        {canClose && (
-            <span
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onClose();
-                }}
-                style={{ fontSize: "18px", lineHeight: "1", opacity: 0.7 }}
-            >
-                ×
-            </span>
-        )}
-    </div>
-);
+const InvoiceTab = ({ invoice, isActive, onSelect, onClose, canClose }) => {
+    let tabLabel = invoice.customer ? `عميل: ${invoice.customer.name}` : `فاتورة ${invoice.id}`;
+    if (invoice.editorMode === "payment" && invoice.sourcePaymentId) {
+        tabLabel = `تعديل دفعة #${invoice.sourcePaymentId}`;
+    } else if (invoice.isEditMode && invoice.sourceSaleId) {
+        tabLabel = `تعديل فاتورة #${invoice.sourceSaleId}`;
+    }
+
+    return (
+        <div
+            onClick={onSelect}
+            style={{
+                padding: "8px 15px",
+                backgroundColor: isActive ? "#2563eb" : "#e5e7eb",
+                color: isActive ? "white" : "#374151",
+                borderRadius: "8px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                minWidth: "120px",
+                justifyContent: "space-between",
+                boxShadow: isActive ? "0 4px 6px -1px rgba(37, 99, 235, 0.3)" : "none",
+                transition: "all 0.2s",
+            }}
+        >
+            <span>{tabLabel}</span>
+            {canClose && (
+                <span
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onClose();
+                    }}
+                    style={{ fontSize: "18px", lineHeight: "1", opacity: 0.7 }}
+                >
+                    ×
+                </span>
+            )}
+        </div>
+    );
+};
 
 /**
  * بطاقة المنتج
@@ -411,42 +482,14 @@ export default function EnhancedPOS() {
             const saved = localStorage.getItem("pos_invoices");
             if (saved) {
                 const parsedInvoices = JSON.parse(saved);
-                // Ensure all invoices have invoiceDate field
-                return parsedInvoices.map(invoice => ({
-                    ...invoice,
-                    invoiceDate: invoice.invoiceDate || new Date().toISOString().split('T')[0]
-                }));
-            } else {
-                return [
-                    {
-                        id: generateInvoiceId(),
-                        invoiceDate: new Date().toISOString().split('T')[0],
-                        cart: [],
-                        customer: null,
-                        discount: 0,
-                        discountType: "value", // value or percent
-                        paidAmount: "",
-                        saleType: "نقدي",
-                        paymentMethod: "Cash",
-                        notes: "",
-                    },
-                ];
+                if (Array.isArray(parsedInvoices) && parsedInvoices.length > 0) {
+                    return parsedInvoices.map(normalizeStoredInvoice);
+                }
+                return [createEmptyInvoice()];
             }
+            return [createEmptyInvoice()];
         } catch (e) {
-            return [
-                {
-                    id: generateInvoiceId(),
-                    invoiceDate: new Date().toISOString().split('T')[0],
-                    cart: [],
-                    customer: null,
-                    discount: 0,
-                    discountType: "value", // value or percent
-                    paidAmount: "",
-                    saleType: "نقدي",
-                    paymentMethod: "Cash",
-                    notes: "",
-                },
-            ];
+            return [createEmptyInvoice()];
         }
     });
 
@@ -477,6 +520,7 @@ export default function EnhancedPOS() {
     const customerListRef = useRef(null);
     const productGridRef = useRef(null);
     const variantModalRef = useRef(null);
+    const showPaymentEditModalRef = useRef(false);
     const isFirstOpenRef = useRef(true);
     const handleCheckoutRef = useRef(null);
     const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
@@ -498,6 +542,7 @@ export default function EnhancedPOS() {
     const [showCustomerList, setShowCustomerList] = useState(false);
     const [showCustomerLedger, setShowCustomerLedger] = useState(null);
     const [showInvoicePreview, setShowInvoicePreview] = useState(false);
+    const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
     const [previewData, setPreviewData] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -507,15 +552,19 @@ export default function EnhancedPOS() {
      */
     const [toast, setToast] = useState(null);
 
-    const showToast = (message, type = "info") => {
+    const showToast = useCallback((message, type = "info") => {
         setToast({ message, type });
-    };
+    }, []);
 
     /**
      * ========== حالات إضافية للواجهة ==========
      */
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
     const [searchMode, setSearchMode] = useState("name"); // 'name' أو 'barcode'
+
+    useEffect(() => {
+        showPaymentEditModalRef.current = showPaymentEditModal;
+    }, [showPaymentEditModal]);
 
     /**
      * ========== الحالة المشتقة ==========
@@ -524,6 +573,27 @@ export default function EnhancedPOS() {
     const activeInvoice =
         invoices.find((inv) => inv.id === activeInvoiceId) || invoices[0];
     const calculations = useInvoiceCalculations(activeInvoice);
+    const variantQuantityById = useMemo(() => {
+        const map = new Map();
+        variants.forEach((variant) => {
+            map.set(variant.id, toNumberSafe(variant.quantity, 0));
+        });
+        return map;
+    }, [variants]);
+    const paymentEditModalCustomer = useMemo(() => {
+        if (!activeInvoice?.customer || activeInvoice?.editorMode !== "payment") return null;
+        const originalPaymentAmount = toNumberSafe(activeInvoice?.paymentEdit?.amount, 0);
+        return {
+            ...activeInvoice.customer,
+            balance: toNumberSafe(activeInvoice.customer.balance, 0) + originalPaymentAmount,
+        };
+    }, [activeInvoice]);
+    const paymentEditModalData = useMemo(() => ({
+        amount: activeInvoice?.paymentEdit?.amount ?? "",
+        notes: activeInvoice?.paymentEdit?.notes || "",
+        paymentDate: activeInvoice?.paymentEdit?.paymentDate || getTodayDate(),
+        paymentMethodId: parseInt(activeInvoice?.paymentEdit?.paymentMethodId, 10) || 1,
+    }), [activeInvoice]);
 
     /**
      * حفظ البيانات في localStorage
@@ -682,6 +752,8 @@ export default function EnhancedPOS() {
         loadData(false);
 
         const handleKeyPress = (e) => {
+            if (showPaymentEditModalRef.current) return;
+
             if (e.key === "F1") {
                 e.preventDefault();
                 if (handleCheckoutRef.current) handleCheckoutRef.current(true);
@@ -807,6 +879,225 @@ export default function EnhancedPOS() {
         }
     };
 
+    const openOrFocusInvoiceTab = useCallback((nextInvoice, matchExisting) => {
+        if (!nextInvoice || typeof matchExisting !== "function") return;
+
+        const existing = invoices.find(matchExisting);
+        if (existing) {
+            setActiveInvoiceId(existing.id);
+            return;
+        }
+
+        setInvoices((prev) => [...prev, nextInvoice]);
+        setActiveInvoiceId(nextInvoice.id);
+    }, [invoices]);
+
+    const buildSaleEditInvoice = useCallback((request) => {
+        const transaction = request?.transaction || {};
+        const sale = transaction?.details || request?.sale;
+        if (!sale?.id) return null;
+
+        const resolvedCustomer =
+            request?.customer ||
+            sale?.customer ||
+            customers.find((item) => String(item.id) === String(sale.customerId)) ||
+            null;
+
+        const saleItems = Array.isArray(sale.items) ? sale.items : [];
+        const discount = toNumberSafe(sale.discount, 0);
+        const invoiceTotal = Math.max(0, toNumberSafe(sale.total, 0));
+        const remaining = Math.max(
+            0,
+            toNumberSafe(
+                sale?.remainingAmount,
+                toNumberSafe(
+                    transaction?.remaining,
+                    isCreditSaleType(sale.saleType) ? invoiceTotal : 0
+                )
+            )
+        );
+        const paidAmount = Math.max(0, invoiceTotal - remaining);
+
+        const cart = saleItems.map((item) => {
+            const variantId = parseInt(item.variantId || item?.variant?.id, 10) || 0;
+            const soldQty = Math.max(1, toNumberSafe(item.quantity, 1));
+            const currentStock = variantQuantityById.get(variantId) || 0;
+            const itemVariant = item?.variant || {};
+
+            return {
+                variantId,
+                productId: itemVariant.productId || item.productId || 0,
+                productName: itemVariant?.product?.name || item.productName || `منتج #${variantId}`,
+                price: toNumberSafe(item.price, 0),
+                costPrice: toNumberSafe(itemVariant.cost ?? item.costPrice, 0),
+                quantity: soldQty,
+                size: itemVariant.productSize || item.size || "-",
+                color: itemVariant.color || item.color || "-",
+                discount: toNumberSafe(item.discount, 0),
+                maxQuantity: Math.max(soldQty, currentStock + soldQty),
+            };
+        });
+
+        return createEmptyInvoice({
+            id: `EDIT-SALE-${sale.id}-${Date.now()}`,
+            invoiceDate: toInputDate(sale.invoiceDate || sale.createdAt),
+            cart,
+            customer: resolvedCustomer,
+            discount,
+            discountType: "value",
+            paidAmount: paidAmount.toFixed(2),
+            saleType: remaining > 0 ? "آجل" : "نقدي",
+            paymentMethod: remaining > 0 && paidAmount <= 0 ? "Credit" : "Cash",
+            notes: sale.notes || "",
+            editorMode: "sale",
+            isEditMode: true,
+            sourceSaleId: sale.id,
+            sourcePaymentId: null,
+            paymentEdit: null,
+        });
+    }, [customers, variantQuantityById]);
+
+    const buildPaymentEditInvoice = useCallback((request) => {
+        const transaction = request?.transaction || {};
+        const payment = transaction?.details || request?.payment;
+        if (!payment?.id) return null;
+
+        const resolvedCustomer =
+            request?.customer ||
+            payment?.customer ||
+            customers.find((item) => String(item.id) === String(payment.customerId)) ||
+            null;
+
+        return createEmptyInvoice({
+            id: `EDIT-PAYMENT-${payment.id}-${Date.now()}`,
+            invoiceDate: toInputDate(payment.paymentDate || payment.createdAt),
+            customer: resolvedCustomer,
+            notes: payment.notes || "",
+            editorMode: "payment",
+            isEditMode: true,
+            sourceSaleId: null,
+            sourcePaymentId: payment.id,
+            paymentEdit: {
+                paymentId: payment.id,
+                customerId: resolvedCustomer?.id || payment.customerId || null,
+                amount: toNumberSafe(payment.amount, 0),
+                paymentDate: toInputDate(payment.paymentDate || payment.createdAt),
+                notes: payment.notes || "",
+                paymentMethodId: parseInt(payment.paymentMethodId || payment?.paymentMethod?.id, 10) || 1,
+            },
+        });
+    }, [customers]);
+
+    const openIncomingEditorRequest = useCallback((request) => {
+        if (!request?.type) return false;
+
+        if (request.type === "sale") {
+            const invoice = buildSaleEditInvoice(request);
+            if (!invoice) return false;
+
+            openOrFocusInvoiceTab(
+                invoice,
+                (inv) => inv.isEditMode && inv.editorMode === "sale" && inv.sourceSaleId === invoice.sourceSaleId
+            );
+            clearPosEditorRequest();
+            showToast(`تم فتح الفاتورة #${invoice.sourceSaleId} للتعديل`, "info");
+            return true;
+        }
+
+        if (request.type === "payment") {
+            const invoice = buildPaymentEditInvoice(request);
+            if (!invoice) return false;
+
+            openOrFocusInvoiceTab(
+                invoice,
+                (inv) => inv.isEditMode && inv.editorMode === "payment" && inv.sourcePaymentId === invoice.sourcePaymentId
+            );
+            clearPosEditorRequest();
+            showToast(`تم فتح الدفعة #${invoice.sourcePaymentId} للتعديل`, "info");
+            return true;
+        }
+
+        return false;
+    }, [buildPaymentEditInvoice, buildSaleEditInvoice, openOrFocusInvoiceTab, showToast]);
+
+    const handleSavePaymentEdit = async (paymentFormData = null) => {
+        const paymentEdit = {
+            ...(activeInvoice?.paymentEdit || {}),
+            ...(paymentFormData || {}),
+        };
+        const editingInvoiceId = activeInvoice?.id;
+        if (!activeInvoice?.sourcePaymentId || !paymentEdit) {
+            showToast("بيانات الدفعة غير مكتملة", "error");
+            return { error: "بيانات الدفعة غير مكتملة" };
+        }
+
+        const amount = Math.max(0, toNumberSafe(paymentEdit.amount, 0));
+        if (amount <= 0) {
+            showToast("أدخل مبلغ صحيح للدفعة", "warning");
+            return { error: "أدخل مبلغ صحيح للدفعة" };
+        }
+
+        try {
+            setIsSaving(true);
+
+            const result = await window.api.updateCustomerPayment(activeInvoice.sourcePaymentId, {
+                customerId: paymentEdit.customerId || activeInvoice.customer?.id,
+                paymentMethodId: parseInt(paymentEdit.paymentMethodId, 10) || 1,
+                amount,
+                paymentDate: paymentEdit.paymentDate,
+                notes: paymentEdit.notes || "",
+            });
+
+            if (result?.error) {
+                showToast(`خطأ: ${result.error}`, "error");
+                return result;
+            }
+
+            await loadData(true);
+            setShowPaymentEditModal(false);
+            if (editingInvoiceId) {
+                closeEditTabAndGoToFreshInvoice(editingInvoiceId);
+            } else {
+                resetInvoice();
+            }
+            showToast("✅ تم تعديل الدفعة بنجاح", "success");
+            return result;
+        } catch (error) {
+            console.error(error);
+            showToast("فشل تعديل الدفعة", "error");
+            return { error: error?.message || "فشل تعديل الدفعة" };
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    useEffect(() => {
+        const handleEditorRequest = (event) => {
+            const request = event?.detail || readPosEditorRequest();
+            if (!request) return;
+            openIncomingEditorRequest(request);
+        };
+
+        window.addEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+
+        const pendingRequest = readPosEditorRequest();
+        if (pendingRequest) {
+            openIncomingEditorRequest(pendingRequest);
+        }
+
+        return () => {
+            window.removeEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+        };
+    }, [openIncomingEditorRequest]);
+
+    useEffect(() => {
+        if (activeInvoice?.editorMode === "payment" && activeInvoice?.paymentEdit) {
+            setShowPaymentEditModal(true);
+        } else {
+            setShowPaymentEditModal(false);
+        }
+    }, [activeInvoiceId, activeInvoice?.editorMode, activeInvoice?.sourcePaymentId, activeInvoice?.paymentEdit]);
+
     /**
      * ========== عمليات الفاتورة ==========
      * التحديث، الحفظ، الحذف والإدارة
@@ -827,18 +1118,7 @@ export default function EnhancedPOS() {
     };
 
     const addTab = () => {
-        const newInvoice = {
-            id: generateInvoiceId(),
-            invoiceDate: new Date().toISOString().split('T')[0],
-            cart: [],
-            customer: null,
-            discount: 0,
-            discountType: "value", // value or percent
-            paidAmount: "",
-            saleType: "نقدي",
-            paymentMethod: "Cash",
-            notes: "",
-        };
+        const newInvoice = createEmptyInvoice();
         setInvoices((prev) => [...prev, newInvoice]);
         setActiveInvoiceId(newInvoice.id);
     };
@@ -855,11 +1135,46 @@ export default function EnhancedPOS() {
         }
     };
 
+    const closeEditTabAndGoToFreshInvoice = (invoiceId) => {
+        const remainingTabs = invoices.filter((inv) => inv.id !== invoiceId);
+        const preferredTab = remainingTabs.find(
+            (inv) => !inv.isEditMode && inv.editorMode !== "payment"
+        );
+
+        if (preferredTab) {
+            setInvoices(remainingTabs);
+            setActiveInvoiceId(preferredTab.id);
+            setCustomerSearchTerm("");
+            return;
+        }
+
+        const freshInvoice = createEmptyInvoice();
+        setInvoices([...remainingTabs, freshInvoice]);
+        setActiveInvoiceId(freshInvoice.id);
+        setCustomerSearchTerm("");
+    };
+
+    const handleClosePaymentEditModal = () => {
+        setShowPaymentEditModal(false);
+    };
+
+    const handleCancelPaymentEditTab = () => {
+        setShowPaymentEditModal(false);
+        if (activeInvoice?.editorMode === "payment" && activeInvoice?.id) {
+            closeEditTabAndGoToFreshInvoice(activeInvoice.id);
+        }
+    };
+
     /**
      * ========== عمليات السلة ==========
      * إضافة، تحديث، حذف المنتجات من السلة
      */
     const addToCart = (variant) => {
+        if (activeInvoice.editorMode === "payment") {
+            showToast("تبويب الدفعة لا يدعم إضافة منتجات", "warning");
+            return;
+        }
+
         // الكمية المتاحة في المخزن
         let availableQuantity = variant.quantity || 0;
 
@@ -925,6 +1240,7 @@ export default function EnhancedPOS() {
      * تحديث سعر أو كمية المنتج في السلة
      */
     const updateCartItem = (variantId, updates) => {
+        if (activeInvoice.editorMode === "payment") return;
         const item = activeInvoice.cart.find((i) => i.variantId === variantId);
         if (updates.quantity && updates.quantity > item.maxQuantity) {
             showToast(`الكمية المتاحة فقط ${item.maxQuantity}`, "warning");
@@ -939,6 +1255,7 @@ export default function EnhancedPOS() {
     };
 
     const removeFromCart = (variantId) => {
+        if (activeInvoice.editorMode === "payment") return;
         updateInvoice({
             cart: activeInvoice.cart.filter((item) => item.variantId !== variantId),
         });
@@ -959,7 +1276,21 @@ export default function EnhancedPOS() {
             const currentInvoice =
                 invoices.find((inv) => inv.id === activeInvoiceId) || invoices[0];
 
+            if (currentInvoice?.editorMode === "payment") {
+                if (!showPaymentEditModal) {
+                    setShowPaymentEditModal(true);
+                    return;
+                }
+                await handleSavePaymentEdit();
+                return;
+            }
+
             if (!currentInvoice || currentInvoice.cart.length === 0) return;
+            const isEditingSale = Boolean(
+                currentInvoice.isEditMode &&
+                currentInvoice.editorMode === "sale" &&
+                currentInvoice.sourceSaleId
+            );
 
             playSound("save");
 
@@ -1026,10 +1357,15 @@ export default function EnhancedPOS() {
                 payment: paymentLabel,
                 saleType: finalSaleType,
                 discount: parseFloat(currentInvoice.discount || 0),
+                notes: currentInvoice.notes || "",
                 invoiceDate: currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
             };
 
-            if (shouldPreview) {
+            if (shouldPreview && isEditingSale) {
+                showToast("معاينة الطباعة متاحة عند إنشاء فاتورة جديدة فقط", "warning");
+            }
+
+            if (shouldPreview && !isEditingSale) {
                 const result = await window.api.createSale(saleData);
                 if (result.error) {
                     showToast("خطأ: " + result.error, "error");
@@ -1065,24 +1401,36 @@ export default function EnhancedPOS() {
                 return;
             }
 
-            const result = await window.api.createSale(saleData);
+            const result = isEditingSale
+                ? await window.api.updateSale(currentInvoice.sourceSaleId, saleData)
+                : await window.api.createSale(saleData);
             if (result.error) {
                 showToast("خطأ: " + result.error, "error");
                 return;
             }
 
             if (shouldPrint) {
-                await window.api.printSale(result.id || result.saleId);
+                const saleIdForPrint = isEditingSale
+                    ? currentInvoice.sourceSaleId
+                    : (result.id || result.saleId);
+                await window.api.printSale(saleIdForPrint);
             }
 
             loadData(true);
-            resetInvoice();
+            if (isEditingSale) {
+                closeEditTabAndGoToFreshInvoice(currentInvoice.id);
+            } else {
+                resetInvoice();
+            }
 
             setTimeout(() => {
                 if (searchInputRef.current) searchInputRef.current.focus();
             }, 100);
 
-            showToast("✅ تم حفظ الفاتورة بنجاح", "success");
+            showToast(
+                isEditingSale ? "✅ تم تعديل الفاتورة بنجاح" : "✅ تم حفظ الفاتورة بنجاح",
+                "success"
+            );
         } catch (err) {
             console.error(err);
             showToast("خطأ في الاتصال بالقاعدة", "error");
@@ -1101,15 +1449,10 @@ export default function EnhancedPOS() {
      * إعادة تعيين الفاتورة لبدء فاتورة جديدة
      */
     const resetInvoice = () => {
-        updateInvoice({
-            cart: [],
-            customer: null,
-            discount: 0,
-            paidAmount: "",
-            saleType: "نقدي",
-            paymentMethod: "Cash",
-            notes: "",
-        });
+        const normalized = createEmptyInvoice({ id: activeInvoiceId });
+        setInvoices((prev) =>
+            prev.map((inv) => (inv.id === activeInvoiceId ? normalized : inv))
+        );
         setCustomerSearchTerm("");
     };
 
@@ -1612,6 +1955,63 @@ export default function EnhancedPOS() {
                         overflow: "hidden",
                     }}
                 >
+                    {activeInvoice.editorMode === "payment" && (
+                        <div
+                            style={{
+                                backgroundColor: "#eef2ff",
+                                border: "1px solid #c7d2fe",
+                                borderRadius: "12px",
+                                padding: "14px",
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: "12px",
+                                flexWrap: "wrap",
+                            }}
+                        >
+                            <div>
+                                <div style={{ fontWeight: "bold", color: "#3730a3" }}>
+                                    تعديل دفعة رقم #{activeInvoice.sourcePaymentId}
+                                </div>
+                                <div style={{ fontSize: "12px", color: "#4338ca" }}>
+                                    {activeInvoice.customer?.name || "عميل غير محدد"}
+                                </div>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "8px" }}>
+                                <button
+                                    onClick={() => setShowPaymentEditModal(true)}
+                                    style={{
+                                        padding: "11px",
+                                        borderRadius: "8px",
+                                        border: "none",
+                                        backgroundColor: "#4f46e5",
+                                        color: "white",
+                                        fontWeight: "bold",
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    فتح موديل الدفعة
+                                </button>
+                                <button
+                                    onClick={handleCancelPaymentEditTab}
+                                    style={{
+                                        padding: "11px 14px",
+                                        borderRadius: "8px",
+                                        border: "1px solid #cbd5e1",
+                                        backgroundColor: "white",
+                                        color: "#334155",
+                                        fontWeight: "bold",
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    إلغاء
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Section 1: Sale Type & Customer Selection */}
                     <div
                         style={{
@@ -2591,6 +2991,19 @@ export default function EnhancedPOS() {
                     />
                 )
             }
+
+            {/* Payment Edit Modal */}
+            {activeInvoice?.editorMode === "payment" && (
+                <PaymentModal
+                    isOpen={showPaymentEditModal}
+                    selectedCustomer={paymentEditModalCustomer}
+                    paymentData={paymentEditModalData}
+                    onSubmit={handleSavePaymentEdit}
+                    onClose={handleClosePaymentEditModal}
+                    isSubmitting={isSaving}
+                    formatCurrency={(value) => `${toNumberSafe(value, 0).toFixed(2)} ج.م`}
+                />
+            )}
 
             {/* Invoice Preview Modal */}
             {

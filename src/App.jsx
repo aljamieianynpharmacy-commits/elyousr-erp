@@ -11,6 +11,7 @@ import Suppliers from './pages/Suppliers'
 import Expenses from './pages/Expenses'
 import Users from './pages/Users'
 import DebtReminders from './pages/DebtReminders'
+import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge'
 import './index.css'
 
 function App() {
@@ -24,6 +25,31 @@ function App() {
       setToken(savedToken);
       setUser(JSON.parse(localStorage.getItem('user')));
     }
+  }, []);
+
+  useEffect(() => {
+    const allowedPages = new Set([
+      'pos',
+      'dashboard',
+      'sales',
+      'purchases',
+      'returns',
+      'products',
+      'customers',
+      'suppliers',
+      'expenses',
+      'debtreminders',
+      'users'
+    ]);
+
+    const handleNavigate = (event) => {
+      const targetPage = event?.detail?.page;
+      if (!allowedPages.has(targetPage)) return;
+      setCurrentPage(targetPage);
+    };
+
+    window.addEventListener(APP_NAVIGATE_EVENT, handleNavigate);
+    return () => window.removeEventListener(APP_NAVIGATE_EVENT, handleNavigate);
   }, []);
 
   const handleLogin = (newToken, userData) => {

@@ -23,7 +23,7 @@ export default function TransactionActions({
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
         {typeof onEditSale === 'function' && (
           <button
-            onClick={() => onEditSale(transaction.details)}
+            onClick={() => onEditSale(transaction)}
             title="تعديل الفاتورة"
             style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
           >
@@ -55,7 +55,7 @@ export default function TransactionActions({
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
         {typeof onEditPayment === 'function' && (
           <button
-            onClick={() => onEditPayment(transaction.details)}
+            onClick={() => onEditPayment(transaction)}
             title="تعديل الدفعة"
             style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
           >

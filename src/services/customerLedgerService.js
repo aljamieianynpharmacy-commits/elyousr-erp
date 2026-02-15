@@ -19,19 +19,27 @@ export class CustomerLedgerService {
 
     // Process sales
     sales.forEach(sale => {
-      const remaining = sale.saleType === 'آجل' ? sale.total : 0;
-      
+      const total = Number(sale.total || 0);
+      const remainingFromSale = Number(sale.remainingAmount ?? sale.remaining);
+      const paidFromSale = Number(sale.paidAmount ?? sale.paid);
+      const remaining = Number.isFinite(remainingFromSale)
+        ? Math.max(0, remainingFromSale)
+        : (sale.saleType === 'آجل' ? total : 0);
+      const paid = Number.isFinite(paidFromSale)
+        ? Math.max(0, paidFromSale)
+        : Math.max(0, total - remaining);
+
       transactions.push({
         id: `sale-${sale.id}`,
         date: this.getSaleDate(sale),
         type: 'بيع',
         typeColor: '#3b82f6',
         description: `فاتورة بيع #${sale.id}`,
-        debit: sale.saleType === 'آجل' ? remaining : 0,
+        debit: remaining,
         credit: 0,
-        total: sale.total,
-        paid: sale.saleType === 'نقدي' ? sale.total : 0,
-        remaining: remaining,
+        total,
+        paid,
+        remaining,
         notes: sale.notes || '✓ بدون ملاحظات',
         details: sale
       });

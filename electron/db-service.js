@@ -93,7 +93,8 @@ const isCreditSaleType = (saleType) => {
 };
 
 const computeSaleOutstandingAmount = ({ total, discount = 0, paid = 0, saleType }) => {
-    const netTotal = Math.max(0, toNumber(total) - toNumber(discount));
+    // `total` in POS payload is already net (after discounts), so do not subtract discount again.
+    const netTotal = Math.max(0, toNumber(total));
     const paidAmount = Math.max(0, toNumber(paid));
     const remaining = Math.max(0, netTotal - paidAmount);
 
@@ -1471,7 +1472,8 @@ const dbService = {
 
     async getCustomerSales(customerId) {
         try {
-            return await prisma.sale.findMany({
+            const parsedCustomerId = parseInt(customerId);
+            const sales = await prisma.sale.findMany({
                 where: { customerId: parseInt(customerId) },
                 include: {
                     items: {
@@ -1481,6 +1483,46 @@ const dbService = {
                     }
                 },
                 orderBy: { createdAt: 'desc' }
+            });
+
+            if (!Array.isArray(sales) || sales.length === 0) {
+                return sales;
+            }
+
+            const saleIds = sales.map((sale) => sale.id);
+            const saleTransactions = await prisma.customerTransaction.findMany({
+                where: {
+                    customerId: parsedCustomerId,
+                    referenceType: 'SALE',
+                    referenceId: { in: saleIds }
+                },
+                select: {
+                    referenceId: true,
+                    debit: true,
+                    credit: true
+                }
+            });
+
+            const outstandingBySaleId = saleTransactions.reduce((map, transaction) => {
+                const saleReferenceId = transaction.referenceId;
+                if (!saleReferenceId) return map;
+                const delta = toNumber(transaction.debit) - toNumber(transaction.credit);
+                map.set(saleReferenceId, (map.get(saleReferenceId) || 0) + delta);
+                return map;
+            }, new Map());
+
+            return sales.map((sale) => {
+                const total = Math.max(0, toNumber(sale.total));
+                const remainingAmount = Math.max(0, toNumber(outstandingBySaleId.get(sale.id) || 0));
+                const paidAmount = Math.max(0, total - remainingAmount);
+                return {
+                    ...sale,
+                    remainingAmount,
+                    paidAmount,
+                    // Backward-compatible aliases used by some UI paths.
+                    remaining: remainingAmount,
+                    paid: paidAmount
+                };
             });
         } catch (error) {
             return { error: error.message };
@@ -1634,6 +1676,129 @@ const dbService = {
                 orderBy: { paymentDate: 'desc' }
             });
         } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateCustomerPayment(paymentId, paymentData) {
+        const perf = startPerfTimer('db:updateCustomerPayment', {
+            paymentId: parseInt(paymentId, 10) || null
+        });
+
+        try {
+            const parsedPaymentId = parsePositiveInt(paymentId);
+            if (!parsedPaymentId) {
+                return { error: 'Invalid paymentId' };
+            }
+
+            const amount = Math.max(0, toNumber(paymentData?.amount));
+            if (amount <= 0) {
+                return { error: 'Invalid payment amount' };
+            }
+
+            const paymentDate = parsePaymentDateInput(paymentData?.paymentDate);
+            const paymentMethodId = parsePositiveInt(paymentData?.paymentMethodId) || 1;
+
+            const result = await prisma.$transaction(async (tx) => {
+                const existingPayment = await tx.customerPayment.findUnique({
+                    where: { id: parsedPaymentId },
+                    select: {
+                        id: true,
+                        customerId: true,
+                        amount: true,
+                        paymentDate: true,
+                        paymentMethodId: true
+                    }
+                });
+
+                if (!existingPayment) {
+                    return { error: 'Payment not found' };
+                }
+
+                const nextCustomerId = Object.prototype.hasOwnProperty.call(paymentData || {}, 'customerId')
+                    ? parsePositiveInt(paymentData.customerId)
+                    : existingPayment.customerId;
+
+                if (!nextCustomerId) {
+                    return { error: 'Invalid customerId' };
+                }
+
+                const updatedPayment = await tx.customerPayment.update({
+                    where: { id: parsedPaymentId },
+                    data: {
+                        customerId: nextCustomerId,
+                        paymentMethodId,
+                        amount,
+                        notes: paymentData?.notes || null,
+                        paymentDate
+                    },
+                    include: {
+                        paymentMethod: true
+                    }
+                });
+
+                await tx.customerTransaction.deleteMany({
+                    where: {
+                        referenceType: 'PAYMENT',
+                        referenceId: parsedPaymentId
+                    }
+                });
+
+                await tx.customerTransaction.create({
+                    data: {
+                        customer: {
+                            connect: { id: nextCustomerId }
+                        },
+                        date: paymentDate,
+                        type: 'PAYMENT',
+                        referenceType: 'PAYMENT',
+                        referenceId: parsedPaymentId,
+                        debit: 0,
+                        credit: amount,
+                        notes: `دفعة معدلة #${parsedPaymentId} - ${paymentData?.notes || 'دفعة نقدية'}`
+                    }
+                });
+
+                const oldAmount = Math.max(0, toNumber(existingPayment.amount));
+
+                if (existingPayment.customerId === nextCustomerId) {
+                    const balanceDelta = oldAmount - amount;
+                    if (balanceDelta !== 0) {
+                        await applyCustomerFinancialDelta(tx, {
+                            customerId: nextCustomerId,
+                            balanceDelta,
+                            paymentDate
+                        });
+                    } else {
+                        await applyCustomerFinancialDelta(tx, {
+                            customerId: nextCustomerId,
+                            balanceDelta: 0,
+                            paymentDate
+                        });
+                    }
+                    await recalculateCustomerActivityDates(tx, nextCustomerId);
+                } else {
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: existingPayment.customerId,
+                        balanceDelta: oldAmount
+                    });
+                    await recalculateCustomerActivityDates(tx, existingPayment.customerId);
+
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: nextCustomerId,
+                        balanceDelta: -amount,
+                        paymentDate
+                    });
+                    await recalculateCustomerActivityDates(tx, nextCustomerId);
+                }
+
+                return { success: true, data: updatedPayment };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },

@@ -327,6 +327,9 @@ ipcMain.handle('db:addCustomerPayment', async (event, paymentData) => {
 ipcMain.handle('db:getCustomerPayments', async (event, customerId) => {
     return await dbService.getCustomerPayments(customerId);
 });
+ipcMain.handle('db:updateCustomerPayment', async (event, paymentId, paymentData) => {
+    return await dbService.updateCustomerPayment(paymentId, paymentData);
+});
 ipcMain.handle('db:deleteCustomerPayment', async (event, paymentId) => {
     return await dbService.deleteCustomerPayment(paymentId);
 });

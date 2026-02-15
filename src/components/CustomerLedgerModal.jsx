@@ -6,17 +6,27 @@ import { safePrint } from '../printing/safePrint';
 import { generateInvoiceHTML } from '../printing/invoiceTemplate';
 import { generateReceiptHTML } from '../printing/receiptTemplate';
 import { generateLedgerHTML } from '../printing/ledgerTemplate';
+import { emitPosEditorRequest } from '../utils/posEditorBridge';
+import PaymentModal from './PaymentModal';
 import CustomerLedgerHeader from './CustomerLedgerHeader';
 import CustomerLedgerSummary from './CustomerLedgerSummary';
 import CustomerLedgerTable from './CustomerLedgerTable';
 import './CustomerLedger.css';
 
-export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpdated }) {
+export default function CustomerLedgerModal({
+  customerId,
+  onClose,
+  onCustomerUpdated,
+  onDataChanged
+}) {
   const [customer, setCustomer] = useState(null);
   const [sales, setSales] = useState([]);
   const [returns, setReturns] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [dateRange, setDateRange] = useState({ from: null, to: null });
 
   const loadCustomerData = async () => {
@@ -69,6 +79,25 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
     return CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
   }, [transactions, customer?.balance]);
 
+  const paymentEditModalCustomer = useMemo(() => {
+    if (!customer || !editingPayment) return null;
+    const originalAmount = Number(editingPayment.amount || 0);
+    return {
+      ...customer,
+      balance: Number(customer.balance || 0) + originalAmount
+    };
+  }, [customer, editingPayment]);
+
+  const paymentEditData = useMemo(() => ({
+    amount: editingPayment?.amount ?? '',
+    notes: editingPayment?.notes || '',
+    paymentDate: editingPayment?.paymentDate || new Date().toISOString().split('T')[0],
+    paymentMethodId: parseInt(
+      editingPayment?.paymentMethodId || editingPayment?.paymentMethod?.id,
+      10
+    ) || 1
+  }), [editingPayment]);
+
   const handlePrintInvoice = async (sale) => {
     const html = generateInvoiceHTML(sale, customer);
     const result = await safePrint(html, { title: `فاتورة رقم ${sale.id}` });
@@ -115,6 +144,7 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
       if (!updatedCustomer.error) {
         setCustomer(updatedCustomer);
         onCustomerUpdated?.(customerId, { balance: updatedCustomer.balance });
+        onDataChanged?.();
       }
 
       await safeAlert('✅ تم حذف الفاتورة بنجاح');
@@ -143,12 +173,84 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
       if (!updatedCustomer.error) {
         setCustomer(updatedCustomer);
         onCustomerUpdated?.(customerId, { balance: updatedCustomer.balance });
+        onDataChanged?.();
       }
 
       await safeAlert('✅ تم حذف الدفعة بنجاح');
       loadCustomerData();
     } catch (err) {
       await safeAlert('خطأ في الحذف: ' + err.message);
+    }
+  };
+
+  const handleEditSale = (transaction) => {
+    const sale = transaction?.details;
+    if (!sale?.id) {
+      safeAlert('تعذر فتح الفاتورة للتعديل');
+      return;
+    }
+
+    emitPosEditorRequest({
+      type: 'sale',
+      transaction,
+      customer
+    });
+
+    onClose?.();
+  };
+
+  const handleEditPayment = (transaction) => {
+    const payment = transaction?.details;
+    if (!payment?.id) {
+      safeAlert('تعذر فتح الدفعة للتعديل');
+      return;
+    }
+    setEditingPayment(payment);
+    setShowPaymentEditModal(true);
+  };
+
+  const handleClosePaymentEditModal = () => {
+    setShowPaymentEditModal(false);
+    setEditingPayment(null);
+  };
+
+  const submitPaymentEdit = async (paymentFormData) => {
+    if (!editingPayment?.id) {
+      return { error: 'بيانات الدفعة غير مكتملة' };
+    }
+
+    const amount = parseFloat(paymentFormData?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { error: 'الرجاء إدخال مبلغ صالح' };
+    }
+
+    setPaymentSubmitting(true);
+    try {
+      const result = await window.api.updateCustomerPayment(editingPayment.id, {
+        customerId: customer?.id || editingPayment.customerId,
+        paymentMethodId: parseInt(paymentFormData?.paymentMethodId, 10) || 1,
+        amount,
+        paymentDate: paymentFormData?.paymentDate,
+        notes: paymentFormData?.notes || ''
+      });
+
+      if (result?.error) {
+        return result;
+      }
+
+      await loadCustomerData();
+      const refreshedCustomer = await window.api.getCustomer(customerId);
+      if (!refreshedCustomer?.error) {
+        setCustomer(refreshedCustomer);
+        onCustomerUpdated?.(customerId, { balance: refreshedCustomer.balance });
+        onDataChanged?.();
+      }
+
+      return result;
+    } catch (err) {
+      return { error: err?.message || 'فشل تعديل الدفعة' };
+    } finally {
+      setPaymentSubmitting(false);
     }
   };
 
@@ -188,6 +290,8 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
           transactions={transactions}
           onPrintInvoice={handlePrintInvoice}
           onPrintReceipt={handlePrintReceipt}
+          onEditSale={handleEditSale}
+          onEditPayment={handleEditPayment}
           onDeleteSale={handleDeleteSale}
           onDeletePayment={handleDeletePayment}
         />
@@ -222,6 +326,16 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
           </div>
         </div>
       </div>
+
+      <PaymentModal
+        isOpen={showPaymentEditModal}
+        selectedCustomer={paymentEditModalCustomer}
+        paymentData={paymentEditData}
+        onSubmit={submitPaymentEdit}
+        onClose={handleClosePaymentEditModal}
+        isSubmitting={paymentSubmitting}
+        formatCurrency={(value) => `${Number(value || 0).toFixed(2)} ج.م`}
+      />
     </div>
   );
 }

@@ -54,6 +54,7 @@ export default function CustomerLedgerTable({
                 transaction.remaining > 0
                   ? "ledger-money-remaining-debit"
                   : "ledger-money-remaining-credit";
+              const notesText = transaction.notes?.trim() || "-";
 
               const runningBalance = Number(transaction.runningBalance || 0);
               const runningBalanceClass =
@@ -89,7 +90,11 @@ export default function CustomerLedgerTable({
                     {formatCurrency(runningBalance)}
                   </td>
 
-                  <td className="ledger-cell-notes">{transaction.notes || "-"}</td>
+                  <td className="ledger-cell-notes">
+                    <span className="ledger-cell-notes-text" title={notesText}>
+                      {notesText}
+                    </span>
+                  </td>
 
                   <td className="ledger-cell-actions" style={{ textAlign: "center" }}>
                     <TransactionActions

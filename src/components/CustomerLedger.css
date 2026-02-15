@@ -443,6 +443,9 @@
 }
 
 .customer-ledger-smart-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: #f8fafc;
   color: #334155;
   font-size: 12px;
@@ -509,7 +512,7 @@
 .customer-ledger-table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   background: #f8fafc;
   color: #334155;
   font-size: 13px;
@@ -563,6 +566,14 @@
   color: #64748b;
   font-size: 12px;
   max-width: 220px;
+  width: 220px;
+}
+
+.ledger-cell-notes-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ledger-cell-actions {

@@ -1,7 +1,7 @@
-import React from 'react';
-import TransactionActions from './TransactionActions';
+import React from "react";
+import TransactionActions from "./TransactionActions";
 
-const formatCurrency = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
+const formatCurrency = (value) => `${Number(value || 0).toFixed(2)} \u062c.\u0645`;
 
 export default function CustomerLedgerTable({
   transactions,
@@ -10,63 +10,60 @@ export default function CustomerLedgerTable({
   onEditSale,
   onEditPayment,
   onDeleteSale,
-  onDeletePayment
+  onDeletePayment,
 }) {
   return (
     <div className="customer-ledger-table-wrap">
       <table className="customer-ledger-table">
         <thead>
           <tr>
-            <th>التاريخ</th>
-            <th>النوع</th>
-            <th>البيان</th>
-            <th style={{ textAlign: 'center' }}>الإجمالي</th>
-            <th style={{ textAlign: 'center' }}>المدفوع</th>
-            <th style={{ textAlign: 'center' }}>المتبقي</th>
-            <th style={{ textAlign: 'center' }}>الرصيد</th>
-            <th>ملاحظات</th>
-            <th style={{ textAlign: 'center' }}>إجراءات</th>
+            <th>{"\u0627\u0644\u062a\u0627\u0631\u064a\u062e"}</th>
+            <th>{"\u0627\u0644\u0628\u064a\u0627\u0646"}</th>
+            <th style={{ textAlign: "center" }}>
+              {"\u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a"}
+            </th>
+            <th style={{ textAlign: "center" }}>
+              {"\u0627\u0644\u0645\u062f\u0641\u0648\u0639"}
+            </th>
+            <th style={{ textAlign: "center" }}>
+              {"\u0627\u0644\u0645\u062a\u0628\u0642\u064a"}
+            </th>
+            <th style={{ textAlign: "center" }}>
+              {"\u0627\u0644\u0631\u0635\u064a\u062f"}
+            </th>
+            <th>{"\u0645\u0644\u0627\u062d\u0638\u0627\u062a"}</th>
+            <th style={{ textAlign: "center" }}>
+              {"\u0625\u062c\u0631\u0627\u0621\u0627\u062a"}
+            </th>
           </tr>
         </thead>
 
         <tbody>
           {transactions.length === 0 ? (
             <tr>
-              <td colSpan="9" className="ledger-empty-state">
-                لا توجد معاملات في الفترة المحددة
+              <td colSpan="8" className="ledger-empty-state">
+                {"\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0639\u0627\u0645\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u0645\u062d\u062f\u062f\u0629"}
               </td>
             </tr>
           ) : (
             transactions.map((transaction) => {
               const remainingClass =
                 transaction.remaining > 0
-                  ? 'ledger-money-remaining-debit'
-                  : 'ledger-money-remaining-credit';
+                  ? "ledger-money-remaining-debit"
+                  : "ledger-money-remaining-credit";
 
               const runningBalance = Number(transaction.runningBalance || 0);
               const runningBalanceClass =
                 runningBalance > 0
-                  ? 'ledger-balance-debit'
+                  ? "ledger-balance-debit"
                   : runningBalance < 0
-                    ? 'ledger-balance-credit'
-                    : 'ledger-balance-neutral';
+                    ? "ledger-balance-credit"
+                    : "ledger-balance-neutral";
 
               return (
                 <tr key={transaction.id}>
                   <td className="ledger-cell-date">
-                    {transaction.date.toLocaleDateString('ar-EG')}
-                  </td>
-
-                  <td>
-                    <span
-                      className="ledger-type-chip"
-                      style={{
-                        backgroundColor: `${transaction.typeColor}1A`,
-                        color: transaction.typeColor
-                      }}
-                    >
-                      {transaction.type}
-                    </span>
+                    {transaction.date.toLocaleDateString("ar-EG")}
                   </td>
 
                   <td className="ledger-cell-description">{transaction.description}</td>
@@ -85,9 +82,9 @@ export default function CustomerLedgerTable({
                     {formatCurrency(runningBalance)}
                   </td>
 
-                  <td className="ledger-cell-notes">{transaction.notes || '-'}</td>
+                  <td className="ledger-cell-notes">{transaction.notes || "-"}</td>
 
-                  <td className="ledger-cell-actions" style={{ textAlign: 'center' }}>
+                  <td className="ledger-cell-actions" style={{ textAlign: "center" }}>
                     <TransactionActions
                       transaction={transaction}
                       onPrintInvoice={onPrintInvoice}

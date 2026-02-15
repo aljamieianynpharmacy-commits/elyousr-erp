@@ -247,6 +247,8 @@
 .ledger-cell-date {
   white-space: nowrap;
   color: #475569;
+  font-size: 15px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 

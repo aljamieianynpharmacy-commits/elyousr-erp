@@ -470,7 +470,7 @@ export default function EnhancedPOS() {
         useState(null);
     const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
     const [selectedProductIndex, setSelectedProductIndex] = useState(-1);
-    const [productDisplayMode, setProductDisplayMode] = useState("grid"); // 'grid' or 'list'
+    const [productDisplayMode, setProductDisplayMode] = useState("list"); // 'grid' or 'list'
     const [selectedVariantIndex, setSelectedVariantIndex] = useState(-1);
     const searchInputRef = useRef(null);
     const customerDropdownRef = useRef(null);

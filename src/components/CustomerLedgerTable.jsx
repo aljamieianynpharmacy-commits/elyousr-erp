@@ -1,9 +1,11 @@
 import React from 'react';
 import TransactionActions from './TransactionActions';
 
-export default function CustomerLedgerTable({ 
-  transactions, 
-  onPrintInvoice, 
+const formatCurrency = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
+
+export default function CustomerLedgerTable({
+  transactions,
+  onPrintInvoice,
   onPrintReceipt,
   onEditSale,
   onEditPayment,
@@ -11,74 +13,94 @@ export default function CustomerLedgerTable({
   onDeletePayment
 }) {
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead style={{ backgroundColor: '#f9fafb', position: 'sticky', top: 0 }}>
+    <div className="customer-ledger-table-wrap">
+      <table className="customer-ledger-table">
+        <thead>
           <tr>
-            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>التاريخ</th>
-            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>النوع</th>
-            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>البيان</th>
-            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>الإجمالي</th>
-            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>المدفوع</th>
-            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>المتبقي</th>
-            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>ملاحظات</th>
-            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>إجراءات</th>
+            <th>التاريخ</th>
+            <th>النوع</th>
+            <th>البيان</th>
+            <th style={{ textAlign: 'center' }}>الإجمالي</th>
+            <th style={{ textAlign: 'center' }}>المدفوع</th>
+            <th style={{ textAlign: 'center' }}>المتبقي</th>
+            <th style={{ textAlign: 'center' }}>الرصيد</th>
+            <th>ملاحظات</th>
+            <th style={{ textAlign: 'center' }}>إجراءات</th>
           </tr>
         </thead>
+
         <tbody>
           {transactions.length === 0 ? (
             <tr>
-              <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af' }}>
-                لا توجد معاملات
+              <td colSpan="9" className="ledger-empty-state">
+                لا توجد معاملات في الفترة المحددة
               </td>
             </tr>
           ) : (
-            transactions.map(transaction => (
-              <tr key={transaction.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: '12px' }}>
-                  {transaction.date.toLocaleDateString('ar-EG')}
-                </td>
-                <td style={{ padding: '12px' }}>
-                  <span style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    backgroundColor: transaction.typeColor + '20',
-                    color: transaction.typeColor
-                  }}>
-                    {transaction.type}
-                  </span>
-                </td>
-                <td style={{ padding: '12px' }}>{transaction.description}</td>
-                <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>
-                  {transaction.total.toFixed(2)} ج.م
-                </td>
-                <td style={{ padding: '12px', textAlign: 'center', color: '#10b981', fontWeight: 'bold' }}>
-                  {transaction.paid.toFixed(2)} ج.م
-                </td>
-                <td style={{ 
-                  padding: '12px', 
-                  textAlign: 'center', 
-                  fontWeight: 'bold', 
-                  color: transaction.remaining > 0 ? '#ef4444' : '#10b981' 
-                }}>
-                  {transaction.remaining.toFixed(2)} ج.م
-                </td>
-                <td style={{ padding: '12px', textAlign: 'right', fontSize: '12px', color: '#6b7280' }}>
-                  {transaction.notes}
-                </td>
-                <td style={{ padding: '12px', textAlign: 'center' }}>
-                  <TransactionActions
-                    transaction={transaction}
-                    onPrintInvoice={onPrintInvoice}
-                    onPrintReceipt={onPrintReceipt}
-                    onDeleteSale={onDeleteSale}
-                    onDeletePayment={onDeletePayment}
-                  />
-                </td>
-              </tr>
-            ))
+            transactions.map((transaction) => {
+              const remainingClass =
+                transaction.remaining > 0
+                  ? 'ledger-money-remaining-debit'
+                  : 'ledger-money-remaining-credit';
+
+              const runningBalance = Number(transaction.runningBalance || 0);
+              const runningBalanceClass =
+                runningBalance > 0
+                  ? 'ledger-balance-debit'
+                  : runningBalance < 0
+                    ? 'ledger-balance-credit'
+                    : 'ledger-balance-neutral';
+
+              return (
+                <tr key={transaction.id}>
+                  <td className="ledger-cell-date">
+                    {transaction.date.toLocaleDateString('ar-EG')}
+                  </td>
+
+                  <td>
+                    <span
+                      className="ledger-type-chip"
+                      style={{
+                        backgroundColor: `${transaction.typeColor}1A`,
+                        color: transaction.typeColor
+                      }}
+                    >
+                      {transaction.type}
+                    </span>
+                  </td>
+
+                  <td className="ledger-cell-description">{transaction.description}</td>
+
+                  <td className="ledger-money-cell">{formatCurrency(transaction.total)}</td>
+
+                  <td className="ledger-money-cell ledger-money-paid">
+                    {formatCurrency(transaction.paid)}
+                  </td>
+
+                  <td className={`ledger-money-cell ${remainingClass}`}>
+                    {formatCurrency(transaction.remaining)}
+                  </td>
+
+                  <td className={`ledger-money-cell ${runningBalanceClass}`}>
+                    {formatCurrency(runningBalance)}
+                  </td>
+
+                  <td className="ledger-cell-notes">{transaction.notes || '-'}</td>
+
+                  <td className="ledger-cell-actions" style={{ textAlign: 'center' }}>
+                    <TransactionActions
+                      transaction={transaction}
+                      onPrintInvoice={onPrintInvoice}
+                      onPrintReceipt={onPrintReceipt}
+                      onEditSale={onEditSale}
+                      onEditPayment={onEditPayment}
+                      onDeleteSale={onDeleteSale}
+                      onDeletePayment={onDeletePayment}
+                    />
+                  </td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

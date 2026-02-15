@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
 import { CustomerLedgerService } from '../services/customerLedgerService';
@@ -9,6 +9,7 @@ import { generateLedgerHTML } from '../printing/ledgerTemplate';
 import CustomerLedgerHeader from './CustomerLedgerHeader';
 import CustomerLedgerSummary from './CustomerLedgerSummary';
 import CustomerLedgerTable from './CustomerLedgerTable';
+import './CustomerLedger.css';
 
 export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpdated }) {
   const [customer, setCustomer] = useState(null);
@@ -17,10 +18,6 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ from: null, to: null });
-
-  useEffect(() => {
-    loadCustomerData();
-  }, [customerId]);
 
   const loadCustomerData = async () => {
     try {
@@ -51,10 +48,31 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
     }
   };
 
+  useEffect(() => {
+    loadCustomerData();
+  }, [customerId]);
+
+  const allTransactions = useMemo(() => {
+    const ledgerRows = CustomerLedgerService.buildLedgerTransactions(sales, returns, payments);
+    return CustomerLedgerService.attachRunningBalance(ledgerRows, customer?.balance || 0);
+  }, [sales, returns, payments, customer?.balance]);
+
+  const transactions = useMemo(() => {
+    return CustomerLedgerService.filterByDateRange(
+      allTransactions,
+      dateRange.from,
+      dateRange.to
+    );
+  }, [allTransactions, dateRange.from, dateRange.to]);
+
+  const summary = useMemo(() => {
+    return CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
+  }, [transactions, customer?.balance]);
+
   const handlePrintInvoice = async (sale) => {
     const html = generateInvoiceHTML(sale, customer);
     const result = await safePrint(html, { title: `فاتورة رقم ${sale.id}` });
-    
+
     if (result.error) {
       await safeAlert('خطأ في الطباعة: ' + result.error);
     }
@@ -63,18 +81,16 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
   const handlePrintReceipt = async (payment) => {
     const html = generateReceiptHTML(payment, customer);
     const result = await safePrint(html, { title: `إيصال دفع رقم ${payment.id}` });
-    
+
     if (result.error) {
       await safeAlert('خطأ في الطباعة: ' + result.error);
     }
   };
 
   const handlePrintLedger = async () => {
-    const transactions = getFilteredTransactions();
-    const summary = CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
     const html = generateLedgerHTML(customer, transactions, summary);
     const result = await safePrint(html, { title: `كشف حساب ${customer?.name}` });
-    
+
     if (result.error) {
       await safeAlert('خطأ في الطباعة: ' + result.error);
     }
@@ -98,7 +114,7 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
       const updatedCustomer = await window.api.getCustomer(customerId);
       if (!updatedCustomer.error) {
         setCustomer(updatedCustomer);
-        onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
+        onCustomerUpdated?.(customerId, { balance: updatedCustomer.balance });
       }
 
       await safeAlert('✅ تم حذف الفاتورة بنجاح');
@@ -126,7 +142,7 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
       const updatedCustomer = await window.api.getCustomer(customerId);
       if (!updatedCustomer.error) {
         setCustomer(updatedCustomer);
-        onCustomerUpdated && onCustomerUpdated(customerId, { balance: updatedCustomer.balance });
+        onCustomerUpdated?.(customerId, { balance: updatedCustomer.balance });
       }
 
       await safeAlert('✅ تم حذف الدفعة بنجاح');
@@ -136,64 +152,24 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
     }
   };
 
-  const getFilteredTransactions = () => {
-    const allTransactions = CustomerLedgerService.buildLedgerTransactions(sales, returns, payments);
-    
-    if (!dateRange.from && !dateRange.to) {
-      return allTransactions;
-    }
-
-    return CustomerLedgerService.filterByDateRange(
-      allTransactions,
-      dateRange.from,
-      dateRange.to
-    );
-  };
-
   if (loading) {
     return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000
-      }}>
-        <div style={{ color: 'white', fontSize: '18px' }}>جاري التحميل...</div>
+      <div className="customer-ledger-overlay">
+        <div className="customer-ledger-loading">جاري التحميل...</div>
       </div>
     );
   }
 
-  const transactions = getFilteredTransactions();
-  const summary = CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
+  const finalBalanceClass =
+    summary.finalBalance > 0
+      ? 'ledger-balance-debit'
+      : summary.finalBalance < 0
+        ? 'ledger-balance-credit'
+        : 'ledger-balance-neutral';
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        width: '95%',
-        maxWidth: '1200px',
-        maxHeight: '90vh',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
+    <div className="customer-ledger-overlay">
+      <div className="customer-ledger-modal">
         <CustomerLedgerHeader
           customer={customer}
           onPrintLedger={handlePrintLedger}
@@ -216,39 +192,31 @@ export default function CustomerLedgerModal({ customerId, onClose, onCustomerUpd
           onDeletePayment={handleDeletePayment}
         />
 
-        <div style={{
-          padding: '20px',
-          borderTop: '2px solid #e5e7eb',
-          backgroundColor: '#f9fafb',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '15px'
-        }}>
-          <div style={{ textAlign: 'center', padding: '15px', backgroundColor: 'white', borderRadius: '8px' }}>
-            <div style={{ fontSize: '13px', color: '#6b7280' }}>إجمالي المبيعات</div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#3b82f6' }}>
+        <div className="customer-ledger-footer">
+          <div className="ledger-total-card">
+            <div className="ledger-total-label">إجمالي المبيعات</div>
+            <div className="ledger-total-value ledger-total-sales">
               {summary.totalSales.toFixed(2)} ج.م
             </div>
           </div>
-          <div style={{ textAlign: 'center', padding: '15px', backgroundColor: 'white', borderRadius: '8px' }}>
-            <div style={{ fontSize: '13px', color: '#6b7280' }}>إجمالي المدفوع</div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#10b981' }}>
+
+          <div className="ledger-total-card">
+            <div className="ledger-total-label">إجمالي المدفوع</div>
+            <div className="ledger-total-value ledger-total-paid">
               {summary.totalPaid.toFixed(2)} ج.م
             </div>
           </div>
-          <div style={{ textAlign: 'center', padding: '15px', backgroundColor: 'white', borderRadius: '8px' }}>
-            <div style={{ fontSize: '13px', color: '#6b7280' }}>إجمالي المتبقي</div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ef4444' }}>
+
+          <div className="ledger-total-card">
+            <div className="ledger-total-label">إجمالي المتبقي</div>
+            <div className="ledger-total-value ledger-total-remaining">
               {summary.totalRemaining.toFixed(2)} ج.م
             </div>
           </div>
-          <div style={{ textAlign: 'center', padding: '15px', backgroundColor: 'white', borderRadius: '8px' }}>
-            <div style={{ fontSize: '13px', color: '#6b7280' }}>الرصيد النهائي</div>
-            <div style={{
-              fontSize: '20px',
-              fontWeight: 'bold',
-              color: summary.finalBalance > 0 ? '#ef4444' : summary.finalBalance < 0 ? '#10b981' : '#6b7280'
-            }}>
+
+          <div className="ledger-total-card">
+            <div className="ledger-total-label">الرصيد الحالي</div>
+            <div className={`ledger-total-value ${finalBalanceClass}`}>
               {summary.finalBalance.toFixed(2)} ج.م
             </div>
           </div>

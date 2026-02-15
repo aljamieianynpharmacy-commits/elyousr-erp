@@ -81,6 +81,49 @@ export class CustomerLedgerService {
   }
 
   /**
+   * Net balance effect of a single transaction
+   * Positive -> increases receivable, Negative -> decreases receivable
+   */
+  static getTransactionEffect(transaction) {
+    const debit = Number(transaction?.debit || 0);
+    const credit = Number(transaction?.credit || 0);
+    return debit - credit;
+  }
+
+  /**
+   * Attach running balance to each transaction row
+   */
+  static attachRunningBalance(transactions, finalBalance) {
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      return [];
+    }
+
+    const ascending = [...transactions].sort((a, b) => {
+      const timeDiff = a.date - b.date;
+      if (timeDiff !== 0) return timeDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    const totalEffect = ascending.reduce(
+      (sum, transaction) => sum + this.getTransactionEffect(transaction),
+      0
+    );
+
+    let runningBalance = Number(finalBalance || 0) - totalEffect;
+    const balanceById = new Map();
+
+    ascending.forEach(transaction => {
+      runningBalance += this.getTransactionEffect(transaction);
+      balanceById.set(transaction.id, runningBalance);
+    });
+
+    return transactions.map(transaction => ({
+      ...transaction,
+      runningBalance: balanceById.get(transaction.id) ?? Number(finalBalance || 0)
+    }));
+  }
+
+  /**
    * Calculate ledger summary
    */
   static calculateSummary(transactions, customerBalance) {
@@ -125,10 +168,21 @@ export class CustomerLedgerService {
   static filterByDateRange(transactions, fromDate, toDate) {
     if (!fromDate && !toDate) return transactions;
 
+    const fromBoundary = fromDate ? new Date(fromDate) : null;
+    const toBoundary = toDate ? new Date(toDate) : null;
+
+    if (fromBoundary) {
+      fromBoundary.setHours(0, 0, 0, 0);
+    }
+
+    if (toBoundary) {
+      toBoundary.setHours(23, 59, 59, 999);
+    }
+
     return transactions.filter(t => {
       const transDate = t.date;
-      if (fromDate && transDate < fromDate) return false;
-      if (toDate && transDate > toDate) return false;
+      if (fromBoundary && transDate < fromBoundary) return false;
+      if (toBoundary && transDate > toBoundary) return false;
       return true;
     });
   }

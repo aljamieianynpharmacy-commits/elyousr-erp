@@ -1,8 +1,8 @@
 import React from 'react';
 
-export default function TransactionActions({ 
-  transaction, 
-  onPrintInvoice, 
+export default function TransactionActions({
+  transaction,
+  onPrintInvoice,
   onPrintReceipt,
   onEditSale,
   onEditPayment,
@@ -21,13 +21,16 @@ export default function TransactionActions({
   if (transaction.type === 'بيع') {
     return (
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-        <button
-          onClick={() => onEditSale(transaction.details)}
-          title="تعديل الفاتورة"
-          style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
-        >
-          ✏️
-        </button>
+        {typeof onEditSale === 'function' && (
+          <button
+            onClick={() => onEditSale(transaction.details)}
+            title="تعديل الفاتورة"
+            style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
+          >
+            ✏️
+          </button>
+        )}
+
         <button
           onClick={() => onPrintInvoice(transaction.details)}
           title="طباعة الفاتورة"
@@ -35,6 +38,7 @@ export default function TransactionActions({
         >
           🖨️
         </button>
+
         <button
           onClick={() => onDeleteSale(transaction.details)}
           title="حذف الفاتورة"
@@ -49,13 +53,16 @@ export default function TransactionActions({
   if (transaction.type === 'دفعة') {
     return (
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-        <button
-          onClick={() => onEditPayment(transaction.details)}
-          title="تعديل الدفعة"
-          style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
-        >
-          ✏️
-        </button>
+        {typeof onEditPayment === 'function' && (
+          <button
+            onClick={() => onEditPayment(transaction.details)}
+            title="تعديل الدفعة"
+            style={{ ...buttonStyle, backgroundColor: '#f59e0b' }}
+          >
+            ✏️
+          </button>
+        )}
+
         <button
           onClick={() => onPrintReceipt(transaction.details)}
           title="طباعة إيصال الدفع"
@@ -63,6 +70,7 @@ export default function TransactionActions({
         >
           🖨️
         </button>
+
         <button
           onClick={() => onDeletePayment(transaction.details)}
           title="حذف الدفعة"
@@ -74,6 +82,5 @@ export default function TransactionActions({
     );
   }
 
-  // Return transactions have no actions
   return <span style={{ color: '#9ca3af', fontSize: '12px' }}>-</span>;
 }

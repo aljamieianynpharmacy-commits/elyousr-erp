@@ -134,13 +134,13 @@ const applyCustomerFinancialDelta = async (tx, {
         SET
             "balance" = COALESCE("balance", 0) + ${safeBalanceDelta},
             "firstActivityDate" = CASE
-                WHEN ${safeActivityDate} IS NULL THEN "firstActivityDate"
-                WHEN "firstActivityDate" IS NULL OR "firstActivityDate" > ${safeActivityDate} THEN ${safeActivityDate}
+                WHEN CAST(${safeActivityDate} AS TIMESTAMP) IS NULL THEN "firstActivityDate"
+                WHEN "firstActivityDate" IS NULL OR "firstActivityDate" > CAST(${safeActivityDate} AS TIMESTAMP) THEN CAST(${safeActivityDate} AS TIMESTAMP)
                 ELSE "firstActivityDate"
             END,
             "lastPaymentDate" = CASE
-                WHEN ${safePaymentDate} IS NULL THEN "lastPaymentDate"
-                WHEN "lastPaymentDate" IS NULL OR "lastPaymentDate" < ${safePaymentDate} THEN ${safePaymentDate}
+                WHEN CAST(${safePaymentDate} AS TIMESTAMP) IS NULL THEN "lastPaymentDate"
+                WHEN "lastPaymentDate" IS NULL OR "lastPaymentDate" < CAST(${safePaymentDate} AS TIMESTAMP) THEN CAST(${safePaymentDate} AS TIMESTAMP)
                 ELSE "lastPaymentDate"
             END,
             "financialsUpdatedAt" = NOW()

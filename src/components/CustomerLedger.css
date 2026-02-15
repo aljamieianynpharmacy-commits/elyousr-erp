@@ -80,6 +80,13 @@
   flex-wrap: wrap;
 }
 
+.customer-ledger-filter-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .customer-ledger-filter-label {
   color: #334155;
   font-size: 14px;
@@ -96,6 +103,66 @@
 .customer-ledger-filter-fields label {
   font-size: 13px;
   color: #64748b;
+}
+
+.customer-ledger-smart-mini {
+  min-width: 280px;
+  max-width: 360px;
+  background: #ffffff;
+  border: 1px solid #dbe3f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+
+.customer-ledger-smart-mini-title {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.customer-ledger-smart-mini-score {
+  margin-top: 2px;
+  font-size: 21px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-ledger-smart-mini-score span {
+  font-size: 13px;
+  margin-inline-start: 4px;
+  color: #64748b;
+}
+
+.customer-ledger-smart-mini-meta {
+  font-size: 12px;
+  color: #475569;
+}
+
+.ledger-smart-mini-good {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.ledger-smart-mini-warn {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.ledger-smart-mini-bad {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.ledger-smart-mini-danger {
+  border-color: #f87171;
+  background: #fee2e2;
+}
+
+.ledger-smart-mini-neutral {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 
 .ledger-input {
@@ -130,6 +197,15 @@
 
 .ledger-btn-primary:hover {
   background: #1d4ed8;
+}
+
+.ledger-btn-insight {
+  background: #0891b2;
+  color: #ffffff;
+}
+
+.ledger-btn-insight:hover {
+  background: #0e7490;
 }
 
 .ledger-btn-accent {
@@ -201,6 +277,215 @@
   line-height: 1.35;
   white-space: normal;
   word-break: break-word;
+}
+
+.customer-ledger-smart-wrap {
+  padding: 12px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.customer-ledger-insight-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.54);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1700;
+  padding: 20px;
+}
+
+.customer-ledger-insight-modal {
+  width: min(96vw, 1120px);
+  max-height: 90vh;
+  background: #ffffff;
+  border: 1px solid #dbe3f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 26px 56px rgba(15, 23, 42, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+.customer-ledger-insight-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-ledger-insight-title {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.customer-ledger-insight-subtitle {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.customer-ledger-insight-modal-body {
+  overflow: auto;
+}
+
+.customer-ledger-insight-modal-body .customer-ledger-smart-wrap {
+  padding: 14px 16px;
+  border-bottom: none;
+}
+
+.customer-ledger-smart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.customer-ledger-smart-title {
+  font-size: 15px;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.customer-ledger-smart-subtitle {
+  font-size: 13px;
+  color: #475569;
+}
+
+.customer-ledger-smart-score {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-ledger-smart-score-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.customer-ledger-smart-score-value span {
+  font-size: 13px;
+  margin-inline-start: 4px;
+  color: #64748b;
+}
+
+.ledger-smart-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ledger-smart-badge-good {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ledger-smart-badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ledger-smart-badge-bad {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ledger-smart-badge-danger {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.ledger-smart-badge-neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.customer-ledger-smart-reasons {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.customer-ledger-smart-reason-item {
+  background: #f1f5f9;
+  border: 1px solid #dbe3f0;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #334155;
+  padding: 4px 10px;
+}
+
+.customer-ledger-smart-table-wrap {
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.customer-ledger-smart-table {
+  width: 100%;
+  min-width: 760px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.customer-ledger-smart-table thead th {
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px;
+}
+
+.customer-ledger-smart-table tbody td {
+  border-bottom: 1px solid #f1f5f9;
+  padding: 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.ledger-smart-money-cell {
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-smart-money-paid {
+  color: #059669;
+}
+
+.ledger-smart-center-cell {
+  text-align: center;
+}
+
+.ledger-smart-month-status {
+  display: inline-block;
+  background: #f1f5f9;
+  border: 1px solid #dbe3f0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #334155;
+}
+
+.ledger-smart-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 16px;
 }
 
 .customer-ledger-table-wrap {
@@ -389,6 +674,15 @@
     min-width: 120px;
   }
 
+  .customer-ledger-smart-wrap {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .customer-ledger-insight-overlay {
+    padding: 12px;
+  }
+
   .customer-ledger-table {
     min-width: 980px;
   }
@@ -406,6 +700,19 @@
   .customer-ledger-filter-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .customer-ledger-filter-main {
+    width: 100%;
+  }
+
+  .customer-ledger-smart-mini {
+    width: 100%;
+    max-width: none;
+  }
+
+  .customer-ledger-insight-title {
+    font-size: 16px;
   }
 
   .customer-ledger-actions {

@@ -10,6 +10,7 @@ import { emitPosEditorRequest } from '../utils/posEditorBridge';
 import PaymentModal from './PaymentModal';
 import CustomerLedgerHeader from './CustomerLedgerHeader';
 import CustomerLedgerSummary from './CustomerLedgerSummary';
+import CustomerLedgerSmartInsightModal from './CustomerLedgerSmartInsightModal';
 import CustomerLedgerTable from './CustomerLedgerTable';
 import './CustomerLedger.css';
 
@@ -25,6 +26,7 @@ export default function CustomerLedgerModal({
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
+  const [showSmartInsightModal, setShowSmartInsightModal] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [dateRange, setDateRange] = useState({ from: null, to: null });
@@ -48,7 +50,7 @@ export default function CustomerLedgerModal({
       setReturns(returnsData);
       setPayments(paymentsData);
     } catch (err) {
-      console.error('فشل تحميل البيانات:', err.message);
+      console.error('Failed to load customer ledger data:', err.message);
       setCustomer(null);
       setSales([]);
       setReturns([]);
@@ -78,6 +80,12 @@ export default function CustomerLedgerModal({
   const summary = useMemo(() => {
     return CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
   }, [transactions, customer?.balance]);
+
+  const smartInsight = useMemo(() => {
+    return CustomerLedgerService.buildSmartPaymentInsight(customer, sales, payments, returns, {
+      months: 6
+    });
+  }, [customer, sales, payments, returns]);
 
   const filteredSales = useMemo(() => {
     if (!dateRange.from && !dateRange.to) return sales;
@@ -268,6 +276,14 @@ export default function CustomerLedgerModal({
     setEditingPayment(null);
   };
 
+  const handleOpenSmartInsightModal = () => {
+    setShowSmartInsightModal(true);
+  };
+
+  const handleCloseSmartInsightModal = () => {
+    setShowSmartInsightModal(false);
+  };
+
   const submitPaymentEdit = async (paymentFormData) => {
     if (!editingPayment?.id) {
       return { error: 'بيانات الدفعة غير مكتملة' };
@@ -330,9 +346,11 @@ export default function CustomerLedgerModal({
           customer={customer}
           onPrintLedger={handlePrintLedger}
           onPrintDetailedLedger={handlePrintDetailedLedger}
+          onOpenSmartInsight={handleOpenSmartInsightModal}
           onClose={onClose}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
+          smartInsight={smartInsight}
         />
 
         <CustomerLedgerSummary
@@ -390,6 +408,13 @@ export default function CustomerLedgerModal({
         onClose={handleClosePaymentEditModal}
         isSubmitting={paymentSubmitting}
         formatCurrency={(value) => `${Number(value || 0).toFixed(2)} ج.م`}
+      />
+
+      <CustomerLedgerSmartInsightModal
+        isOpen={showSmartInsightModal}
+        onClose={handleCloseSmartInsightModal}
+        customer={customer}
+        smartInsight={smartInsight}
       />
     </div>
   );

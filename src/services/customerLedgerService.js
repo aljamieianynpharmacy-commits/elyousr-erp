@@ -4,6 +4,8 @@
  */
 
 export class CustomerLedgerService {
+  static SMART_MONTHS_DEFAULT = 6;
+
   /**
    * Get sale date with fallback
    */
@@ -193,6 +195,327 @@ export class CustomerLedgerService {
       if (toBoundary && transDate > toBoundary) return false;
       return true;
     });
+  }
+
+  static clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  static getMonthStart(dateValue) {
+    const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  }
+
+  static getMonthEnd(monthStart) {
+    return new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59, 999);
+  }
+
+  static getMonthKey(dateValue) {
+    const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${date.getFullYear()}-${month}`;
+  }
+
+  static isValidDate(value) {
+    return value instanceof Date && !Number.isNaN(value.getTime());
+  }
+
+  static normalizePaymentAmountFromSale(sale) {
+    const total = Number(sale?.total || 0);
+    const remainingFromSale = Number(sale?.remainingAmount ?? sale?.remaining);
+    const paidFromSale = Number(sale?.paidAmount ?? sale?.paid);
+
+    const remaining = Number.isFinite(remainingFromSale)
+      ? Math.max(0, remainingFromSale)
+      : 0;
+
+    if (Number.isFinite(paidFromSale)) {
+      return Math.max(0, paidFromSale);
+    }
+
+    return Math.max(0, total - remaining);
+  }
+
+  /**
+   * Build a smart payment behavior report for last N months.
+   * Includes invoice-paid amounts + standalone payments.
+   */
+  static buildSmartPaymentInsight(
+    customer,
+    sales = [],
+    payments = [],
+    returns = [],
+    options = {}
+  ) {
+    const monthsCount = Math.max(
+      1,
+      parseInt(options?.months, 10) || this.SMART_MONTHS_DEFAULT
+    );
+
+    const now = options?.now ? new Date(options.now) : new Date();
+    const safeNow = this.isValidDate(now) ? now : new Date();
+    const currentMonthStart = this.getMonthStart(safeNow);
+    const windowStart = new Date(
+      currentMonthStart.getFullYear(),
+      currentMonthStart.getMonth() - (monthsCount - 1),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+
+    const firstActivityDate = customer?.firstActivityDate
+      ? new Date(customer.firstActivityDate)
+      : null;
+    const firstActivityMonth = this.isValidDate(firstActivityDate)
+      ? this.getMonthStart(firstActivityDate)
+      : null;
+
+    const effectiveStart =
+      firstActivityMonth && firstActivityMonth > windowStart ? firstActivityMonth : windowStart;
+
+    const buckets = [];
+    const bucketByKey = new Map();
+
+    for (let offset = monthsCount - 1; offset >= 0; offset -= 1) {
+      const monthStart = new Date(
+        currentMonthStart.getFullYear(),
+        currentMonthStart.getMonth() - offset,
+        1,
+        0,
+        0,
+        0,
+        0
+      );
+
+      if (monthStart < effectiveStart) continue;
+
+      const key = this.getMonthKey(monthStart);
+      const bucket = {
+        key,
+        label: monthStart.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' }),
+        monthStart,
+        monthEnd: this.getMonthEnd(monthStart),
+        dueAmount: 0,
+        paidAmount: 0,
+        reliefAmount: 0,
+        paymentEvents: 0,
+        hasInvoicePayment: false,
+        hasStandalonePayment: false,
+        delayDays: 0,
+        hadObligation: false,
+        statusLabel: 'لا نشاط'
+      };
+
+      buckets.push(bucket);
+      bucketByKey.set(key, bucket);
+    }
+
+    const paymentEventDates = [];
+
+    (sales || []).forEach((sale) => {
+      const saleDate = this.getSaleDate(sale);
+      if (!this.isValidDate(saleDate)) return;
+      const monthKey = this.getMonthKey(saleDate);
+      const bucket = bucketByKey.get(monthKey);
+      if (!bucket) return;
+
+      const total = Math.max(0, Number(sale?.total || 0));
+      const paid = this.normalizePaymentAmountFromSale(sale);
+
+      bucket.dueAmount += total;
+      if (paid > 0) {
+        bucket.paidAmount += paid;
+        bucket.paymentEvents += 1;
+        bucket.hasInvoicePayment = true;
+        paymentEventDates.push(new Date(saleDate));
+      }
+    });
+
+    (payments || []).forEach((payment) => {
+      const amount = Math.max(0, Number(payment?.amount || 0));
+      if (amount <= 0) return;
+
+      const paymentDate = payment?.paymentDate
+        ? new Date(payment.paymentDate)
+        : new Date(payment?.createdAt);
+      if (!this.isValidDate(paymentDate)) return;
+
+      const monthKey = this.getMonthKey(paymentDate);
+      const bucket = bucketByKey.get(monthKey);
+      if (!bucket) return;
+
+      bucket.paidAmount += amount;
+      bucket.paymentEvents += 1;
+      bucket.hasStandalonePayment = true;
+      paymentEventDates.push(new Date(paymentDate));
+    });
+
+    (returns || []).forEach((returnItem) => {
+      const returnDate = new Date(returnItem?.createdAt);
+      if (!this.isValidDate(returnDate)) return;
+
+      const monthKey = this.getMonthKey(returnDate);
+      const bucket = bucketByKey.get(monthKey);
+      if (!bucket) return;
+
+      const returnTotal = Math.max(0, Number(returnItem?.total || 0));
+      bucket.reliefAmount += returnTotal;
+    });
+
+    paymentEventDates.sort((a, b) => a - b);
+
+    const totalDue = buckets.reduce((sum, bucket) => sum + bucket.dueAmount, 0);
+    const totalPaid = buckets.reduce((sum, bucket) => sum + bucket.paidAmount, 0);
+    const totalRelief = buckets.reduce((sum, bucket) => sum + bucket.reliefAmount, 0);
+    const windowNet = totalDue - totalPaid - totalRelief;
+    const currentBalance = Math.max(0, Number(customer?.balance || 0));
+    const inferredStartOutstanding = Math.max(0, currentBalance - windowNet);
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    let runningOutstanding = inferredStartOutstanding;
+    let expectedMonths = 0;
+    let monthsWithPayment = 0;
+    let missedMonths = 0;
+    let longestMissStreak = 0;
+    let activeMissStreak = 0;
+    let delayDaysTotal = 0;
+    let delayMonthsCount = 0;
+
+    buckets.forEach((bucket) => {
+      const hadObligation = runningOutstanding > 0.009 || bucket.dueAmount > 0.009;
+      const hasPayment = bucket.paymentEvents > 0;
+      bucket.hadObligation = hadObligation;
+
+      if (hadObligation) {
+        expectedMonths += 1;
+        if (hasPayment) {
+          monthsWithPayment += 1;
+          activeMissStreak = 0;
+          bucket.delayDays = 0;
+        } else {
+          missedMonths += 1;
+          activeMissStreak += 1;
+          longestMissStreak = Math.max(longestMissStreak, activeMissStreak);
+
+          const nextPaymentDate = paymentEventDates.find((eventDate) => eventDate > bucket.monthEnd);
+          const delayReference = nextPaymentDate || safeNow;
+          const rawDelay = Math.ceil((delayReference - bucket.monthEnd) / dayMs);
+          bucket.delayDays = Math.max(0, rawDelay);
+          delayDaysTotal += bucket.delayDays;
+          delayMonthsCount += 1;
+        }
+      } else {
+        bucket.delayDays = 0;
+        activeMissStreak = 0;
+      }
+
+      if (!hadObligation) {
+        bucket.statusLabel = 'لا يوجد استحقاق';
+      } else if (hasPayment) {
+        bucket.statusLabel = 'مدفوع';
+      } else if (bucket.delayDays <= 30) {
+        bucket.statusLabel = 'متأخر';
+      } else {
+        bucket.statusLabel = 'متأخر بشدة';
+      }
+
+      runningOutstanding = Math.max(
+        0,
+        runningOutstanding + bucket.dueAmount - bucket.paidAmount - bucket.reliefAmount
+      );
+      bucket.outstandingEnd = runningOutstanding;
+    });
+
+    const averageDelayDays =
+      delayMonthsCount > 0 ? delayDaysTotal / delayMonthsCount : 0;
+    const regularityRate = expectedMonths > 0 ? monthsWithPayment / expectedMonths : 1;
+    const coverageRatio =
+      totalDue > 0 ? this.clamp(totalPaid / totalDue, 0, 2) : (totalPaid > 0 ? 1 : 1);
+
+    let score = 100;
+    score -= (1 - regularityRate) * 55;
+    score -= Math.min(4, longestMissStreak) * 8;
+    score -= (Math.min(averageDelayDays, 90) / 90) * 20;
+    if (coverageRatio < 1) {
+      score -= (1 - coverageRatio) * 25;
+    }
+    score = Math.round(this.clamp(score, 0, 100));
+
+    let classification = 'ملتزم';
+    let tone = 'good';
+    if (score < 30) {
+      classification = 'عالي المخاطر';
+      tone = 'danger';
+    } else if (score < 50) {
+      classification = 'متأخر';
+      tone = 'bad';
+    } else if (score < 70) {
+      classification = 'متذبذب';
+      tone = 'warn';
+    } else if (score < 85) {
+      classification = 'جيد';
+      tone = 'good';
+    }
+
+    let pattern = 'منتظم شهريا';
+    if (expectedMonths === 0) {
+      pattern = 'لا توجد مديونية خلال الفترة';
+    } else if (monthsWithPayment === 0) {
+      pattern = 'لا يوجد سداد خلال آخر 6 شهور';
+    } else if (missedMonths === 0) {
+      pattern = 'دفع مرة واحدة على الأقل كل شهر';
+    } else if (longestMissStreak >= 2) {
+      pattern = `يدفع ثم يتأخر ${longestMissStreak} شهر`;
+    } else {
+      pattern = 'سداد غير منتظم';
+    }
+
+    const reasons = [];
+    reasons.push(`التزام شهري: ${monthsWithPayment}/${expectedMonths || 0}`);
+    reasons.push(`نسبة تغطية السداد: ${(coverageRatio * 100).toFixed(0)}%`);
+    if (missedMonths > 0) {
+      reasons.push(`أشهر بدون سداد: ${missedMonths}`);
+    }
+    if (averageDelayDays > 0) {
+      reasons.push(`متوسط التأخير: ${averageDelayDays.toFixed(0)} يوم`);
+    }
+
+    return {
+      periodMonths: monthsCount,
+      from: effectiveStart,
+      to: safeNow,
+      score,
+      classification,
+      tone,
+      pattern,
+      reasons,
+      metrics: {
+        expectedMonths,
+        monthsWithPayment,
+        missedMonths,
+        longestMissStreak,
+        averageDelayDays,
+        totalDue,
+        totalPaid,
+        totalRelief,
+        regularityRate,
+        coverageRatio,
+        inferredStartOutstanding
+      },
+      timeline: buckets.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        dueAmount: bucket.dueAmount,
+        paidAmount: bucket.paidAmount,
+        paymentEvents: bucket.paymentEvents,
+        delayDays: bucket.delayDays,
+        hadObligation: bucket.hadObligation,
+        statusLabel: bucket.statusLabel,
+        outstandingEnd: bucket.outstandingEnd
+      }))
+    };
   }
 
   /**

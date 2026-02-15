@@ -20,10 +20,16 @@ export default function CustomerLedgerHeader({
   customer,
   onPrintLedger,
   onPrintDetailedLedger,
+  onOpenSmartInsight,
   onClose,
   dateRange,
-  onDateRangeChange
+  onDateRangeChange,
+  smartInsight
 }) {
+  const smartScore = Number.isFinite(Number(smartInsight?.score))
+    ? Math.round(Number(smartInsight.score))
+    : 0;
+
   return (
     <div className="customer-ledger-header">
       <div className="customer-ledger-header-main">
@@ -33,6 +39,9 @@ export default function CustomerLedgerHeader({
         </div>
 
         <div className="customer-ledger-actions">
+          <button onClick={onOpenSmartInsight} className="ledger-btn ledger-btn-insight">
+            التقييم الذكي {smartScore}/100
+          </button>
           <button onClick={onPrintLedger} className="ledger-btn ledger-btn-primary">
             طباعة الكشف
           </button>
@@ -46,45 +55,47 @@ export default function CustomerLedgerHeader({
       </div>
 
       <div className="customer-ledger-filter-row">
-        <span className="customer-ledger-filter-label">فلترة الفترة</span>
+        <div className="customer-ledger-filter-main">
+          <span className="customer-ledger-filter-label">فلترة الفترة</span>
 
-        <div className="customer-ledger-filter-fields">
-          <label htmlFor="ledger-date-from">من</label>
-          <input
-            id="ledger-date-from"
-            type="date"
-            className="ledger-input"
-            value={toInputDateValue(dateRange.from)}
-            onChange={(e) => {
-              onDateRangeChange({
-                ...dateRange,
-                from: parseInputDate(e.target.value)
-              });
-            }}
-          />
+          <div className="customer-ledger-filter-fields">
+            <label htmlFor="ledger-date-from">من</label>
+            <input
+              id="ledger-date-from"
+              type="date"
+              className="ledger-input"
+              value={toInputDateValue(dateRange.from)}
+              onChange={(e) => {
+                onDateRangeChange({
+                  ...dateRange,
+                  from: parseInputDate(e.target.value)
+                });
+              }}
+            />
 
-          <label htmlFor="ledger-date-to">إلى</label>
-          <input
-            id="ledger-date-to"
-            type="date"
-            className="ledger-input"
-            value={toInputDateValue(dateRange.to)}
-            onChange={(e) => {
-              onDateRangeChange({
-                ...dateRange,
-                to: parseInputDate(e.target.value, true)
-              });
-            }}
-          />
+            <label htmlFor="ledger-date-to">إلى</label>
+            <input
+              id="ledger-date-to"
+              type="date"
+              className="ledger-input"
+              value={toInputDateValue(dateRange.to)}
+              onChange={(e) => {
+                onDateRangeChange({
+                  ...dateRange,
+                  to: parseInputDate(e.target.value, true)
+                });
+              }}
+            />
 
-          {(dateRange.from || dateRange.to) && (
-            <button
-              onClick={() => onDateRangeChange({ from: null, to: null })}
-              className="ledger-btn ledger-btn-light"
-            >
-              مسح الفلتر
-            </button>
-          )}
+            {(dateRange.from || dateRange.to) && (
+              <button
+                onClick={() => onDateRangeChange({ from: null, to: null })}
+                className="ledger-btn ledger-btn-light"
+              >
+                مسح الفلتر
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

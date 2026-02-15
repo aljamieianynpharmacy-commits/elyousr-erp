@@ -23,6 +23,7 @@
 .customer-ledger-modal {
   width: min(96vw, 1320px);
   max-height: 92vh;
+  min-height: 0;
   background: #ffffff;
   border: 1px solid #dbe3f0;
   border-radius: 16px;
@@ -493,9 +494,12 @@
 
 .customer-ledger-table-wrap {
   flex: 1;
+  min-height: 0;
+  position: relative;
   overflow: auto;
   padding: 0 24px 18px;
   background: #ffffff;
+  overscroll-behavior: contain;
 }
 
 .customer-ledger-table {
@@ -509,10 +513,16 @@
   margin-top: 14px;
 }
 
+.customer-ledger-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
 .customer-ledger-table thead th {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
   background: #f8fafc;
   color: #334155;
   font-size: 13px;
@@ -520,6 +530,7 @@
   border-bottom: 1px solid #e2e8f0;
   padding: 12px;
   white-space: nowrap;
+  box-shadow: 0 1px 0 #e2e8f0;
 }
 
 .customer-ledger-table tbody tr {

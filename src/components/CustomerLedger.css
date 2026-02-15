@@ -132,6 +132,15 @@
   background: #1d4ed8;
 }
 
+.ledger-btn-accent {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.ledger-btn-accent:hover {
+  background: #115e59;
+}
+
 .ledger-btn-secondary {
   background: #334155;
   color: #ffffff;

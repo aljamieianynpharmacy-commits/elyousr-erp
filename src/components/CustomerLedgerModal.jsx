@@ -5,7 +5,7 @@ import { CustomerLedgerService } from '../services/customerLedgerService';
 import { safePrint } from '../printing/safePrint';
 import { generateInvoiceHTML } from '../printing/invoiceTemplate';
 import { generateReceiptHTML } from '../printing/receiptTemplate';
-import { generateLedgerHTML } from '../printing/ledgerTemplate';
+import { generateLedgerHTML, generateDetailedLedgerA4HTML } from '../printing/ledgerTemplate';
 import { emitPosEditorRequest } from '../utils/posEditorBridge';
 import PaymentModal from './PaymentModal';
 import CustomerLedgerHeader from './CustomerLedgerHeader';
@@ -79,6 +79,41 @@ export default function CustomerLedgerModal({
     return CustomerLedgerService.calculateSummary(transactions, customer?.balance || 0);
   }, [transactions, customer?.balance]);
 
+  const filteredSales = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return sales;
+
+    return sales.filter((sale) => {
+      const saleDate = CustomerLedgerService.getSaleDate(sale);
+      if (dateRange.from && saleDate < dateRange.from) return false;
+      if (dateRange.to && saleDate > dateRange.to) return false;
+      return true;
+    });
+  }, [sales, dateRange.from, dateRange.to]);
+
+  const filteredReturns = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return returns;
+
+    return returns.filter((returnItem) => {
+      const returnDate = new Date(returnItem.createdAt);
+      if (dateRange.from && returnDate < dateRange.from) return false;
+      if (dateRange.to && returnDate > dateRange.to) return false;
+      return true;
+    });
+  }, [returns, dateRange.from, dateRange.to]);
+
+  const filteredPayments = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return payments;
+
+    return payments.filter((payment) => {
+      const paymentDate = payment.paymentDate
+        ? new Date(payment.paymentDate)
+        : new Date(payment.createdAt);
+      if (dateRange.from && paymentDate < dateRange.from) return false;
+      if (dateRange.to && paymentDate > dateRange.to) return false;
+      return true;
+    });
+  }, [payments, dateRange.from, dateRange.to]);
+
   const paymentEditModalCustomer = useMemo(() => {
     if (!customer || !editingPayment) return null;
     const originalAmount = Number(editingPayment.amount || 0);
@@ -119,6 +154,25 @@ export default function CustomerLedgerModal({
   const handlePrintLedger = async () => {
     const html = generateLedgerHTML(customer, transactions, summary);
     const result = await safePrint(html, { title: `كشف حساب ${customer?.name}` });
+
+    if (result.error) {
+      await safeAlert('خطأ في الطباعة: ' + result.error);
+    }
+  };
+
+  const handlePrintDetailedLedger = async () => {
+    const html = generateDetailedLedgerA4HTML({
+      customer,
+      sales: filteredSales,
+      returns: filteredReturns,
+      payments: filteredPayments,
+      summary,
+      dateRange
+    });
+
+    const result = await safePrint(html, {
+      title: `تقرير كشف حساب تفصيلي ${customer?.name || ''}`.trim()
+    });
 
     if (result.error) {
       await safeAlert('خطأ في الطباعة: ' + result.error);
@@ -275,6 +329,7 @@ export default function CustomerLedgerModal({
         <CustomerLedgerHeader
           customer={customer}
           onPrintLedger={handlePrintLedger}
+          onPrintDetailedLedger={handlePrintDetailedLedger}
           onClose={onClose}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}

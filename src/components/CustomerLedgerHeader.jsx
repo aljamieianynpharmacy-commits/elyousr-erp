@@ -19,6 +19,7 @@ const parseInputDate = (value, endOfDay = false) => {
 export default function CustomerLedgerHeader({
   customer,
   onPrintLedger,
+  onPrintDetailedLedger,
   onClose,
   dateRange,
   onDateRangeChange
@@ -34,6 +35,9 @@ export default function CustomerLedgerHeader({
         <div className="customer-ledger-actions">
           <button onClick={onPrintLedger} className="ledger-btn ledger-btn-primary">
             طباعة الكشف
+          </button>
+          <button onClick={onPrintDetailedLedger} className="ledger-btn ledger-btn-accent">
+            تقرير تفصيلي A4
           </button>
           <button onClick={onClose} className="ledger-btn ledger-btn-secondary">
             إغلاق

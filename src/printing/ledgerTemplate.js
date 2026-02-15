@@ -3,7 +3,7 @@
  * Returns pure HTML string for printing full customer ledger
  */
 
-export const generateLedgerHTML = (customer, transactions, summary) => {
+const generateLegacyLedgerHTML = (customer, transactions, summary) => {
   const formatMoney = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
   const getBalanceColor = (value) =>
     value > 0 ? '#ef4444' : value < 0 ? '#10b981' : '#475569';
@@ -147,13 +147,8 @@ export const generateLedgerHTML = (customer, transactions, summary) => {
 
   <script>
     document.addEventListener('keydown', function(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'p') {
         e.preventDefault();
-        if (window.electronAPI && window.electronAPI.triggerPrint) {
-          window.electronAPI.triggerPrint();
-        } else {
-          window.print();
-        }
       }
     });
   </script>
@@ -189,6 +184,348 @@ const formatDateRangeLabel = (dateRange) => {
   if (from) return `من ${from}`;
   if (to) return `إلى ${to}`;
   return 'كل الفترات';
+};
+
+export const generateLedgerHTML = (customer, transactions, summary) => {
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const totalSales = Number(summary?.totalSales || 0);
+  const totalReturns = Number(summary?.totalReturns || 0);
+  const totalPayments = Number(summary?.totalPayments || 0);
+  const totalRemaining = Number(summary?.totalRemaining || 0);
+  const finalBalance = Number(summary?.finalBalance ?? customer?.balance ?? 0);
+  const finalBalanceClass =
+    finalBalance > 0 ? 'danger' : finalBalance < 0 ? 'success' : 'neutral';
+
+  const transactionRows = safeTransactions.length
+    ? safeTransactions.map((transaction, index) => {
+      const runningBalance = Number(transaction?.runningBalance || 0);
+      const runningBalanceClass =
+        runningBalance > 0 ? 'danger' : runningBalance < 0 ? 'success' : 'neutral';
+
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${formatDate(transaction?.date)}</td>
+          <td>${escapeHtml(transaction?.description || '-')}</td>
+          <td>${escapeHtml(transaction?.paymentMethodName || '-')}</td>
+          <td class="amount-cell neutral">${formatMoney(transaction?.total || 0)}</td>
+          <td class="amount-cell success">${formatMoney(transaction?.paid || 0)}</td>
+          <td class="amount-cell danger">${formatMoney(transaction?.remaining || 0)}</td>
+          <td class="amount-cell ${runningBalanceClass}">${formatMoney(runningBalance)}</td>
+          <td class="notes-cell">${escapeHtml(transaction?.notes || '-')}</td>
+        </tr>
+      `;
+    }).join('')
+    : `
+      <tr>
+        <td colspan="9" class="empty-row">لا توجد معاملات في الفترة المحددة</td>
+      </tr>
+    `;
+
+  return `
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>كشف حساب - ${escapeHtml(customer?.name || '-')}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 10mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #f1f5f9;
+      direction: rtl;
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      color: #0f172a;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 190mm;
+      margin: 8px auto;
+      background: #ffffff;
+      border: 1px solid #dbe3f0;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    .header {
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .header h2 {
+      margin: 4px 0 0;
+      font-size: 14px;
+      color: #334155;
+      font-weight: 700;
+    }
+
+    .header-meta {
+      font-size: 12px;
+      color: #475569;
+      text-align: left;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .info-card {
+      background: #f8fafc;
+      border: 1px solid #dbe3f0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .summary-card {
+      border: 1px solid #dbe3f0;
+      border-radius: 8px;
+      padding: 8px;
+      background: #ffffff;
+      text-align: center;
+    }
+
+    .summary-label {
+      color: #64748b;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      font-size: 14px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .summary-value.success { color: #059669; }
+    .summary-value.danger { color: #dc2626; }
+    .summary-value.neutral { color: #334155; }
+
+    .section-title {
+      margin: 14px 0 8px;
+      font-size: 15px;
+      color: #0f172a;
+      border-inline-start: 4px solid #2563eb;
+      padding-inline-start: 8px;
+      font-weight: 800;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 11px;
+      table-layout: fixed;
+    }
+
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 5px 6px;
+      text-align: right;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 700;
+    }
+
+    .amount-cell {
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    .amount-cell.success { color: #059669; }
+    .amount-cell.danger { color: #dc2626; }
+    .amount-cell.neutral { color: #334155; }
+
+    .notes-cell {
+      color: #334155;
+      line-height: 1.45;
+    }
+
+    .empty-row {
+      text-align: center;
+      color: #64748b;
+      padding: 12px;
+      font-size: 12px;
+    }
+
+    .footer {
+      margin-top: 14px;
+      border-top: 1px solid #dbe3f0;
+      padding-top: 8px;
+      font-size: 11px;
+      color: #64748b;
+      text-align: center;
+    }
+
+    .print-button {
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      background: #2563eb;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .print-button:hover {
+      background: #1d4ed8;
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .page {
+        margin: 0;
+        max-width: none;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 0;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <h1>ERP SYSTEM</h1>
+        <h2>كشف حساب عميل</h2>
+      </div>
+      <div class="header-meta">
+        <div><strong>العميل:</strong> ${escapeHtml(customer?.name || '-')}</div>
+        <div><strong>تاريخ الطباعة:</strong> ${formatDate(new Date(), true)}</div>
+      </div>
+    </header>
+
+    <section class="info-grid">
+      <div class="info-card">
+        <div><strong>الاسم:</strong> ${escapeHtml(customer?.name || '-')}</div>
+        <div><strong>الهاتف:</strong> ${escapeHtml(customer?.phone || '-')}</div>
+        <div><strong>الهاتف 2:</strong> ${escapeHtml(customer?.phone2 || '-')}</div>
+      </div>
+      <div class="info-card">
+        <div><strong>العنوان:</strong> ${escapeHtml(customer?.address || '-')}</div>
+        <div><strong>ملاحظات العميل:</strong> ${escapeHtml(customer?.notes || '-')}</div>
+        <div><strong>الحد الائتماني:</strong> ${formatMoney(customer?.creditLimit || 0)}</div>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">إجمالي المبيعات</div>
+        <div class="summary-value neutral">${formatMoney(totalSales)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">إجمالي المدفوعات</div>
+        <div class="summary-value success">${formatMoney(totalPayments)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">إجمالي المرتجعات</div>
+        <div class="summary-value success">${formatMoney(totalReturns)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">إجمالي المتبقي</div>
+        <div class="summary-value danger">${formatMoney(totalRemaining)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">الرصيد الحالي</div>
+        <div class="summary-value ${finalBalanceClass}">${formatMoney(finalBalance)}</div>
+      </div>
+    </section>
+
+    <h3 class="section-title">حركة الحساب</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>التاريخ</th>
+          <th>البيان</th>
+          <th>طريقة الدفع</th>
+          <th>الإجمالي</th>
+          <th>المدفوع</th>
+          <th>المتبقي</th>
+          <th>الرصيد</th>
+          <th>ملاحظات</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${transactionRows}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      تم توليد التقرير من شاشة كشف حساب العميل
+      <div class="no-print">
+        <button class="print-button" onclick="if(window.electronAPI){window.electronAPI.triggerPrint()}else{window.print()}">
+          طباعة كشف الحساب
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'p') {
+        e.preventDefault();
+      }
+    });
+  </script>
+</body>
+</html>
+  `.trim();
 };
 
 export const generateDetailedLedgerA4HTML = ({
@@ -661,13 +998,8 @@ export const generateDetailedLedgerA4HTML = ({
 
   <script>
     document.addEventListener('keydown', function(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'p') {
         e.preventDefault();
-        if (window.electronAPI && window.electronAPI.triggerPrint) {
-          window.electronAPI.triggerPrint();
-        } else {
-          window.print();
-        }
       }
     });
   </script>

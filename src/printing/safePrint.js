@@ -1,7 +1,7 @@
 /**
  * Safe Print Utility
- * Sends HTML to Electron main process for printing
- * Avoids window.open and window.print focus issues
+ * Sends HTML to Electron main process for print preview
+ * In non-Electron environments, opens a preview window (manual print only)
  */
 
 export const safePrint = async (html, options = {}) => {
@@ -21,8 +21,8 @@ export const safePrint = async (html, options = {}) => {
       return { success: true };
     }
 
-    // Fallback: Create hidden iframe for printing
-    return await fallbackPrint(html);
+    // Fallback: open browser preview window without auto-print
+    return await fallbackPreview(html, options);
   } catch (err) {
     console.error('Print error:', err);
     return { error: err.message };
@@ -30,38 +30,27 @@ export const safePrint = async (html, options = {}) => {
 };
 
 /**
- * Fallback print method using hidden iframe
+ * Fallback preview method using browser popup
  * Used when Electron IPC is not available
  */
-const fallbackPrint = (html) => {
+const fallbackPreview = (html, options = {}) => {
   return new Promise((resolve) => {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '-9999px';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    
-    document.body.appendChild(iframe);
-    
-    const iframeDoc = iframe.contentWindow.document;
-    iframeDoc.open();
-    iframeDoc.write(html);
-    iframeDoc.close();
-    
-    iframe.contentWindow.onafterprint = () => {
-      document.body.removeChild(iframe);
-      resolve({ success: true });
-    };
-    
-    // Trigger print after content loads
-    iframe.contentWindow.onload = () => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch (err) {
-        document.body.removeChild(iframe);
-        resolve({ error: err.message });
+    try {
+      const previewWindow = window.open('', '_blank');
+      if (!previewWindow) {
+        resolve({ error: 'Popup blocked. Please allow popups and try again.' });
+        return;
       }
-    };
+
+      previewWindow.document.open();
+      previewWindow.document.write(html);
+      previewWindow.document.close();
+      previewWindow.document.title = options.title || 'Print Preview';
+      previewWindow.focus();
+
+      resolve({ success: true, previewOpened: true });
+    } catch (err) {
+      resolve({ error: err.message });
+    }
   });
 };

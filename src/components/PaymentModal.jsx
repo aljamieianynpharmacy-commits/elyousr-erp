@@ -23,7 +23,6 @@ export default function PaymentModal({
     onSubmit,
     onClose,
     isSubmitting,
-    formatCurrency,
     paymentMethods = DEFAULT_PAYMENT_METHODS,
 }) {
     /* =======================

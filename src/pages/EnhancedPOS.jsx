@@ -9,7 +9,10 @@ import {
     readPosEditorRequest,
     clearPosEditorRequest
 } from "../utils/posEditorBridge";
-import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
+import {
+    filterPosPaymentMethods,
+    normalizePaymentMethodCode
+} from "../utils/paymentMethodFilters";
 
 /**
  * Toast Notification Component
@@ -170,7 +173,7 @@ const createEmptyInvoice = (overrides = {}) => ({
     discountType: "value",
     paidAmount: "",
     saleType: "نقدي",
-    paymentMethod: "Cash",
+    paymentMethod: "CASH",
     notes: "",
     editorMode: "sale",
     isEditMode: false,
@@ -607,28 +610,14 @@ export default function EnhancedPOS() {
             }
         }
 
-        const normalized = String(rawMethod || "").trim().toLowerCase();
-        if (!normalized) return getDefaultPaymentMethodId();
-
-        const aliasCodeMap = {
-            cash: "CASH",
-            credit: "CREDIT",
-            deferred: "CREDIT",
-            vodafonecash: "VODAFONE_CASH",
-            "vodafone cash": "VODAFONE_CASH",
-            instapay: "INSTAPAY",
-            "insta pay": "INSTAPAY",
-            visa: "VISA",
-            mastercard: "MASTERCARD",
-            banktransfer: "BANK_TRANSFER",
-            "bank transfer": "BANK_TRANSFER",
-        };
-
-        const mappedCode = aliasCodeMap[normalized] || normalized.toUpperCase().replace(/[\s-]+/g, "_");
+        const normalizedInput = String(rawMethod || "").trim();
+        if (!normalizedInput) return getDefaultPaymentMethodId();
+        const normalizedName = normalizedInput.toLowerCase();
+        const mappedCode = normalizePaymentMethodCode(normalizedInput);
         const matchedMethod = paymentMethods.find((method) => {
             const methodCode = String(method?.code || "").trim().toUpperCase();
             const methodName = String(method?.name || "").trim().toLowerCase();
-            return methodCode === mappedCode || methodName === normalized;
+            return methodCode === mappedCode || methodName === normalizedName;
         });
 
         const matchedId = parseInt(matchedMethod?.id, 10);
@@ -3119,7 +3108,6 @@ export default function EnhancedPOS() {
                     onSubmit={handleSavePaymentEdit}
                     onClose={handleClosePaymentEditModal}
                     isSubmitting={isSaving}
-                    formatCurrency={(value) => `${toNumberSafe(value, 0).toFixed(2)} ج.م`}
                     paymentMethods={paymentMethods}
                 />
             )}

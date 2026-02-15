@@ -418,7 +418,6 @@ export default function CustomerLedgerModal({
         onSubmit={submitPaymentEdit}
         onClose={handleClosePaymentEditModal}
         isSubmitting={paymentSubmitting}
-        formatCurrency={(value) => `${Number(value || 0).toFixed(2)} ج.م`}
         paymentMethods={paymentMethods}
       />
 

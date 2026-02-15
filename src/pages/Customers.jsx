@@ -1835,11 +1835,9 @@ export default function Customers() {
         isOpen={showPaymentModal}
         selectedCustomer={selectedCustomer}
         paymentData={paymentData}
-        onPaymentDataChange={setPaymentData}
         onSubmit={submitPayment}
         onClose={() => setShowPaymentModal(false)}
         isSubmitting={paymentSubmitting}
-        formatCurrency={formatCurrency}
         paymentMethods={paymentMethods}
       />
 

@@ -20,69 +20,76 @@ export class CustomerLedgerService {
     const transactions = [];
 
     // Process sales
-    sales.forEach(sale => {
+    sales.forEach((sale) => {
       const total = Number(sale.total || 0);
       const remainingFromSale = Number(sale.remainingAmount ?? sale.remaining);
       const paidFromSale = Number(sale.paidAmount ?? sale.paid);
       const remaining = Number.isFinite(remainingFromSale)
         ? Math.max(0, remainingFromSale)
-        : (sale.saleType === 'آجل' ? total : 0);
+        : (sale.saleType === '\u0622\u062c\u0644' ? total : 0);
       const paid = Number.isFinite(paidFromSale)
         ? Math.max(0, paidFromSale)
         : Math.max(0, total - remaining);
+      const paymentMethodName = sale?.paymentMethod?.name || sale?.payment || '-';
 
       transactions.push({
         id: `sale-${sale.id}`,
         date: this.getSaleDate(sale),
-        type: 'بيع',
+        type: '\u0628\u064a\u0639',
         typeColor: '#3b82f6',
-        description: `فاتورة بيع #${sale.id}`,
+        description: `\u0641\u0627\u062a\u0648\u0631\u0629 \u0628\u064a\u0639 #${sale.id}`,
         debit: remaining,
         credit: 0,
         total,
         paid,
         remaining,
-        notes: sale.notes || '✓ بدون ملاحظات',
+        paymentMethodName,
+        notes: sale.notes || '\u2713 \u0628\u062f\u0648\u0646 \u0645\u0644\u0627\u062d\u0638\u0627\u062a',
         details: sale
       });
     });
 
     // Process returns
-    returns.forEach(returnItem => {
+    returns.forEach((returnItem) => {
       transactions.push({
         id: `return-${returnItem.id}`,
         date: new Date(returnItem.createdAt),
-        type: 'مرتجع',
+        type: '\u0645\u0631\u062a\u062c\u0639',
         typeColor: '#f59e0b',
-        description: `مرتجع #${returnItem.id}`,
+        description: `\u0645\u0631\u062a\u062c\u0639 #${returnItem.id}`,
         debit: 0,
         credit: returnItem.total,
         total: returnItem.total,
         paid: returnItem.total,
         remaining: 0,
-        notes: returnItem.notes || '✓ بدون ملاحظات',
+        paymentMethodName: '-',
+        notes: returnItem.notes || '\u2713 \u0628\u062f\u0648\u0646 \u0645\u0644\u0627\u062d\u0638\u0627\u062a',
         details: returnItem
       });
     });
 
     // Process payments
-    payments.forEach(payment => {
-      const paymentDate = payment.paymentDate 
-        ? new Date(payment.paymentDate) 
+    payments.forEach((payment) => {
+      const paymentDate = payment.paymentDate
+        ? new Date(payment.paymentDate)
         : new Date(payment.createdAt);
-      
+      const paymentMethodName = payment?.paymentMethod?.name || '-';
+
       transactions.push({
         id: `payment-${payment.id}`,
         date: paymentDate,
-        type: 'دفعة',
+        type: '\u062f\u0641\u0639\u0629',
         typeColor: '#10b981',
-        description: `دفعة نقدية`,
+        description: paymentMethodName === '-'
+          ? '\u062f\u0641\u0639\u0629'
+          : `\u062f\u0641\u0639\u0629 (${paymentMethodName})`,
         debit: 0,
         credit: payment.amount,
         total: payment.amount,
         paid: payment.amount,
         remaining: 0,
-        notes: payment.notes || '✓ بدون ملاحظات',
+        paymentMethodName,
+        notes: payment.notes || '\u2713 \u0628\u062f\u0648\u0646 \u0645\u0644\u0627\u062d\u0638\u0627\u062a',
         details: payment
       });
     });

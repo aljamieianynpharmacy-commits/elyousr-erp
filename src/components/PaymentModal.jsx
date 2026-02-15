@@ -7,12 +7,13 @@ import React, {
     useCallback,
 } from "react";
 import { X, Printer, Save, FileText } from "lucide-react";
+import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
 
 // ثابت (عدم إعادة إنشاء المصفوفة في كل رندر)
 const DEFAULT_PAYMENT_METHODS = [
-    { id: 1, name: "كاش", code: "cash" },
-    { id: 2, name: "فودافون كاش", code: "vodafone" },
-    { id: 3, name: "انستاباي", code: "instapay" },
+    { id: 1, name: "Cash", code: "CASH" },
+    { id: 2, name: "Vodafone Cash", code: "VODAFONE_CASH" },
+    { id: 3, name: "InstaPay", code: "INSTAPAY" },
 ];
 
 export default function PaymentModal({
@@ -29,13 +30,19 @@ export default function PaymentModal({
        Hooks (ثابتة دائمًا)
     ======================= */
     const amountRef = useRef(null);
+    const safePaymentMethods = useMemo(() => {
+        const filtered = filterPosPaymentMethods(paymentMethods);
+        if (filtered.length > 0) return filtered;
+
+        return filterPosPaymentMethods(DEFAULT_PAYMENT_METHODS);
+    }, [paymentMethods]);
 
     const [amount, setAmount] = useState("");
     const [date, setDate] = useState("");
     const [notes, setNotes] = useState("");
     const [alert, setAlert] = useState({ message: "", type: "info" }); // unified alert box
     // keep paymentMethod as string to match option values and avoid unnecessary resets
-    const [paymentMethod, setPaymentMethod] = useState(String(paymentMethods[0]?.id || ""));
+    const [paymentMethod, setPaymentMethod] = useState(String(safePaymentMethods[0]?.id || ""));
 
     useEffect(() => {
         if (isOpen) {
@@ -50,13 +57,21 @@ export default function PaymentModal({
 
             setDate(formatDateForInput(paymentData.paymentDate) || "");
             setNotes(paymentData.notes || "");
-            setPaymentMethod(String(paymentData.paymentMethodId || paymentMethods[0]?.id || ""));
+            const requestedMethodId = String(paymentData.paymentMethodId || "");
+            const hasRequestedMethod = safePaymentMethods.some(
+                (method) => String(method?.id) === requestedMethodId
+            );
+            setPaymentMethod(
+                hasRequestedMethod
+                    ? requestedMethodId
+                    : String(safePaymentMethods[0]?.id || "")
+            );
             setTimeout(() => {
                 amountRef.current?.focus();
                 amountRef.current?.select();
             }, 50);
         }
-    }, [isOpen, paymentData, paymentMethods]);
+    }, [isOpen, paymentData, safePaymentMethods]);
 
     const amountNumber = parseFloat(amount) || 0;
 
@@ -95,7 +110,9 @@ export default function PaymentModal({
                 amount,
                 paymentDate: date,
                 // ensure we send a number id
-                paymentMethodId: parseInt(paymentMethod, 10) || 1,
+                paymentMethodId: parseInt(paymentMethod, 10)
+                    || parseInt(safePaymentMethods[0]?.id, 10)
+                    || 1,
                 notes,
             });
 
@@ -120,7 +137,7 @@ export default function PaymentModal({
             // close modal immediately after successful save
             onClose && onClose();
         },
-        [amount, date, paymentMethod, notes, isSubmitting, onSubmit, paymentData]
+        [amount, date, paymentMethod, notes, isSubmitting, onSubmit, paymentData, safePaymentMethods]
     );
 
     useEffect(() => {
@@ -326,7 +343,7 @@ export default function PaymentModal({
                                         cursor: 'pointer',
                                     }}
                                 >
-                                    {paymentMethods.map((method) => (
+                                    {safePaymentMethods.map((method) => (
                                         <option key={method.id} value={String(method.id)}>
                                             {method.name}
                                         </option>

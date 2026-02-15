@@ -117,6 +117,105 @@ const parsePaymentDateInput = (value) => {
     return parsed || new Date();
 };
 
+const PAYMENT_METHOD_CODE_ALIASES = {
+    cash: 'CASH',
+    نقدي: 'CASH',
+    credit: 'CREDIT',
+    deferred: 'CREDIT',
+    اجل: 'CREDIT',
+    آجل: 'CREDIT',
+    visa: 'VISA',
+    mastercard: 'MASTERCARD',
+    banktransfer: 'BANK_TRANSFER',
+    bank_transfer: 'BANK_TRANSFER',
+    vodafonecash: 'VODAFONE_CASH',
+    vodafone_cash: 'VODAFONE_CASH',
+    فودافون: 'VODAFONE_CASH',
+    فودافونكاش: 'VODAFONE_CASH',
+    instapay: 'INSTAPAY',
+    انستاباي: 'INSTAPAY',
+    insta: 'INSTAPAY'
+};
+
+const normalizePaymentMethodLookup = (rawValue) => {
+    const numeric = parsePositiveInt(rawValue);
+    if (numeric) {
+        return { id: numeric, rawName: null, code: null };
+    }
+
+    const rawName = String(rawValue || '').trim();
+    if (!rawName) {
+        return { id: null, rawName: null, code: null };
+    }
+
+    const normalizedKey = rawName
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/[-_]/g, '');
+
+    const aliasCode = PAYMENT_METHOD_CODE_ALIASES[normalizedKey];
+    const fallbackCode = rawName
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, '_');
+
+    return {
+        id: null,
+        rawName,
+        code: aliasCode || fallbackCode
+    };
+};
+
+const resolvePaymentMethodId = async (txOrClient, rawValue, fallbackId = 1) => {
+    const { id, rawName, code } = normalizePaymentMethodLookup(rawValue);
+
+    if (id) {
+        const byId = await txOrClient.paymentMethod.findFirst({
+            where: { id, isActive: true },
+            select: { id: true }
+        });
+        if (byId?.id) return byId.id;
+    }
+
+    if (rawName || code) {
+        const filters = [];
+        if (code) {
+            filters.push({ code: { equals: code, mode: 'insensitive' } });
+        }
+        if (rawName) {
+            filters.push({ name: { equals: rawName, mode: 'insensitive' } });
+        }
+
+        if (filters.length > 0) {
+            const byCodeOrName = await txOrClient.paymentMethod.findFirst({
+                where: {
+                    isActive: true,
+                    OR: filters
+                },
+                select: { id: true }
+            });
+            if (byCodeOrName?.id) return byCodeOrName.id;
+        }
+    }
+
+    const fallbackNumeric = parsePositiveInt(fallbackId);
+    if (fallbackNumeric) {
+        const fallbackMethod = await txOrClient.paymentMethod.findFirst({
+            where: { id: fallbackNumeric, isActive: true },
+            select: { id: true }
+        });
+        if (fallbackMethod?.id) return fallbackMethod.id;
+    }
+
+    const firstActive = await txOrClient.paymentMethod.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true }
+    });
+
+    return firstActive?.id || null;
+};
+
 const applyCustomerFinancialDelta = async (tx, {
     customerId,
     balanceDelta = 0,
@@ -656,9 +755,10 @@ const dbService = {
     // ==================== SALES ====================
     async getSales() {
         try {
-            return await prisma.sale.findMany({
+            const sales = await prisma.sale.findMany({
                 include: {
                     customer: true,
+                    paymentMethod: true,
                     items: {
                         include: {
                             variant: {
@@ -669,6 +769,12 @@ const dbService = {
                 },
                 orderBy: { createdAt: 'desc' }
             });
+
+            return sales.map((sale) => ({
+                ...sale,
+                payment: sale?.paymentMethod?.name || null,
+                paymentMethodCode: sale?.paymentMethod?.code || null
+            }));
         } catch (error) {
             return { error: error.message };
         }
@@ -684,12 +790,20 @@ const dbService = {
         try {
             const result = await prisma.$transaction(async (tx) => {
                 const parsedCustomerId = parsePositiveInt(saleData.customerId);
+                const resolvedPaymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    saleData.paymentMethodId ?? saleData.paymentMethod ?? saleData.payment,
+                    1
+                );
 
                 const newSale = await tx.sale.create({
                     data: {
                         customer: parsedCustomerId ? {
                             connect: { id: parsedCustomerId }
                         } : undefined,
+                        paymentMethod: resolvedPaymentMethodId
+                            ? { connect: { id: resolvedPaymentMethodId } }
+                            : undefined,
                         total: parseFloat(saleData.total),
                         discount: parseFloat(saleData.discount || 0),
                         saleType: saleData.saleType || '\u0646\u0642\u062f\u064a',
@@ -829,10 +943,11 @@ const dbService = {
 
     async getSaleDetails(saleId) {
         try {
-            return await prisma.sale.findUnique({
+            const sale = await prisma.sale.findUnique({
                 where: { id: parseInt(saleId) },
                 include: {
                     customer: true,
+                    paymentMethod: true,
                     items: {
                         include: {
                             variant: {
@@ -844,6 +959,14 @@ const dbService = {
                     }
                 }
             });
+
+            if (!sale) return null;
+
+            return {
+                ...sale,
+                payment: sale?.paymentMethod?.name || null,
+                paymentMethodCode: sale?.paymentMethod?.code || null
+            };
         } catch (error) {
             return { error: error.message };
         }
@@ -954,6 +1077,18 @@ const dbService = {
                 const newCustomerId = Object.prototype.hasOwnProperty.call(saleData, 'customerId')
                     ? parsePositiveInt(saleData.customerId)
                     : currentSale.customerId;
+                const hasPaymentMethodUpdate = (
+                    Object.prototype.hasOwnProperty.call(saleData || {}, 'paymentMethodId') ||
+                    Object.prototype.hasOwnProperty.call(saleData || {}, 'paymentMethod') ||
+                    Object.prototype.hasOwnProperty.call(saleData || {}, 'payment')
+                );
+                const nextPaymentMethodId = hasPaymentMethodUpdate
+                    ? await resolvePaymentMethodId(
+                        tx,
+                        saleData.paymentMethodId ?? saleData.paymentMethod ?? saleData.payment,
+                        currentSale.paymentMethodId || 1
+                    )
+                    : currentSale.paymentMethodId;
 
                 const oldSaleTransactions = await tx.customerTransaction.findMany({
                     where: {
@@ -1021,6 +1156,11 @@ const dbService = {
                                 ? { connect: { id: newCustomerId } }
                                 : { disconnect: true })
                             : undefined,
+                        paymentMethod: hasPaymentMethodUpdate
+                            ? (nextPaymentMethodId
+                                ? { connect: { id: nextPaymentMethodId } }
+                                : { disconnect: true })
+                            : undefined,
                         total: parseFloat(saleData.total),
                         discount: parseFloat(saleData.discount || 0),
                         saleType: saleData.saleType || 'نقدي',
@@ -1031,6 +1171,7 @@ const dbService = {
                     },
                     include: {
                         customer: true,
+                        paymentMethod: true,
                         items: true
                     }
                 });
@@ -1476,6 +1617,7 @@ const dbService = {
             const sales = await prisma.sale.findMany({
                 where: { customerId: parseInt(customerId) },
                 include: {
+                    paymentMethod: true,
                     items: {
                         include: {
                             variant: { include: { product: true } }
@@ -1517,6 +1659,8 @@ const dbService = {
                 const paidAmount = Math.max(0, total - remainingAmount);
                 return {
                     ...sale,
+                    payment: sale?.paymentMethod?.name || null,
+                    paymentMethodCode: sale?.paymentMethod?.code || null,
                     remainingAmount,
                     paidAmount,
                     // Backward-compatible aliases used by some UI paths.
@@ -1621,17 +1765,27 @@ const dbService = {
             const paymentDate = parsePaymentDateInput(paymentData.paymentDate);
 
             const result = await prisma.$transaction(async (tx) => {
+                const paymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    paymentData?.paymentMethodId ?? paymentData?.paymentMethod,
+                    1
+                );
+                if (!paymentMethodId) {
+                    return { error: 'Invalid paymentMethodId' };
+                }
+
                 const payment = await tx.customerPayment.create({
                     data: {
                         customer: {
                             connect: { id: customerId }
                         },
-                        paymentMethod: {
-                            connect: { id: parseInt(paymentData.paymentMethodId) || 1 }
-                        },
+                        paymentMethodId,
                         amount: paymentAmount,
                         notes: paymentData.notes || null,
                         paymentDate
+                    },
+                    include: {
+                        paymentMethod: true
                     }
                 });
 
@@ -1697,7 +1851,6 @@ const dbService = {
             }
 
             const paymentDate = parsePaymentDateInput(paymentData?.paymentDate);
-            const paymentMethodId = parsePositiveInt(paymentData?.paymentMethodId) || 1;
 
             const result = await prisma.$transaction(async (tx) => {
                 const existingPayment = await tx.customerPayment.findUnique({
@@ -1721,6 +1874,15 @@ const dbService = {
 
                 if (!nextCustomerId) {
                     return { error: 'Invalid customerId' };
+                }
+
+                const paymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    paymentData?.paymentMethodId ?? paymentData?.paymentMethod,
+                    existingPayment.paymentMethodId || 1
+                );
+                if (!paymentMethodId) {
+                    return { error: 'Invalid paymentMethodId' };
                 }
 
                 const updatedPayment = await tx.customerPayment.update({

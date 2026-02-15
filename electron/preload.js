@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('api', {
     rebuildCustomerFinancials: (customerId) => ipcRenderer.invoke('db:rebuildCustomerFinancials', customerId),
     rebuildAllCustomersFinancials: (params) => ipcRenderer.invoke('db:rebuildAllCustomersFinancials', params),
     checkCustomerFinancialsHealth: () => ipcRenderer.invoke('db:checkCustomerFinancialsHealth'),
+    getPaymentMethods: () => ipcRenderer.invoke('db:getPaymentMethods'),
+    getPaymentMethodStats: () => ipcRenderer.invoke('db:getPaymentMethodStats'),
 
     // Suppliers
     getSuppliers: () => ipcRenderer.invoke('db:getSuppliers'),

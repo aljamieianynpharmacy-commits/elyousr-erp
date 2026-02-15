@@ -175,6 +175,7 @@ enum ReferenceType {
 model Sale {
   id          Int      @id @default(autoincrement())
   customerId  Int?
+  paymentMethodId Int?
   total       Float
   discount    Float    @default(0)
   saleType    String   @default("نقدي")
@@ -183,10 +184,12 @@ model Sale {
   createdAt   DateTime @default(now())
 
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   items       SaleItem[]
   returns     Return[]
 
   @@index([customerId])
+  @@index([paymentMethodId])
   @@index([customerId, invoiceDate])
 }
 
@@ -245,6 +248,7 @@ model PaymentMethod {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
+  sales     Sale[]
   payments  CustomerPayment[]
 }
 

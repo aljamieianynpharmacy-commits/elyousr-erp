@@ -342,6 +342,12 @@ ipcMain.handle('db:rebuildAllCustomersFinancials', async (event, params) => {
 ipcMain.handle('db:checkCustomerFinancialsHealth', async () => {
     return await dbService.checkCustomerFinancialsHealth();
 });
+ipcMain.handle('db:getPaymentMethods', async () => {
+    return await dbService.getPaymentMethods();
+});
+ipcMain.handle('db:getPaymentMethodStats', async () => {
+    return await dbService.getPaymentMethodStats();
+});
 
 // Supplier Payments
 ipcMain.handle('db:addSupplierPayment', async (event, paymentData) => {

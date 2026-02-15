@@ -5,6 +5,7 @@ import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } 
 import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
+import { filterPosPaymentMethods } from '../utils/paymentMethodFilters';
 import './Customers.css';
 
 // Utility functions - moved outside component for better performance
@@ -484,6 +485,7 @@ export default function Customers() {
   const [showLedger, setShowLedger] = useState(null);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all'); // all, VIP, عادي, تاجر جملة
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
@@ -557,6 +559,17 @@ export default function Customers() {
     overdueThreshold
   }), [currentPage, pageSize, effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir, overdueThreshold]);
 
+  const loadPaymentMethods = useCallback(async () => {
+    try {
+      const methods = await window.api.getPaymentMethods();
+      if (Array.isArray(methods)) {
+        setPaymentMethods(filterPosPaymentMethods(methods));
+      }
+    } catch (error) {
+      console.error('Failed to load payment methods:', error);
+    }
+  }, []);
+
   const loadAllCustomers = useCallback(async ({ force = false } = {}) => {
     const CACHE_TTL_MS = 15000;
 
@@ -626,6 +639,10 @@ export default function Customers() {
   useEffect(() => {
     loadAllCustomers();
   }, [loadAllCustomers]);
+
+  useEffect(() => {
+    loadPaymentMethods();
+  }, [loadPaymentMethods]);
 
   const activeColumnFilters = useMemo(() => (
     Object.entries(debouncedColumnSearch)
@@ -779,7 +796,10 @@ export default function Customers() {
         customerId: selectedCustomer.id,
         amount: paymentAmount,
         notes: paymentFormData.notes || '',
-        paymentDate: paymentFormData.paymentDate
+        paymentDate: paymentFormData.paymentDate,
+        paymentMethodId: parseInt(paymentFormData.paymentMethodId, 10)
+          || parseInt(paymentMethods[0]?.id, 10)
+          || 1
       };
 
       const result = await window.api.addCustomerPayment(payload);
@@ -1820,6 +1840,7 @@ export default function Customers() {
         onClose={() => setShowPaymentModal(false)}
         isSubmitting={paymentSubmitting}
         formatCurrency={formatCurrency}
+        paymentMethods={paymentMethods}
       />
 
       {/* Customer Ledger */}

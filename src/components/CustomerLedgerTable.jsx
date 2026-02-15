@@ -20,6 +20,9 @@ export default function CustomerLedgerTable({
             <th>{"\u0627\u0644\u062a\u0627\u0631\u064a\u062e"}</th>
             <th>{"\u0627\u0644\u0628\u064a\u0627\u0646"}</th>
             <th style={{ textAlign: "center" }}>
+              {"\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062f\u0641\u0639"}
+            </th>
+            <th style={{ textAlign: "center" }}>
               {"\u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a"}
             </th>
             <th style={{ textAlign: "center" }}>
@@ -41,7 +44,7 @@ export default function CustomerLedgerTable({
         <tbody>
           {transactions.length === 0 ? (
             <tr>
-              <td colSpan="8" className="ledger-empty-state">
+              <td colSpan="9" className="ledger-empty-state">
                 {"\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0639\u0627\u0645\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u0645\u062d\u062f\u062f\u0629"}
               </td>
             </tr>
@@ -67,6 +70,10 @@ export default function CustomerLedgerTable({
                   </td>
 
                   <td className="ledger-cell-description">{transaction.description}</td>
+
+                  <td style={{ textAlign: "center" }}>
+                    {transaction.paymentMethodName || "-"}
+                  </td>
 
                   <td className="ledger-money-cell">{formatCurrency(transaction.total)}</td>
 

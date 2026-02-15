@@ -9,6 +9,7 @@ import {
     readPosEditorRequest,
     clearPosEditorRequest
 } from "../utils/posEditorBridge";
+import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
 
 /**
  * Toast Notification Component
@@ -203,6 +204,17 @@ const isCreditSaleType = (saleType) => {
     const normalized = String(saleType || "").trim().toLowerCase();
     return normalized === "آجل" || normalized === "اجل" || normalized === "credit" || normalized === "deferred";
 };
+const PAYMENT_METHOD_UI_PRESETS = {
+    CASH: { color: "#10b981", bg: "#ecfdf5", text: "#047857" },
+    VODAFONE_CASH: { color: "#dc2626", bg: "#fef2f2", text: "#991b1b" },
+    INSTAPAY: { color: "#6366f1", bg: "#eef2ff", text: "#4338ca" },
+};
+
+const DEFAULT_POS_PAYMENT_METHODS = [
+    { id: "CASH", code: "CASH", name: "Cash" },
+    { id: "VODAFONE_CASH", code: "VODAFONE_CASH", name: "Vodafone Cash" },
+    { id: "INSTAPAY", code: "INSTAPAY", name: "InstaPay" },
+];
 
 /**
  * ============================================
@@ -471,6 +483,7 @@ export default function EnhancedPOS() {
      */
     const [variants, setVariants] = useState([]);
     const [customers, setCustomers] = useState([]);
+    const [paymentMethods, setPaymentMethods] = useState([]);
     const [loading, setLoading] = useState(true);
 
     /**
@@ -580,6 +593,76 @@ export default function EnhancedPOS() {
         });
         return map;
     }, [variants]);
+    const getDefaultPaymentMethodId = useCallback(() => {
+        const firstMethod = Array.isArray(paymentMethods) ? paymentMethods[0] : null;
+        const fallbackId = parseInt(firstMethod?.id, 10);
+        return Number.isFinite(fallbackId) && fallbackId > 0 ? fallbackId : 1;
+    }, [paymentMethods]);
+    const resolveInvoicePaymentMethodId = useCallback((rawMethod) => {
+        const directId = parseInt(rawMethod, 10);
+        if (Number.isFinite(directId) && directId > 0) {
+            const exists = paymentMethods.some((method) => parseInt(method?.id, 10) === directId);
+            if (exists || paymentMethods.length === 0) {
+                return directId;
+            }
+        }
+
+        const normalized = String(rawMethod || "").trim().toLowerCase();
+        if (!normalized) return getDefaultPaymentMethodId();
+
+        const aliasCodeMap = {
+            cash: "CASH",
+            credit: "CREDIT",
+            deferred: "CREDIT",
+            vodafonecash: "VODAFONE_CASH",
+            "vodafone cash": "VODAFONE_CASH",
+            instapay: "INSTAPAY",
+            "insta pay": "INSTAPAY",
+            visa: "VISA",
+            mastercard: "MASTERCARD",
+            banktransfer: "BANK_TRANSFER",
+            "bank transfer": "BANK_TRANSFER",
+        };
+
+        const mappedCode = aliasCodeMap[normalized] || normalized.toUpperCase().replace(/[\s-]+/g, "_");
+        const matchedMethod = paymentMethods.find((method) => {
+            const methodCode = String(method?.code || "").trim().toUpperCase();
+            const methodName = String(method?.name || "").trim().toLowerCase();
+            return methodCode === mappedCode || methodName === normalized;
+        });
+
+        const matchedId = parseInt(matchedMethod?.id, 10);
+        if (Number.isFinite(matchedId) && matchedId > 0) {
+            return matchedId;
+        }
+
+        return getDefaultPaymentMethodId();
+    }, [paymentMethods, getDefaultPaymentMethodId]);
+    const paymentMethodButtons = useMemo(() => {
+        const filteredMethods = filterPosPaymentMethods(paymentMethods);
+        const source = filteredMethods.length > 0
+            ? filteredMethods
+            : DEFAULT_POS_PAYMENT_METHODS;
+
+        return source.map((method) => {
+            const normalizedCode = String(method?.code || "")
+                .trim()
+                .toUpperCase()
+                .replace(/[\s-]+/g, "_");
+            const visuals = PAYMENT_METHOD_UI_PRESETS[normalizedCode] || {
+                color: "#2563eb",
+                bg: "#eff6ff",
+                text: "#1d4ed8",
+            };
+
+            return {
+                ...method,
+                buttonValue: String(method?.id ?? method?.code ?? method?.name ?? ""),
+                normalizedCode,
+                ...visuals,
+            };
+        });
+    }, [paymentMethods]);
     const paymentEditModalCustomer = useMemo(() => {
         if (!activeInvoice?.customer || activeInvoice?.editorMode !== "payment") return null;
         const originalPaymentAmount = toNumberSafe(activeInvoice?.paymentEdit?.amount, 0);
@@ -592,8 +675,8 @@ export default function EnhancedPOS() {
         amount: activeInvoice?.paymentEdit?.amount ?? "",
         notes: activeInvoice?.paymentEdit?.notes || "",
         paymentDate: activeInvoice?.paymentEdit?.paymentDate || getTodayDate(),
-        paymentMethodId: parseInt(activeInvoice?.paymentEdit?.paymentMethodId, 10) || 1,
-    }), [activeInvoice]);
+        paymentMethodId: parseInt(activeInvoice?.paymentEdit?.paymentMethodId, 10) || getDefaultPaymentMethodId(),
+    }), [activeInvoice, getDefaultPaymentMethodId]);
 
     /**
      * حفظ البيانات في localStorage
@@ -603,6 +686,20 @@ export default function EnhancedPOS() {
         localStorage.setItem("pos_invoices", JSON.stringify(invoices));
         localStorage.setItem("pos_activeId", activeInvoiceId);
     }, [invoices, activeInvoiceId]);
+
+    useEffect(() => {
+        if (!Array.isArray(paymentMethods) || paymentMethods.length === 0) return;
+
+        setInvoices((prev) => prev.map((invoice) => {
+            if (invoice?.editorMode === "payment") return invoice;
+
+            const resolvedId = resolveInvoicePaymentMethodId(invoice?.paymentMethod);
+            const nextValue = String(resolvedId || "");
+            return String(invoice?.paymentMethod || "") === nextValue
+                ? invoice
+                : { ...invoice, paymentMethod: nextValue };
+        }));
+    }, [paymentMethods, resolveInvoicePaymentMethodId]);
 
     /**
      * تجميع المنتجات حسب الفئة
@@ -864,13 +961,17 @@ export default function EnhancedPOS() {
     const loadData = async (isBackground = false) => {
         try {
             if (!isBackground) setLoading(true);
-            const [variantsData, customersData] = await Promise.all([
+            const [variantsData, customersData, paymentMethodsData] = await Promise.all([
                 window.api.getVariants(),
                 window.api.getCustomers(),
+                window.api.getPaymentMethods(),
             ]);
 
             if (!variantsData.error) setVariants(variantsData);
             if (!customersData.error) setCustomers(customersData.data || []);
+            if (Array.isArray(paymentMethodsData)) {
+                setPaymentMethods(filterPosPaymentMethods(paymentMethodsData));
+            }
         } catch (error) {
             console.error(error);
             if (!isBackground) showToast("فشل في تحميل البيانات", "error");
@@ -917,6 +1018,7 @@ export default function EnhancedPOS() {
             )
         );
         const paidAmount = Math.max(0, invoiceTotal - remaining);
+        const salePaymentMethodId = parseInt(sale?.paymentMethodId || sale?.paymentMethod?.id, 10);
 
         const cart = saleItems.map((item) => {
             const variantId = parseInt(item.variantId || item?.variant?.id, 10) || 0;
@@ -947,7 +1049,9 @@ export default function EnhancedPOS() {
             discountType: "value",
             paidAmount: paidAmount.toFixed(2),
             saleType: remaining > 0 ? "آجل" : "نقدي",
-            paymentMethod: remaining > 0 && paidAmount <= 0 ? "Credit" : "Cash",
+            paymentMethod: Number.isFinite(salePaymentMethodId) && salePaymentMethodId > 0
+                ? String(salePaymentMethodId)
+                : (remaining > 0 && paidAmount <= 0 ? "CREDIT" : "CASH"),
             notes: sale.notes || "",
             editorMode: "sale",
             isEditMode: true,
@@ -983,10 +1087,10 @@ export default function EnhancedPOS() {
                 amount: toNumberSafe(payment.amount, 0),
                 paymentDate: toInputDate(payment.paymentDate || payment.createdAt),
                 notes: payment.notes || "",
-                paymentMethodId: parseInt(payment.paymentMethodId || payment?.paymentMethod?.id, 10) || 1,
+                paymentMethodId: parseInt(payment.paymentMethodId || payment?.paymentMethod?.id, 10) || getDefaultPaymentMethodId(),
             },
         });
-    }, [customers]);
+    }, [customers, getDefaultPaymentMethodId]);
 
     const openIncomingEditorRequest = useCallback((request) => {
         if (!request?.type) return false;
@@ -1042,7 +1146,7 @@ export default function EnhancedPOS() {
 
             const result = await window.api.updateCustomerPayment(activeInvoice.sourcePaymentId, {
                 customerId: paymentEdit.customerId || activeInvoice.customer?.id,
-                paymentMethodId: parseInt(paymentEdit.paymentMethodId, 10) || 1,
+                paymentMethodId: parseInt(paymentEdit.paymentMethodId, 10) || getDefaultPaymentMethodId(),
                 amount,
                 paymentDate: paymentEdit.paymentDate,
                 notes: paymentEdit.notes || "",
@@ -1118,7 +1222,9 @@ export default function EnhancedPOS() {
     };
 
     const addTab = () => {
-        const newInvoice = createEmptyInvoice();
+        const newInvoice = createEmptyInvoice({
+            paymentMethod: String(getDefaultPaymentMethodId()),
+        });
         setInvoices((prev) => [...prev, newInvoice]);
         setActiveInvoiceId(newInvoice.id);
     };
@@ -1148,7 +1254,9 @@ export default function EnhancedPOS() {
             return;
         }
 
-        const freshInvoice = createEmptyInvoice();
+        const freshInvoice = createEmptyInvoice({
+            paymentMethod: String(getDefaultPaymentMethodId()),
+        });
         setInvoices([...remainingTabs, freshInvoice]);
         setActiveInvoiceId(freshInvoice.id);
         setCustomerSearchTerm("");
@@ -1338,9 +1446,18 @@ export default function EnhancedPOS() {
                 }
             }
 
-            let paymentLabel = currentInvoice.paymentMethod;
+            const resolvedPaymentMethodId = resolveInvoicePaymentMethodId(currentInvoice.paymentMethod);
+            const selectedPaymentMethod = paymentMethods.find(
+                (method) => parseInt(method?.id, 10) === resolvedPaymentMethodId
+            );
+            let paymentLabel = selectedPaymentMethod?.name || String(currentInvoice.paymentMethod || "");
+            let paymentCode = String(selectedPaymentMethod?.code || currentInvoice.paymentMethod || "")
+                .trim()
+                .toUpperCase()
+                .replace(/[\s-]+/g, "_");
             if (paid === 0 && finalSaleType === "آجل") {
                 paymentLabel = "Credit";
+                paymentCode = "CREDIT";
             }
 
             const saleData = {
@@ -1354,6 +1471,8 @@ export default function EnhancedPOS() {
                 customerId: currentInvoice.customer?.id,
                 total: total,
                 paid: paid,
+                paymentMethodId: resolvedPaymentMethodId,
+                paymentMethod: paymentCode,
                 payment: paymentLabel,
                 saleType: finalSaleType,
                 discount: parseFloat(currentInvoice.discount || 0),
@@ -1449,7 +1568,10 @@ export default function EnhancedPOS() {
      * إعادة تعيين الفاتورة لبدء فاتورة جديدة
      */
     const resetInvoice = () => {
-        const normalized = createEmptyInvoice({ id: activeInvoiceId });
+        const normalized = createEmptyInvoice({
+            id: activeInvoiceId,
+            paymentMethod: String(getDefaultPaymentMethodId()),
+        });
         setInvoices((prev) =>
             prev.map((inv) => (inv.id === activeInvoiceId ? normalized : inv))
         );
@@ -2498,30 +2620,26 @@ export default function EnhancedPOS() {
                                     <label style={{ fontSize: "12px", color: "#6b7280", width: "100px" }}>طريقة الدفع:</label>
 
                                     <div style={{ display: "flex", gap: "5px", flex: 2 }}>
-                                        {[
-                                            { id: "Cash", label: "نقدى", color: "#10b981", bg: "#ecfdf5", text: "#047857" },
-                                            { id: "VodafoneCash", label: "فودافون", color: "#dc2626", bg: "#fef2f2", text: "#991b1b" },
-                                            { id: "InstaPay", label: "إنستاباي", color: "#6366f1", bg: "#eef2ff", text: "#4338ca" },
-                                        ].map((method) => (
+                                        {paymentMethodButtons.map((method) => (
                                             <button
-                                                key={method.id}
-                                                onClick={() => updateInvoice({ paymentMethod: method.id })}
+                                                key={String(method?.id ?? method?.code ?? method?.name)}
+                                                onClick={() => updateInvoice({ paymentMethod: String(method.buttonValue) })}
                                                 style={{
                                                     flex: 1,
                                                     padding: "11px", // Increased padding
                                                     borderRadius: "6px",
-                                                    border: `2px solid ${activeInvoice.paymentMethod === method.id ? method.color : "#e5e7eb"}`,
-                                                    backgroundColor: activeInvoice.paymentMethod === method.id ? method.bg : "white",
-                                                    color: activeInvoice.paymentMethod === method.id ? method.text : "#374151",
+                                                    border: `2px solid ${String(activeInvoice.paymentMethod || "") === String(method.buttonValue) ? method.color : "#e5e7eb"}`,
+                                                    backgroundColor: String(activeInvoice.paymentMethod || "") === String(method.buttonValue) ? method.bg : "white",
+                                                    color: String(activeInvoice.paymentMethod || "") === String(method.buttonValue) ? method.text : "#374151",
                                                     fontWeight: "bold",
                                                     fontSize: "13px", // Increased font size
                                                     cursor: "pointer",
                                                     transition: "all 0.2s",
 
                                                 }}
-                                                title={method.label}
+                                                title={method.name}
                                             >
-                                                {method.label}
+                                                {method.name}
                                             </button>
                                         ))}
                                     </div>
@@ -3002,6 +3120,7 @@ export default function EnhancedPOS() {
                     onClose={handleClosePaymentEditModal}
                     isSubmitting={isSaving}
                     formatCurrency={(value) => `${toNumberSafe(value, 0).toFixed(2)} ج.م`}
+                    paymentMethods={paymentMethods}
                 />
             )}
 

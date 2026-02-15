@@ -12,6 +12,7 @@ import CustomerLedgerHeader from './CustomerLedgerHeader';
 import CustomerLedgerSummary from './CustomerLedgerSummary';
 import CustomerLedgerSmartInsightModal from './CustomerLedgerSmartInsightModal';
 import CustomerLedgerTable from './CustomerLedgerTable';
+import { filterPosPaymentMethods } from '../utils/paymentMethodFilters';
 import './CustomerLedger.css';
 
 export default function CustomerLedgerModal({
@@ -24,6 +25,7 @@ export default function CustomerLedgerModal({
   const [sales, setSales] = useState([]);
   const [returns, setReturns] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
   const [showSmartInsightModal, setShowSmartInsightModal] = useState(false);
@@ -33,11 +35,12 @@ export default function CustomerLedgerModal({
 
   const loadCustomerData = async () => {
     try {
-      const [customerInfo, salesData, returnsData, paymentsData] = await Promise.all([
+      const [customerInfo, salesData, returnsData, paymentsData, paymentMethodsData] = await Promise.all([
         window.api.getCustomer(customerId),
         window.api.getCustomerSales(customerId),
         window.api.getCustomerReturns(customerId),
-        window.api.getCustomerPayments(customerId)
+        window.api.getCustomerPayments(customerId),
+        window.api.getPaymentMethods()
       ]);
 
       if (customerInfo.error) throw new Error(customerInfo.error);
@@ -49,12 +52,18 @@ export default function CustomerLedgerModal({
       setSales(salesData);
       setReturns(returnsData);
       setPayments(paymentsData);
+      setPaymentMethods(
+        Array.isArray(paymentMethodsData)
+          ? filterPosPaymentMethods(paymentMethodsData)
+          : []
+      );
     } catch (err) {
       console.error('Failed to load customer ledger data:', err.message);
       setCustomer(null);
       setSales([]);
       setReturns([]);
       setPayments([]);
+      setPaymentMethods([]);
     } finally {
       setLoading(false);
     }
@@ -138,8 +147,8 @@ export default function CustomerLedgerModal({
     paymentMethodId: parseInt(
       editingPayment?.paymentMethodId || editingPayment?.paymentMethod?.id,
       10
-    ) || 1
-  }), [editingPayment]);
+    ) || parseInt(paymentMethods[0]?.id, 10) || 1
+  }), [editingPayment, paymentMethods]);
 
   const handlePrintInvoice = async (sale) => {
     const html = generateInvoiceHTML(sale, customer);
@@ -298,7 +307,9 @@ export default function CustomerLedgerModal({
     try {
       const result = await window.api.updateCustomerPayment(editingPayment.id, {
         customerId: customer?.id || editingPayment.customerId,
-        paymentMethodId: parseInt(paymentFormData?.paymentMethodId, 10) || 1,
+        paymentMethodId: parseInt(paymentFormData?.paymentMethodId, 10)
+          || parseInt(paymentMethods[0]?.id, 10)
+          || 1,
         amount,
         paymentDate: paymentFormData?.paymentDate,
         notes: paymentFormData?.notes || ''
@@ -408,6 +419,7 @@ export default function CustomerLedgerModal({
         onClose={handleClosePaymentEditModal}
         isSubmitting={paymentSubmitting}
         formatCurrency={(value) => `${Number(value || 0).toFixed(2)} ج.م`}
+        paymentMethods={paymentMethods}
       />
 
       <CustomerLedgerSmartInsightModal

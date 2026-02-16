@@ -1,18 +1,19 @@
-import { useState, useEffect } from 'react'
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Products from './pages/Products'
-import EnhancedPOS from './pages/EnhancedPOS'
-import Sales from './pages/Sales'
-import Purchases from './pages/Purchases'
-import Returns from './pages/Returns'
-import Customers from './pages/Customers'
-import Suppliers from './pages/Suppliers'
-import Expenses from './pages/Expenses'
-import Users from './pages/Users'
-import DebtReminders from './pages/DebtReminders'
-import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge'
-import './index.css'
+import { useEffect, useState } from 'react';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import Products from './pages/Products';
+import EnhancedPOS from './pages/EnhancedPOS';
+import Sales from './pages/Sales';
+import Purchases from './pages/Purchases';
+import Returns from './pages/Returns';
+import Customers from './pages/Customers';
+import Suppliers from './pages/Suppliers';
+import Expenses from './pages/Expenses';
+import Users from './pages/Users';
+import DebtReminders from './pages/DebtReminders';
+import Treasury from './pages/Treasury';
+import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge';
+import './index.css';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -38,6 +39,7 @@ function App() {
       'customers',
       'suppliers',
       'expenses',
+      'treasury',
       'debtreminders',
       'users'
     ]);
@@ -90,6 +92,8 @@ function App() {
         return <Suppliers />;
       case 'expenses':
         return <Expenses />;
+      case 'treasury':
+        return <Treasury />;
       case 'debtreminders':
         return <DebtReminders />;
       case 'users':
@@ -110,11 +114,11 @@ function App() {
         marginBottom: '8px',
         transition: 'all 0.2s'
       }}
-      onMouseEnter={(e) => {
-        if (currentPage !== page) e.currentTarget.style.backgroundColor = '#2d3748';
+      onMouseEnter={(event) => {
+        if (currentPage !== page) event.currentTarget.style.backgroundColor = '#2d3748';
       }}
-      onMouseLeave={(e) => {
-        if (currentPage !== page) e.currentTarget.style.backgroundColor = 'transparent';
+      onMouseLeave={(event) => {
+        if (currentPage !== page) event.currentTarget.style.backgroundColor = 'transparent';
       }}
     >
       {icon} {label}
@@ -123,23 +127,32 @@ function App() {
 
   return (
     <div className="app-container" style={{ display: 'flex', minHeight: '100vh', direction: 'rtl' }}>
-      {/* Sidebar */}
-      <div className="sidebar" style={{
-        width: '250px',
-        backgroundColor: '#1e293b',
-        color: 'white',
-        padding: '20px',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '30px', textAlign: 'center', borderBottom: '2px solid #334155', paddingBottom: '15px' }}>
+      <div
+        className="sidebar"
+        style={{
+          width: '250px',
+          backgroundColor: '#1e293b',
+          color: 'white',
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+      >
+        <h2
+          style={{
+            fontSize: '20px',
+            marginBottom: '30px',
+            textAlign: 'center',
+            borderBottom: '2px solid #334155',
+            paddingBottom: '15px'
+          }}
+        >
           ⚡ ERP SYSTEM
         </h2>
 
         <nav style={{ flex: 1 }}>
           <ul style={{ listStyle: 'none', padding: 0 }}>
-            <NavItem page="pos" icon="🛒" label="فاتوره البيع" />
-            
+            <NavItem page="pos" icon="🛒" label="فاتورة البيع" />
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchases" icon="📥" label="المشتريات" />
@@ -148,15 +161,21 @@ function App() {
             <NavItem page="customers" icon="👥" label="العملاء" />
             <NavItem page="suppliers" icon="🚚" label="الموردين" />
             <NavItem page="expenses" icon="💸" label="المصروفات" />
+            <NavItem page="treasury" icon="🏦" label="الخزنة والإيراد اليومي" />
             <NavItem page="debtreminders" icon="⚠️" label="تذكيرات الديون" />
-            {user?.role === 'ADMIN' && (
-              <NavItem page="users" icon="👤" label="المستخدمين" />
-            )}
+            {user?.role === 'ADMIN' && <NavItem page="users" icon="👤" label="المستخدمين" />}
           </ul>
         </nav>
 
         <div style={{ borderTop: '1px solid #334155', paddingTop: '20px' }}>
-          <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#334155', borderRadius: '8px' }}>
+          <div
+            style={{
+              marginBottom: '15px',
+              padding: '10px',
+              backgroundColor: '#334155',
+              borderRadius: '8px'
+            }}
+          >
             <div style={{ fontSize: '14px', marginBottom: '5px', fontWeight: 'bold' }}>{user?.name}</div>
             <div style={{ fontSize: '12px', color: '#94a3b8' }}>
               {user?.role === 'ADMIN' ? 'مدير' : user?.role === 'CASHIER' ? 'أمين صندوق' : 'أمين مخزن'}
@@ -180,12 +199,11 @@ function App() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="main-content" style={{ flex: 1, padding: '30px', backgroundColor: '#f9fafb', overflowY: 'auto' }}>
         {renderPage()}
       </div>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

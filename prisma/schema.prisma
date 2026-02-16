@@ -7,9 +7,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
-/* =========================
-   USERS & ROLES
-========================= */
+/**
+ * =========================
+ * USERS & ROLES
+ * =========================
+ */
 
 model User {
   id        Int      @id @default(autoincrement())
@@ -18,6 +20,10 @@ model User {
   password  String
   role      Role
   createdAt DateTime @default(now())
+
+  treasuryEntries          TreasuryEntry[]          @relation("TreasuryEntryCreatedBy")
+  paymentAllocations       PaymentAllocation[]      @relation("PaymentAllocationCreatedBy")
+  auditLogs                AuditLog[]               @relation("AuditLogPerformedBy")
 }
 
 enum Role {
@@ -26,9 +32,11 @@ enum Role {
   STOREKEEPER
 }
 
-/* =========================
-   CATALOG
-========================= */
+/**
+ * =========================
+ * CATALOG
+ * =========================
+ */
 
 model Category {
   id          Int      @id @default(autoincrement())
@@ -39,7 +47,7 @@ model Category {
   color       String?
   createdAt   DateTime @default(now())
 
-  products    Product[]
+  products Product[]
 }
 
 model Product {
@@ -56,9 +64,9 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  variants    Variant[]
-  inventory   Inventory?
+  category  Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  variants  Variant[]
+  inventory Inventory?
 }
 
 model Variant {
@@ -74,54 +82,57 @@ model Variant {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  saleItems    SaleItem[]
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  saleItems     SaleItem[]
   purchaseItems PurchaseItem[]
-  returnItems  ReturnItem[]
+  returnItems   ReturnItem[]
 }
 
 model Inventory {
-  id            Int      @id @default(autoincrement())
-  productId     Int      @unique
-  totalQuantity Int      @default(0)
-  minStock      Int      @default(5)
-  maxStock      Int      @default(100)
-  warehouseQty  Int      @default(0)
-  displayQty    Int      @default(0)
+  id            Int       @id @default(autoincrement())
+  productId     Int       @unique
+  totalQuantity Int       @default(0)
+  minStock      Int       @default(5)
+  maxStock      Int       @default(100)
+  warehouseQty  Int       @default(0)
+  displayQty    Int       @default(0)
   lastRestock   DateTime?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
-/* =========================
-   CUSTOMERS & ACCOUNTING
-========================= */
+/**
+ * =========================
+ * CUSTOMERS & ACCOUNTING
+ * =========================
+ */
 
 model Customer {
-  id           Int      @id @default(autoincrement())
-  name         String
-  phone        String?
-  phone2       String?
-  address      String?
-  city         String?
-  district     String?
-  notes        String?
-  creditLimit  Float    @default(0)
-  balance      Float    @default(0)
-  firstActivityDate DateTime?
-  lastPaymentDate   DateTime?
+  id                  Int       @id @default(autoincrement())
+  name                String
+  phone               String?
+  phone2              String?
+  address             String?
+  city                String?
+  district            String?
+  notes               String?
+  creditLimit         Float     @default(0)
+  balance             Float     @default(0)
+  firstActivityDate   DateTime?
+  lastPaymentDate     DateTime?
   financialsUpdatedAt DateTime?
-  customerType String   @default("عادي")
-  rating       Float    @default(0)
-  createdAt    DateTime @default(now())
+  customerType        String    @default("عادي")
+  rating              Float     @default(0)
+  createdAt           DateTime  @default(now())
 
-  sales        Sale[]
-  returns      Return[]
-  payments     CustomerPayment[]
-  transactions CustomerTransaction[]
+  sales              Sale[]
+  returns            Return[]
+  payments           CustomerPayment[]
+  transactions       CustomerTransaction[]
+  paymentAllocations PaymentAllocation[]
 
   @@index([name])
   @@index([phone])
@@ -135,19 +146,19 @@ model Customer {
 }
 
 model CustomerTransaction {
-  id            Int      @id @default(autoincrement())
-  customerId    Int
-  date          DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  date       DateTime @default(now())
 
   type          TransactionType
   referenceType ReferenceType?
   referenceId   Int?
 
-  debit         Float    @default(0)
-  credit        Float    @default(0)
-  notes         String?
+  debit  Float   @default(0)
+  credit Float   @default(0)
+  notes  String?
 
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId, date])
   @@index([type])
@@ -168,25 +179,28 @@ enum ReferenceType {
   RETURN
 }
 
-/* =========================
-   SALES
-========================= */
+/**
+ * =========================
+ * SALES
+ * =========================
+ */
 
 model Sale {
-  id          Int      @id @default(autoincrement())
-  customerId  Int?
+  id              Int      @id @default(autoincrement())
+  customerId      Int?
   paymentMethodId Int?
-  total       Float
-  discount    Float    @default(0)
-  saleType    String   @default("نقدي")
-  notes       String?
-  invoiceDate DateTime @default(now())
-  createdAt   DateTime @default(now())
+  total           Float
+  discount        Float    @default(0)
+  saleType        String   @default("نقدي")
+  notes           String?
+  invoiceDate     DateTime @default(now())
+  createdAt       DateTime @default(now())
 
-  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
-  items       SaleItem[]
-  returns     Return[]
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  paymentMethod      PaymentMethod?      @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  items              SaleItem[]
+  returns            Return[]
+  paymentAllocations PaymentAllocation[]
 
   @@index([customerId])
   @@index([paymentMethodId])
@@ -199,17 +213,19 @@ model SaleItem {
   variantId Int
   quantity  Int
   price     Float
-  discount  Float   @default(0)
+  discount  Float @default(0)
 
-  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  variant   Variant @relation(fields: [variantId], references: [id])
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variant Variant @relation(fields: [variantId], references: [id])
 
   @@id([id, saleId])
 }
 
-/* =========================
-   RETURNS
-========================= */
+/**
+ * =========================
+ * RETURNS
+ * =========================
+ */
 
 model Return {
   id         Int      @id @default(autoincrement())
@@ -219,9 +235,9 @@ model Return {
   notes      String?
   createdAt  DateTime @default(now())
 
-  sale       Sale?     @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  items      ReturnItem[]
+  sale     Sale?        @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  customer Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items    ReturnItem[]
 }
 
 model ReturnItem {
@@ -231,15 +247,17 @@ model ReturnItem {
   quantity  Int
   price     Float
 
-  return    Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  variant   Variant @relation(fields: [variantId], references: [id])
+  return  Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  variant Variant @relation(fields: [variantId], references: [id])
 
   @@id([id, returnId])
 }
 
-/* =========================
-   PAYMENTS
-========================= */
+/**
+ * =========================
+ * PAYMENTS
+ * =========================
+ */
 
 model PaymentMethod {
   id        Int      @id @default(autoincrement())
@@ -248,8 +266,9 @@ model PaymentMethod {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  sales     Sale[]
-  payments  CustomerPayment[]
+  sales           Sale[]
+  payments        CustomerPayment[]
+  treasuryEntries TreasuryEntry[]
 }
 
 model CustomerPayment {
@@ -260,16 +279,19 @@ model CustomerPayment {
   notes           String?
   paymentDate     DateTime @default(now())
 
-  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentMethod      PaymentMethod       @relation(fields: [paymentMethodId], references: [id])
+  paymentAllocations PaymentAllocation[]
 
   @@index([customerId])
   @@index([customerId, paymentDate])
 }
 
-/* =========================
-   SUPPLIERS (BASIC)
-========================= */
+/**
+ * =========================
+ * SUPPLIERS (BASIC)
+ * =========================
+ */
 
 model Supplier {
   id        Int      @id @default(autoincrement())
@@ -291,8 +313,8 @@ model Purchase {
   notes      String?
   createdAt  DateTime @default(now())
 
-  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  items      PurchaseItem[]
+  supplier Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items    PurchaseItem[]
 }
 
 model PurchaseItem {
@@ -302,8 +324,8 @@ model PurchaseItem {
   quantity   Int
   cost       Float
 
-  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  variant    Variant  @relation(fields: [variantId], references: [id])
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  variant  Variant  @relation(fields: [variantId], references: [id])
 
   @@id([id, purchaseId])
 }
@@ -315,16 +337,167 @@ model SupplierPayment {
   notes      String?
   createdAt  DateTime @default(now())
 
-  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 }
 
-/* =========================
-   EXPENSES
-========================= */
+/**
+ * =========================
+ * EXPENSES
+ * =========================
+ */
 
 model Expense {
   id        Int      @id @default(autoincrement())
   title     String
   amount    Float
   createdAt DateTime @default(now())
+}
+
+/**
+ * =========================
+ * TREASURY
+ * =========================
+ */
+
+enum TreasuryDirection {
+  IN
+  OUT
+}
+
+enum TreasuryEntryType {
+  OPENING_BALANCE
+  SALE_INCOME
+  CUSTOMER_PAYMENT
+  DEPOSIT_IN
+  DEPOSIT_REFUND
+  MANUAL_IN
+  EXPENSE_PAYMENT
+  PURCHASE_PAYMENT
+  SUPPLIER_PAYMENT
+  RETURN_REFUND
+  MANUAL_OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+enum PaymentAllocationSourceType {
+  CUSTOMER_PAYMENT
+  DEPOSIT
+}
+
+model Treasury {
+  id             Int      @id @default(autoincrement())
+  name           String   @unique
+  code           String   @unique
+  description    String?
+  openingBalance Float    @default(0)
+  currentBalance Float    @default(0)
+  isActive       Boolean  @default(true)
+  isDefault      Boolean  @default(false)
+  isDeleted      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  entries               TreasuryEntry[]          @relation("TreasuryMain")
+  sourceTransferEntries TreasuryEntry[]          @relation("TreasuryTransferSource")
+  targetTransferEntries TreasuryEntry[]          @relation("TreasuryTransferTarget")
+  auditLogs             AuditLog[]
+
+  @@index([isActive])
+  @@index([isDefault])
+  @@index([isDeleted])
+}
+
+model TreasuryEntry {
+  id               Int               @id @default(autoincrement())
+  treasuryId       Int
+  entryType        TreasuryEntryType
+  direction        TreasuryDirection
+  amount           Float
+  balanceBefore    Float             @default(0)
+  balanceAfter     Float             @default(0)
+  notes            String?
+  note             String?
+  referenceType    String?
+  referenceId      Int?
+  paymentMethodId  Int?
+  idempotencyKey   String?           @unique
+  createdByUserId  Int?
+  meta             Json?
+  sourceTreasuryId Int?
+  targetTreasuryId Int?
+  entryDate        DateTime          @default(now())
+  createdAt        DateTime          @default(now())
+
+  treasury                  Treasury                 @relation("TreasuryMain", fields: [treasuryId], references: [id], onDelete: Cascade)
+  paymentMethod             PaymentMethod?           @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  createdByUser             User?                    @relation("TreasuryEntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  sourceTreasury            Treasury?                @relation("TreasuryTransferSource", fields: [sourceTreasuryId], references: [id], onDelete: SetNull)
+  targetTreasury            Treasury?                @relation("TreasuryTransferTarget", fields: [targetTreasuryId], references: [id], onDelete: SetNull)
+  paymentAllocationsSource  PaymentAllocation[]      @relation("PaymentAllocationSourceEntry")
+  auditLogs                 AuditLog[]
+
+  @@index([treasuryId, entryDate])
+  @@index([treasuryId, createdAt])
+  @@index([entryType])
+  @@index([entryType, createdAt])
+  @@index([direction])
+  @@index([referenceType, referenceId])
+  @@index([paymentMethodId])
+  @@index([paymentMethodId, createdAt])
+}
+
+model PaymentAllocation {
+  id                Int                         @id @default(autoincrement())
+  customerId        Int?
+  saleId            Int
+  sourceType        PaymentAllocationSourceType
+  customerPaymentId Int?
+  treasuryEntryId   Int?
+  amount            Float
+  allocationDate    DateTime                    @default(now())
+  note              String?
+  meta              Json?
+  createdByUserId   Int?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  sale            Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  customerPayment CustomerPayment? @relation(fields: [customerPaymentId], references: [id], onDelete: Cascade)
+  treasuryEntry   TreasuryEntry?   @relation("PaymentAllocationSourceEntry", fields: [treasuryEntryId], references: [id], onDelete: SetNull)
+  createdBy       User?            @relation("PaymentAllocationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([saleId, allocationDate])
+  @@index([customerPaymentId])
+  @@index([treasuryEntryId])
+  @@index([sourceType, allocationDate])
+  @@index([customerId, allocationDate])
+}
+
+model AuditLog {
+  id                Int      @id @default(autoincrement())
+  action            String
+  entityType        String
+  entityId          String?
+  treasuryId        Int?
+  treasuryEntryId   Int?
+  referenceType     String?
+  referenceId       Int?
+  performedByUserId Int?
+  note              String?
+  meta              Json?
+  createdAt         DateTime @default(now())
+
+  treasury      Treasury?      @relation(fields: [treasuryId], references: [id], onDelete: SetNull)
+  treasuryEntry TreasuryEntry? @relation(fields: [treasuryEntryId], references: [id], onDelete: SetNull)
+  performedBy   User?          @relation("AuditLogPerformedBy", fields: [performedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+  @@index([treasuryId, createdAt])
+  @@index([treasuryEntryId, createdAt])
+  @@index([referenceType, referenceId])
 }

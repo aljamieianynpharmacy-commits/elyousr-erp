@@ -3,6 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 const DEBUG_CUSTOMERS_QUERIES = process.env.DEBUG_CUSTOMERS_QUERIES === '1';
@@ -393,6 +394,903 @@ const rebuildCustomerFinancialSummary = async (txOrClient, customerId) => {
     return summaryMap.get(parseInt(customerId, 10)) || null;
 };
 
+const TREASURY_DEFAULT_CODE = 'MAIN';
+const TREASURY_DIRECTION = Object.freeze({
+    IN: 'IN',
+    OUT: 'OUT'
+});
+const TREASURY_ENTRY_TYPE = Object.freeze({
+    OPENING_BALANCE: 'OPENING_BALANCE',
+    SALE_INCOME: 'SALE_INCOME',
+    CUSTOMER_PAYMENT: 'CUSTOMER_PAYMENT',
+    DEPOSIT_IN: 'DEPOSIT_IN',
+    DEPOSIT_REFUND: 'DEPOSIT_REFUND',
+    MANUAL_IN: 'MANUAL_IN',
+    EXPENSE_PAYMENT: 'EXPENSE_PAYMENT',
+    PURCHASE_PAYMENT: 'PURCHASE_PAYMENT',
+    SUPPLIER_PAYMENT: 'SUPPLIER_PAYMENT',
+    RETURN_REFUND: 'RETURN_REFUND',
+    MANUAL_OUT: 'MANUAL_OUT',
+    TRANSFER_IN: 'TRANSFER_IN',
+    TRANSFER_OUT: 'TRANSFER_OUT',
+    ADJUSTMENT_IN: 'ADJUSTMENT_IN',
+    ADJUSTMENT_OUT: 'ADJUSTMENT_OUT'
+});
+const TREASURY_ENTRY_TYPE_SET = new Set(Object.values(TREASURY_ENTRY_TYPE));
+const TREASURY_REVENUE_ENTRY_TYPES = new Set([
+    TREASURY_ENTRY_TYPE.SALE_INCOME,
+    TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT,
+    TREASURY_ENTRY_TYPE.DEPOSIT_IN,
+    TREASURY_ENTRY_TYPE.DEPOSIT_REFUND
+]);
+const TREASURY_CASH_ENTRY_TYPES = new Set(Object.values(TREASURY_ENTRY_TYPE));
+const PAYMENT_ALLOCATION_SOURCE_TYPE = Object.freeze({
+    CUSTOMER_PAYMENT: 'CUSTOMER_PAYMENT',
+    DEPOSIT: 'DEPOSIT'
+});
+const REFUND_MODE = Object.freeze({
+    SAME_METHOD: 'SAME_METHOD',
+    CASH_ONLY: 'CASH_ONLY'
+});
+const AUDIT_ACTION = Object.freeze({
+    TREASURY_CREATE: 'TREASURY_CREATE',
+    TREASURY_UPDATE: 'TREASURY_UPDATE',
+    TREASURY_DELETE: 'TREASURY_DELETE',
+    TREASURY_DEFAULT_SET: 'TREASURY_DEFAULT_SET',
+    TREASURY_ENTRY_CREATE: 'TREASURY_ENTRY_CREATE',
+    TREASURY_ENTRY_ROLLBACK: 'TREASURY_ENTRY_ROLLBACK',
+    DEPOSIT_RECEIPT_CREATE: 'DEPOSIT_RECEIPT_CREATE',
+    DEPOSIT_APPLY_TO_SALE: 'DEPOSIT_APPLY_TO_SALE',
+    DEPOSIT_REFUND: 'DEPOSIT_REFUND',
+    PAYMENT_ALLOCATION_CREATE: 'PAYMENT_ALLOCATION_CREATE'
+});
+
+const normalizeReportPaymentCode = (value) => String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+
+const resolveReportPaymentMethodCode = (paymentMethod = null) => {
+    const lookup = normalizePaymentMethodLookup(
+        paymentMethod?.code || paymentMethod?.name || null
+    );
+    const directCode = normalizeReportPaymentCode(paymentMethod?.code || paymentMethod?.name || '');
+    const resolvedCode = normalizeReportPaymentCode(lookup?.code || directCode || 'UNSPECIFIED');
+    return resolvedCode || 'UNSPECIFIED';
+};
+
+const resolveRevenueChannelFromCode = (code) => {
+    const normalizedCode = normalizeReportPaymentCode(code);
+    if (normalizedCode === 'CASH') return 'cash';
+    if (normalizedCode === 'VODAFONE_CASH') return 'vodafoneCash';
+    if (normalizedCode === 'INSTAPAY') return 'instaPay';
+    return 'other';
+};
+
+const normalizeTreasuryCode = (value) => {
+    const raw = String(value || '').trim().toUpperCase();
+    if (!raw) return null;
+
+    const normalized = raw
+        .replace(/[\s-]+/g, '_')
+        .replace(/[^\p{L}\p{N}_]/gu, '')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    return normalized || null;
+};
+
+const generateTreasuryCode = () => {
+    const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000).toString(36)}`;
+    return `TRS_${suffix.toUpperCase()}`;
+};
+
+const parseDateOrDefault = (value, fallback = new Date()) => {
+    if (!value) return fallback;
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const parsedDate = new Date(`${value}T00:00:00`);
+        return Number.isFinite(parsedDate.getTime()) ? parsedDate : fallback;
+    }
+    const parsedDate = toValidDate(value);
+    return parsedDate || fallback;
+};
+
+const startOfDay = (value) => {
+    const date = parseDateOrDefault(value);
+    date.setHours(0, 0, 0, 0);
+    return date;
+};
+
+const endOfDay = (value) => {
+    const date = parseDateOrDefault(value);
+    date.setHours(23, 59, 59, 999);
+    return date;
+};
+
+const setDefaultTreasuryInternal = async (txOrClient, treasuryId, { forceActivate = true } = {}) => {
+    const parsedTreasuryId = parsePositiveInt(treasuryId);
+    if (!parsedTreasuryId) {
+        return { error: 'Invalid treasuryId' };
+    }
+
+    const existing = await txOrClient.treasury.findUnique({
+        where: { id: parsedTreasuryId },
+        select: {
+            id: true,
+            isActive: true,
+            isDeleted: true
+        }
+    });
+    if (!existing) {
+        return { error: 'Treasury not found' };
+    }
+    if (existing.isDeleted) {
+        return { error: 'Cannot set deleted treasury as default' };
+    }
+
+    await txOrClient.treasury.updateMany({
+        where: {
+            isDefault: true,
+            isDeleted: false,
+            id: { not: parsedTreasuryId }
+        },
+        data: { isDefault: false },
+    });
+
+    const updateData = { isDefault: true };
+    if (forceActivate) updateData.isActive = true;
+
+    const treasury = await txOrClient.treasury.update({
+        where: { id: parsedTreasuryId },
+        data: updateData
+    });
+
+    return { success: true, treasury };
+};
+
+const pickDefaultTreasuryCandidate = async (txOrClient, { allowInactive = false } = {}) => {
+    const explicitDefault = await txOrClient.treasury.findFirst({
+        where: { isDefault: true, isDeleted: false },
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, isActive: true }
+    });
+    if (explicitDefault?.id) return explicitDefault;
+
+    const mainCodeDefault = await txOrClient.treasury.findFirst({
+        where: { code: TREASURY_DEFAULT_CODE, isDeleted: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, isActive: true }
+    });
+    if (mainCodeDefault?.id) return mainCodeDefault;
+
+    const activeTreasury = await txOrClient.treasury.findFirst({
+        where: { isActive: true, isDeleted: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, isActive: true }
+    });
+    if (activeTreasury?.id) return activeTreasury;
+
+    if (allowInactive) {
+        const anyTreasury = await txOrClient.treasury.findFirst({
+            where: { isDeleted: false },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            select: { id: true, isActive: true }
+        });
+        return anyTreasury || null;
+    }
+
+    const inactiveTreasury = await txOrClient.treasury.findFirst({
+        where: { isDeleted: false },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, isActive: true }
+    });
+    return inactiveTreasury || null;
+};
+
+const getOrCreateDefaultTreasury = async (txOrClient, { allowInactive = false } = {}) => {
+    let candidate = await pickDefaultTreasuryCandidate(txOrClient, { allowInactive });
+    if (!candidate) {
+        candidate = await txOrClient.treasury.create({
+            data: {
+                name: 'Main Treasury',
+                code: TREASURY_DEFAULT_CODE,
+                description: 'Auto-created default treasury',
+                openingBalance: 0,
+                currentBalance: 0,
+                isActive: true,
+                isDefault: false,
+                isDeleted: false
+            },
+            select: { id: true, isActive: true }
+        });
+    }
+
+    const defaultResult = await setDefaultTreasuryInternal(txOrClient, candidate.id, {
+        forceActivate: !allowInactive
+    });
+    if (defaultResult?.error) {
+        throw new Error(defaultResult.error);
+    }
+    return defaultResult.treasury;
+};
+
+const resolveTreasuryId = async (txOrClient, rawTreasuryId = null, { allowInactive = false } = {}) => {
+    const parsedTreasuryId = parsePositiveInt(rawTreasuryId);
+    if (parsedTreasuryId) {
+        const treasury = await txOrClient.treasury.findFirst({
+            where: {
+                id: parsedTreasuryId,
+                isDeleted: false,
+                ...(allowInactive ? {} : { isActive: true })
+            },
+            select: { id: true }
+        });
+        if (treasury?.id) return treasury.id;
+    }
+
+    const fallbackTreasury = await getOrCreateDefaultTreasury(txOrClient, { allowInactive: false });
+    return fallbackTreasury.id;
+};
+
+const getTreasuryOperationLinkStats = async (txOrClient, treasuryId) => {
+    const parsedTreasuryId = parsePositiveInt(treasuryId);
+    if (!parsedTreasuryId) {
+        return {
+            nonOpeningEntryCount: 0,
+            hasLinkedOperations: false
+        };
+    }
+
+    const nonOpeningEntryCount = await txOrClient.treasuryEntry.count({
+        where: {
+            treasuryId: parsedTreasuryId,
+            entryType: { not: TREASURY_ENTRY_TYPE.OPENING_BALANCE }
+        }
+    });
+
+    return {
+        nonOpeningEntryCount,
+        hasLinkedOperations: nonOpeningEntryCount > 0
+    };
+};
+
+const normalizeIdempotencyKey = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    return raw.slice(0, 191);
+};
+
+const hashToSignedInt = (value) => {
+    const digest = crypto
+        .createHash('sha256')
+        .update(String(value || ''))
+        .digest('hex')
+        .slice(0, 8);
+    let parsed = Number.parseInt(digest, 16);
+    if (!Number.isFinite(parsed)) parsed = 0;
+    if (parsed > 0x7fffffff) parsed -= 0x100000000;
+    return parsed;
+};
+
+const generateIdempotencyKey = (prefix, parts = []) => {
+    const normalizedPrefix = String(prefix || 'GEN').trim().toUpperCase();
+    const serializedParts = Array.isArray(parts) ? parts : [parts];
+    const payload = serializedParts
+        .map((part) => (part === null || part === undefined ? '' : String(part).trim()))
+        .join('|');
+    const hash = crypto.createHash('sha256').update(`${normalizedPrefix}|${payload}`).digest('hex');
+    return normalizeIdempotencyKey(`${normalizedPrefix}:${hash}`);
+};
+
+const acquireIdempotencyLock = async (tx, idempotencyKey) => {
+    const normalized = normalizeIdempotencyKey(idempotencyKey);
+    if (!normalized) return null;
+    const advisoryKey = hashToSignedInt(normalized);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${advisoryKey})`;
+    return normalized;
+};
+
+const toDayLockDate = (value) => startOfDay(value);
+
+const writeAuditLog = async (txOrClient, payload = {}) => {
+    try {
+        await txOrClient.auditLog.create({
+            data: {
+                action: String(payload?.action || 'UNKNOWN'),
+                entityType: String(payload?.entityType || 'UNKNOWN'),
+                entityId: payload?.entityId !== undefined && payload?.entityId !== null
+                    ? String(payload.entityId)
+                    : null,
+                treasuryId: parsePositiveInt(payload?.treasuryId),
+                treasuryEntryId: parsePositiveInt(payload?.treasuryEntryId),
+                referenceType: payload?.referenceType ? String(payload.referenceType) : null,
+                referenceId: parsePositiveInt(payload?.referenceId),
+                performedByUserId: parsePositiveInt(payload?.performedByUserId),
+                note: payload?.note ? String(payload.note) : null,
+                meta: payload?.meta ?? null
+            }
+        });
+    } catch (error) {
+        // Keep business flow non-blocking if audit insert fails.
+        console.warn('Audit log write failed:', error?.message || error);
+    }
+};
+
+const resolveCashPaymentMethodId = async (txOrClient, fallbackId = 1) => {
+    const cashMethod = await txOrClient.paymentMethod.findFirst({
+        where: {
+            isActive: true,
+            OR: [
+                { code: { equals: 'CASH', mode: 'insensitive' } },
+                { name: { equals: 'cash', mode: 'insensitive' } },
+                { name: { equals: 'نقدي', mode: 'insensitive' } }
+            ]
+        },
+        select: { id: true }
+    });
+    if (cashMethod?.id) return cashMethod.id;
+    return resolvePaymentMethodId(txOrClient, 'CASH', fallbackId);
+};
+
+const lockTreasuryForUpdate = async (tx, treasuryId) => {
+    const parsedTreasuryId = parsePositiveInt(treasuryId);
+    if (!parsedTreasuryId) return null;
+    const rows = await tx.$queryRaw`
+        SELECT "id", "currentBalance", "isActive"
+        FROM "Treasury"
+        WHERE "id" = ${parsedTreasuryId}
+        FOR UPDATE
+    `;
+    return rows?.[0] || null;
+};
+
+const normalizeAmountForKey = (value) => Number(Math.max(0, toNumber(value, 0)).toFixed(2)).toFixed(2);
+
+const normalizeSplitPaymentsInput = (rows = []) => (
+    Array.isArray(rows)
+        ? rows
+            .map((row, index) => ({
+                index,
+                rawPaymentMethodId: row?.paymentMethodId ?? row?.methodId ?? row?.paymentMethod,
+                amount: Math.max(0, toNumber(row?.amount)),
+                note: row?.note ? String(row.note) : null
+            }))
+            .filter((row) => row.amount > 0)
+        : []
+);
+
+const resolvePaymentSplits = async (
+    tx,
+    {
+        splitPayments = [],
+        fallbackPaymentMethodId = 1,
+        totalAmount = 0
+    } = {},
+) => {
+    const safeTotalAmount = Math.max(0, toNumber(totalAmount));
+    if (safeTotalAmount <= 0) return [];
+
+    const normalizedSplits = normalizeSplitPaymentsInput(splitPayments);
+    if (normalizedSplits.length === 0) {
+        const resolvedMethod = await resolvePaymentMethodId(tx, fallbackPaymentMethodId, 1);
+        return [{
+            index: 0,
+            paymentMethodId: resolvedMethod,
+            amount: safeTotalAmount,
+            note: null
+        }];
+    }
+
+    const resolvedSplits = [];
+    for (const split of normalizedSplits) {
+        const paymentMethodId = await resolvePaymentMethodId(tx, split.rawPaymentMethodId, fallbackPaymentMethodId || 1);
+        if (!paymentMethodId) {
+            return { error: 'Invalid payment method in split payments' };
+        }
+        resolvedSplits.push({
+            index: split.index,
+            paymentMethodId,
+            amount: split.amount,
+            note: split.note
+        });
+    }
+
+    const splitTotal = resolvedSplits.reduce((sum, row) => sum + row.amount, 0);
+    const roundedSplitTotal = Number(splitTotal.toFixed(2));
+    const roundedTargetTotal = Number(safeTotalAmount.toFixed(2));
+    if (Math.abs(roundedSplitTotal - roundedTargetTotal) > 0.01) {
+        return { error: 'Split payment total does not match paid amount' };
+    }
+
+    return resolvedSplits;
+};
+
+const getSaleOutstandingRowsForAllocation = async (
+    txOrClient,
+    customerId,
+    { customerBalanceOverride = null } = {},
+) => {
+    const parsedCustomerId = parsePositiveInt(customerId);
+    if (!parsedCustomerId) return [];
+
+    const sales = await txOrClient.sale.findMany({
+        where: { customerId: parsedCustomerId },
+        select: {
+            id: true,
+            invoiceDate: true,
+            createdAt: true
+        },
+        orderBy: [
+            { invoiceDate: 'asc' },
+            { id: 'asc' }
+        ]
+    });
+
+    if (sales.length === 0) return [];
+    const saleIds = sales.map((sale) => sale.id);
+
+    const [saleTransactions, allocationsAgg, customer] = await Promise.all([
+        txOrClient.customerTransaction.groupBy({
+            by: ['referenceId'],
+            where: {
+                customerId: parsedCustomerId,
+                referenceType: 'SALE',
+                referenceId: { in: saleIds }
+            },
+            _sum: {
+                debit: true,
+                credit: true
+            }
+        }),
+        txOrClient.paymentAllocation.groupBy({
+            by: ['saleId'],
+            where: { saleId: { in: saleIds } },
+            _sum: { amount: true }
+        }),
+        txOrClient.customer.findUnique({
+            where: { id: parsedCustomerId },
+            select: { balance: true }
+        })
+    ]);
+
+    const outstandingBySaleId = new Map();
+    saleTransactions.forEach((row) => {
+        const saleId = parsePositiveInt(row.referenceId);
+        if (!saleId) return;
+        const outstanding = Math.max(0, toNumber(row?._sum?.debit) - toNumber(row?._sum?.credit));
+        outstandingBySaleId.set(saleId, outstanding);
+    });
+
+    const allocationBySaleId = new Map();
+    allocationsAgg.forEach((row) => {
+        const saleId = parsePositiveInt(row.saleId);
+        if (!saleId) return;
+        allocationBySaleId.set(saleId, Math.max(0, toNumber(row?._sum?.amount)));
+    });
+
+    const rows = sales
+        .map((sale) => {
+            const baseOutstanding = Math.max(0, toNumber(outstandingBySaleId.get(sale.id)));
+            const allocated = Math.max(0, toNumber(allocationBySaleId.get(sale.id)));
+            const outstanding = Math.max(0, Number((baseOutstanding - allocated).toFixed(2)));
+            return {
+                saleId: sale.id,
+                invoiceDate: sale.invoiceDate || sale.createdAt || new Date(),
+                outstanding
+            };
+        })
+        .filter((row) => row.outstanding > 0)
+        .sort((a, b) => (
+            a.invoiceDate.getTime() - b.invoiceDate.getTime() || a.saleId - b.saleId
+        ));
+
+    const referenceBalance = Math.max(
+        0,
+        toNumber(customerBalanceOverride, toNumber(customer?.balance, 0))
+    );
+    const rawOutstandingTotal = rows.reduce((sum, row) => sum + row.outstanding, 0);
+    let settledWithoutAllocation = Math.max(0, Number((rawOutstandingTotal - referenceBalance).toFixed(2)));
+    if (settledWithoutAllocation > 0) {
+        for (const row of rows) {
+            if (settledWithoutAllocation <= 0) break;
+            const reduction = Math.min(row.outstanding, settledWithoutAllocation);
+            row.outstanding = Number((row.outstanding - reduction).toFixed(2));
+            settledWithoutAllocation = Number((settledWithoutAllocation - reduction).toFixed(2));
+        }
+    }
+
+    return rows.filter((row) => row.outstanding > 0);
+};
+
+const applyAllocationsFromOutstandingRows = async (
+    tx,
+    {
+        outstandingRows = [],
+        sourceType,
+        amount,
+        customerId = null,
+        customerPaymentId = null,
+        treasuryEntryId = null,
+        createdByUserId = null,
+        note = null,
+        allocationDate = new Date()
+    } = {},
+) => {
+    let remaining = Math.max(0, toNumber(amount));
+    if (remaining <= 0) return [];
+
+    const allocations = [];
+    for (const row of outstandingRows) {
+        if (remaining <= 0) break;
+        const outstanding = Math.max(0, toNumber(row?.outstanding));
+        if (outstanding <= 0) continue;
+
+        const allocated = Number(Math.min(remaining, outstanding).toFixed(2));
+        if (allocated <= 0) continue;
+
+        const createdAllocation = await tx.paymentAllocation.create({
+            data: {
+                customerId: parsePositiveInt(customerId),
+                saleId: row.saleId,
+                sourceType,
+                customerPaymentId: parsePositiveInt(customerPaymentId),
+                treasuryEntryId: parsePositiveInt(treasuryEntryId),
+                amount: allocated,
+                allocationDate: parseDateOrDefault(allocationDate, new Date()),
+                createdByUserId: parsePositiveInt(createdByUserId),
+                note: note || null
+            }
+        });
+
+        row.outstanding = Number((outstanding - allocated).toFixed(2));
+        remaining = Number((remaining - allocated).toFixed(2));
+        allocations.push(createdAllocation);
+    }
+
+    return allocations;
+};
+
+const createTreasuryEntry = async (tx, {
+    treasuryId = null,
+    entryType = TREASURY_ENTRY_TYPE.MANUAL_IN,
+    direction = TREASURY_DIRECTION.IN,
+    amount = 0,
+    notes = null,
+    note = null,
+    referenceType = null,
+    referenceId = null,
+    paymentMethodId = null,
+    sourceTreasuryId = null,
+    targetTreasuryId = null,
+    entryDate = null,
+    allowNegative = false,
+    idempotencyKey = null,
+    createdByUserId = null,
+    meta = null
+} = {}) => {
+    const safeDirection = direction === TREASURY_DIRECTION.OUT
+        ? TREASURY_DIRECTION.OUT
+        : TREASURY_DIRECTION.IN;
+    const safeAmount = Math.max(0, toNumber(amount));
+    if (safeAmount <= 0) {
+        return { error: 'Invalid treasury amount' };
+    }
+
+    const safeEntryDate = parseDateOrDefault(entryDate);
+    const safeIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+    const includeRelations = {
+        treasury: true,
+        paymentMethod: true,
+        sourceTreasury: true,
+        targetTreasury: true
+    };
+
+    if (safeIdempotencyKey) {
+        await acquireIdempotencyLock(tx, safeIdempotencyKey);
+        const existingEntry = await tx.treasuryEntry.findUnique({
+            where: { idempotencyKey: safeIdempotencyKey },
+            include: includeRelations
+        });
+        if (existingEntry) {
+            return { success: true, entry: existingEntry, idempotent: true };
+        }
+    }
+
+    const resolvedTreasuryId = await resolveTreasuryId(tx, treasuryId);
+
+    const treasury = await lockTreasuryForUpdate(tx, resolvedTreasuryId);
+    if (!treasury) {
+        return { error: 'Treasury not found' };
+    }
+    if (!treasury?.isActive) {
+        return { error: 'Treasury is inactive' };
+    }
+
+    const balanceBefore = toNumber(treasury.currentBalance, 0);
+    const delta = safeDirection === TREASURY_DIRECTION.IN ? safeAmount : -safeAmount;
+    const balanceAfter = Number((balanceBefore + delta).toFixed(2));
+
+    if (!allowNegative && safeDirection === TREASURY_DIRECTION.OUT && balanceAfter < -0.0001) {
+        return { error: 'Insufficient treasury balance' };
+    }
+
+    await tx.treasury.update({
+        where: { id: resolvedTreasuryId },
+        data: { currentBalance: balanceAfter }
+    });
+
+    let entry;
+    try {
+        entry = await tx.treasuryEntry.create({
+            data: {
+                treasuryId: resolvedTreasuryId,
+                entryType,
+                direction: safeDirection,
+                amount: safeAmount,
+                balanceBefore,
+                balanceAfter,
+                notes: notes || note || null,
+                note: note || notes || null,
+                referenceType: referenceType || null,
+                referenceId: parsePositiveInt(referenceId),
+                paymentMethodId: parsePositiveInt(paymentMethodId),
+                idempotencyKey: safeIdempotencyKey,
+                createdByUserId: parsePositiveInt(createdByUserId),
+                meta: meta ?? null,
+                sourceTreasuryId: parsePositiveInt(sourceTreasuryId),
+                targetTreasuryId: parsePositiveInt(targetTreasuryId),
+                entryDate: safeEntryDate
+            },
+            include: includeRelations
+        });
+    } catch (error) {
+        const duplicateByIdempotency = (
+            safeIdempotencyKey &&
+            error?.code === 'P2002'
+        );
+        if (duplicateByIdempotency) {
+            const existingEntry = await tx.treasuryEntry.findUnique({
+                where: { idempotencyKey: safeIdempotencyKey },
+                include: includeRelations
+            });
+            if (existingEntry) {
+                return { success: true, entry: existingEntry, idempotent: true };
+            }
+        }
+        throw error;
+    }
+
+    await writeAuditLog(tx, {
+        action: AUDIT_ACTION.TREASURY_ENTRY_CREATE,
+        entityType: 'TreasuryEntry',
+        entityId: entry.id,
+        treasuryId: entry.treasuryId,
+        treasuryEntryId: entry.id,
+        referenceType: entry.referenceType,
+        referenceId: entry.referenceId,
+        performedByUserId: parsePositiveInt(createdByUserId),
+        note: entry.note || entry.notes || null,
+        meta: {
+            entryType: entry.entryType,
+            direction: entry.direction,
+            amount: entry.amount,
+            idempotencyKey: entry.idempotencyKey || null
+        }
+    });
+
+    return { success: true, entry };
+};
+
+const rollbackTreasuryEntriesByReference = async (tx, referenceType, referenceId) => {
+    const parsedReferenceId = parsePositiveInt(referenceId);
+    if (!referenceType || !parsedReferenceId) {
+        return { count: 0 };
+    }
+
+    const entries = await tx.treasuryEntry.findMany({
+        where: {
+            referenceType: String(referenceType),
+            referenceId: parsedReferenceId
+        },
+        select: {
+            id: true,
+            treasuryId: true,
+            direction: true,
+            amount: true,
+            entryDate: true,
+            createdAt: true
+        }
+    });
+
+    if (entries.length === 0) {
+        return { count: 0 };
+    }
+
+    const balanceDeltaByTreasury = new Map();
+    entries.forEach((entry) => {
+        const rollbackDelta = entry.direction === TREASURY_DIRECTION.IN
+            ? -Math.max(0, toNumber(entry.amount))
+            : Math.max(0, toNumber(entry.amount));
+        const previous = balanceDeltaByTreasury.get(entry.treasuryId) || 0;
+        balanceDeltaByTreasury.set(entry.treasuryId, Number((previous + rollbackDelta).toFixed(2)));
+    });
+
+    for (const treasuryId of balanceDeltaByTreasury.keys()) {
+        await lockTreasuryForUpdate(tx, treasuryId);
+    }
+
+    for (const [treasuryId, delta] of balanceDeltaByTreasury.entries()) {
+        await tx.treasury.update({
+            where: { id: treasuryId },
+            data: {
+                currentBalance: {
+                    increment: delta
+                }
+            }
+        });
+    }
+
+    const entryIds = entries.map((entry) => entry.id);
+    if (String(referenceType).toUpperCase() === 'PAYMENT') {
+        await tx.paymentAllocation.deleteMany({
+            where: { customerPaymentId: parsedReferenceId }
+        });
+    }
+    await tx.paymentAllocation.deleteMany({
+        where: { treasuryEntryId: { in: entryIds } }
+    });
+
+    await tx.treasuryEntry.deleteMany({
+        where: {
+            id: {
+                in: entryIds
+            }
+        }
+    });
+
+    await writeAuditLog(tx, {
+        action: AUDIT_ACTION.TREASURY_ENTRY_ROLLBACK,
+        entityType: 'TreasuryEntry',
+        referenceType: String(referenceType),
+        referenceId: parsedReferenceId,
+        note: `Rollback by reference ${referenceType}#${parsedReferenceId}`,
+        meta: {
+            count: entries.length,
+            treasuryIds: [...new Set(entries.map((entry) => entry.treasuryId))]
+        }
+    });
+
+    return { count: entries.length };
+};
+
+const throwIfResultError = (result, fallbackMessage = 'Operation failed') => {
+    if (result?.error) {
+        throw new Error(result.error || fallbackMessage);
+    }
+    return result;
+};
+
+const resolveReportRange = (params = {}) => {
+    const hasFromTo = Boolean(params?.fromDate || params?.toDate);
+    if (!hasFromTo) {
+        const reportDate = params?.date || new Date();
+        return {
+            from: startOfDay(reportDate),
+            to: endOfDay(reportDate),
+            isSingleDay: true
+        };
+    }
+
+    const rawFrom = params?.fromDate || params?.date || new Date();
+    const rawTo = params?.toDate || params?.date || rawFrom;
+    const from = startOfDay(rawFrom);
+    const to = endOfDay(rawTo);
+    if (from.getTime() <= to.getTime()) {
+        return { from, to, isSingleDay: false };
+    }
+    return { from: startOfDay(rawTo), to: endOfDay(rawFrom), isSingleDay: false };
+};
+
+const shiftDateRange = ({ from, to }, daysBack = 1) => {
+    const shiftMs = Math.max(1, Number(daysBack || 1)) * 24 * 60 * 60 * 1000;
+    return {
+        from: new Date(from.getTime() - shiftMs),
+        to: new Date(to.getTime() - shiftMs)
+    };
+};
+
+const getDepositSummary = async (txOrClient, depositReferenceId) => {
+    const parsedReferenceId = parsePositiveInt(depositReferenceId);
+    if (!parsedReferenceId) {
+        return { error: 'Invalid deposit reference' };
+    }
+
+    const [entries, appliedAgg] = await Promise.all([
+        txOrClient.treasuryEntry.findMany({
+            where: {
+                referenceType: 'DEPOSIT',
+                referenceId: parsedReferenceId,
+                entryType: {
+                    in: [TREASURY_ENTRY_TYPE.DEPOSIT_IN, TREASURY_ENTRY_TYPE.DEPOSIT_REFUND]
+                }
+            },
+            orderBy: [{ id: 'asc' }]
+        }),
+        txOrClient.paymentAllocation.aggregate({
+            where: {
+                sourceType: PAYMENT_ALLOCATION_SOURCE_TYPE.DEPOSIT,
+                treasuryEntry: {
+                    referenceType: 'DEPOSIT',
+                    referenceId: parsedReferenceId,
+                    entryType: TREASURY_ENTRY_TYPE.DEPOSIT_IN
+                }
+            },
+            _sum: { amount: true }
+        })
+    ]);
+
+    const totalIn = entries
+        .filter((entry) => entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN)
+        .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+    const totalRefund = entries
+        .filter((entry) => entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_REFUND)
+        .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+    const totalApplied = Math.max(0, toNumber(appliedAgg?._sum?.amount));
+    const remaining = Number(Math.max(0, totalIn - totalRefund - totalApplied).toFixed(2));
+
+    return {
+        referenceId: parsedReferenceId,
+        entries,
+        totalIn,
+        totalRefund,
+        totalApplied,
+        remaining
+    };
+};
+
+const computeExpectedCashFromLedger = async (
+    txOrClient,
+    {
+        treasuryId = null,
+        from,
+        to
+    } = {},
+) => {
+    const parsedTreasuryId = parsePositiveInt(treasuryId);
+    const where = {
+        entryDate: {
+            gte: startOfDay(from),
+            lte: endOfDay(to)
+        },
+        ...(parsedTreasuryId ? { treasuryId: parsedTreasuryId } : {})
+    };
+
+    const cashEntries = await txOrClient.treasuryEntry.findMany({
+        where,
+        include: {
+            paymentMethod: true
+        }
+    });
+
+    let inCash = 0;
+    let outCash = 0;
+    cashEntries.forEach((entry) => {
+        const code = resolveReportPaymentMethodCode(entry?.paymentMethod);
+        if (code !== 'CASH') return;
+
+        const amount = Math.max(0, toNumber(entry.amount));
+        if (entry.direction === TREASURY_DIRECTION.IN) inCash += amount;
+        else outCash += amount;
+    });
+
+    return {
+        expectedCash: Number((inCash - outCash).toFixed(2)),
+        cashIn: Number(inCash.toFixed(2)),
+        cashOut: Number(outCash.toFixed(2)),
+        entryCount: cashEntries.length
+    };
+};
+
 const dbService = {
     // ==================== AUTH ====================
     async login({ username, password }) {
@@ -454,6 +1352,36 @@ const dbService = {
                 _sum: { balance: true }
             });
 
+            let treasuryBalance = 0;
+            let treasuryInToday = 0;
+            let treasuryOutToday = 0;
+
+            try {
+                const [treasuryAgg, treasuryTodayAgg] = await Promise.all([
+                    prisma.treasury.aggregate({
+                        where: { isActive: true },
+                        _sum: { currentBalance: true }
+                    }),
+                    prisma.treasuryEntry.groupBy({
+                        by: ['direction'],
+                        where: { entryDate: { gte: today } },
+                        _sum: { amount: true }
+                    })
+                ]);
+
+                treasuryBalance = treasuryAgg?._sum?.currentBalance || 0;
+                treasuryTodayAgg.forEach((entry) => {
+                    const amount = entry?._sum?.amount || 0;
+                    if (entry.direction === TREASURY_DIRECTION.IN) {
+                        treasuryInToday += amount;
+                    } else {
+                        treasuryOutToday += amount;
+                    }
+                });
+            } catch (treasuryError) {
+                console.warn('Treasury stats are unavailable:', treasuryError?.message || treasuryError);
+            }
+
             return {
                 salesAmount,
                 salesCount: sales.length,
@@ -462,6 +1390,9 @@ const dbService = {
                 customersDebt: customersDebt || 0,
                 suppliersDebt: suppliersDebt._sum.balance || 0,
                 netProfit: salesAmount - expensesAmount,
+                treasuryBalance,
+                treasuryInToday,
+                treasuryOutToday,
                 lowStockVariants: lowStockVariants.map(v => ({
                     id: v.id,
                     productName: v.product.name,
@@ -930,6 +1861,54 @@ const dbService = {
                     }
                 }
 
+                const paidAmount = Math.max(0, Math.min(
+                    toNumber(saleData.paid, 0),
+                    toNumber(saleData.total, 0)
+                ));
+                if (paidAmount > 0) {
+                    const saleTreasuryId = await resolveTreasuryId(tx, saleData?.treasuryId);
+                    const splitRows = await resolvePaymentSplits(tx, {
+                        splitPayments: saleData?.splitPayments ?? saleData?.payments,
+                        fallbackPaymentMethodId: resolvedPaymentMethodId || 1,
+                        totalAmount: paidAmount
+                    });
+                    if (splitRows?.error) {
+                        return { error: splitRows.error };
+                    }
+
+                    for (const splitRow of splitRows) {
+                        const splitAmount = Math.max(0, toNumber(splitRow.amount));
+                        if (splitAmount <= 0) continue;
+
+                        const treasuryEntryResult = await createTreasuryEntry(tx, {
+                            treasuryId: saleTreasuryId,
+                            entryType: TREASURY_ENTRY_TYPE.SALE_INCOME,
+                            direction: TREASURY_DIRECTION.IN,
+                            amount: splitAmount,
+                            notes: `Sale #${newSale.id}${saleData.notes ? ` - ${saleData.notes}` : ''}`,
+                            note: splitRow?.note || null,
+                            referenceType: 'SALE',
+                            referenceId: newSale.id,
+                            paymentMethodId: splitRow.paymentMethodId,
+                            entryDate: newSale.invoiceDate || new Date(),
+                            idempotencyKey: generateIdempotencyKey('SALE_PAYMENT', [
+                                newSale.id,
+                                splitRow.paymentMethodId,
+                                normalizeAmountForKey(splitAmount),
+                                splitRow.index,
+                                'CREATE'
+                            ]),
+                            createdByUserId: parsePositiveInt(saleData?.createdByUserId ?? saleData?.userId),
+                            meta: {
+                                source: 'createSale',
+                                splitIndex: splitRow.index,
+                                splitCount: splitRows.length
+                            }
+                        });
+                        throwIfResultError(treasuryEntryResult);
+                    }
+                }
+
                 return newSale;
             });
 
@@ -1020,6 +1999,8 @@ const dbService = {
                         referenceId: parseInt(saleId)
                     }
                 });
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'SALE', parseInt(saleId));
+                throwIfResultError(rollbackResult, 'Failed to rollback sale treasury entries');
 
                 // Ø­Ø°Ù Ø¨Ù†ÙˆØ¯ Ø§Ù„ÙØ§ØªÙˆØ±Ø©
                 await tx.saleItem.deleteMany({
@@ -1229,6 +2210,57 @@ const dbService = {
                     }
                 }
 
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'SALE', parseInt(saleId));
+                throwIfResultError(rollbackResult, 'Failed to rollback sale treasury entries');
+
+                const paidAmount = Math.max(0, Math.min(
+                    toNumber(saleData.paid, 0),
+                    toNumber(saleData.total, 0)
+                ));
+                if (paidAmount > 0) {
+                    const saleTreasuryId = await resolveTreasuryId(tx, saleData?.treasuryId);
+                    const splitRows = await resolvePaymentSplits(tx, {
+                        splitPayments: saleData?.splitPayments ?? saleData?.payments,
+                        fallbackPaymentMethodId: nextPaymentMethodId || 1,
+                        totalAmount: paidAmount
+                    });
+                    if (splitRows?.error) {
+                        return { error: splitRows.error };
+                    }
+
+                    for (const splitRow of splitRows) {
+                        const splitAmount = Math.max(0, toNumber(splitRow.amount));
+                        if (splitAmount <= 0) continue;
+
+                        const treasuryEntryResult = await createTreasuryEntry(tx, {
+                            treasuryId: saleTreasuryId,
+                            entryType: TREASURY_ENTRY_TYPE.SALE_INCOME,
+                            direction: TREASURY_DIRECTION.IN,
+                            amount: splitAmount,
+                            notes: `Sale update #${updatedSale.id}${saleData.notes ? ` - ${saleData.notes}` : ''}`,
+                            note: splitRow?.note || null,
+                            referenceType: 'SALE',
+                            referenceId: updatedSale.id,
+                            paymentMethodId: splitRow.paymentMethodId,
+                            entryDate: updatedSale.invoiceDate || new Date(),
+                            idempotencyKey: generateIdempotencyKey('SALE_PAYMENT', [
+                                updatedSale.id,
+                                splitRow.paymentMethodId,
+                                normalizeAmountForKey(splitAmount),
+                                splitRow.index,
+                                'UPDATE'
+                            ]),
+                            createdByUserId: parsePositiveInt(saleData?.createdByUserId ?? saleData?.userId),
+                            meta: {
+                                source: 'updateSale',
+                                splitIndex: splitRow.index,
+                                splitCount: splitRows.length
+                            }
+                        });
+                        throwIfResultError(treasuryEntryResult);
+                    }
+                }
+
                 return { success: true, data: updatedSale };
             });
 
@@ -1305,6 +2337,26 @@ const dbService = {
                     });
                 }
 
+                const paidAmount = Math.max(0, Math.min(
+                    toNumber(purchaseData.paid, 0),
+                    toNumber(purchaseData.total, 0)
+                ));
+                if (paidAmount > 0) {
+                    const purchaseTreasuryId = await resolveTreasuryId(tx, purchaseData?.treasuryId);
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: purchaseTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.PURCHASE_PAYMENT,
+                        direction: TREASURY_DIRECTION.OUT,
+                        amount: paidAmount,
+                        notes: `Purchase #${newPurchase.id}${purchaseData.notes ? ` - ${purchaseData.notes}` : ''}`,
+                        referenceType: 'PURCHASE',
+                        referenceId: newPurchase.id,
+                        entryDate: purchaseData?.createdAt || new Date()
+                    });
+
+                    throwIfResultError(treasuryEntryResult);
+                }
+
                 return newPurchase;
             });
         } catch (error) {
@@ -1342,6 +2394,7 @@ const dbService = {
 
         try {
             const result = await prisma.$transaction(async (tx) => {
+                const returnDate = parseDateOrDefault(returnData?.returnDate, new Date());
                 const newReturn = await tx.return.create({
                     data: {
                         saleId: returnData.saleId ? parseInt(returnData.saleId) : null,
@@ -1375,7 +2428,6 @@ const dbService = {
                 if (returnData.customerId) {
                     const parsedCustomerId = parseInt(returnData.customerId);
                     const returnAmount = Math.max(0, toNumber(returnData.total));
-                    const returnDate = new Date();
 
                     await tx.customerTransaction.create({
                         data: {
@@ -1397,6 +2449,59 @@ const dbService = {
                         balanceDelta: -returnAmount,
                         activityDate: returnDate
                     });
+                }
+
+                const refundAmount = Math.max(0, toNumber(
+                    returnData?.refundAmount !== undefined ? returnData.refundAmount : returnData.total
+                ));
+                if (refundAmount > 0) {
+                    const returnTreasuryId = await resolveTreasuryId(tx, returnData?.treasuryId);
+                    const refundMode = String(returnData?.refundMode || REFUND_MODE.SAME_METHOD)
+                        .trim()
+                        .toUpperCase();
+
+                    let resolvedPaymentMethodId;
+                    if (refundMode === REFUND_MODE.CASH_ONLY) {
+                        resolvedPaymentMethodId = await resolveCashPaymentMethodId(tx, 1);
+                    } else {
+                        let sameMethodCandidate = returnData?.paymentMethodId ?? returnData?.paymentMethod;
+                        if (!sameMethodCandidate && returnData?.saleId) {
+                            const sourceSale = await tx.sale.findUnique({
+                                where: { id: parsePositiveInt(returnData.saleId) || 0 },
+                                select: { paymentMethodId: true }
+                            });
+                            sameMethodCandidate = sourceSale?.paymentMethodId || null;
+                        }
+                        resolvedPaymentMethodId = await resolvePaymentMethodId(
+                            tx,
+                            sameMethodCandidate,
+                            1
+                        );
+                    }
+
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: returnTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.RETURN_REFUND,
+                        direction: TREASURY_DIRECTION.OUT,
+                        amount: refundAmount,
+                        notes: `Return #${newReturn.id}${returnData.notes ? ` - ${returnData.notes}` : ''}`,
+                        referenceType: 'RETURN',
+                        referenceId: newReturn.id,
+                        paymentMethodId: resolvedPaymentMethodId,
+                        entryDate: returnDate,
+                        idempotencyKey: generateIdempotencyKey('RETURN_REFUND', [
+                            newReturn.id,
+                            resolvedPaymentMethodId,
+                            normalizeAmountForKey(refundAmount),
+                            refundMode
+                        ]),
+                        createdByUserId: parsePositiveInt(returnData?.createdByUserId ?? returnData?.userId),
+                        meta: {
+                            refundMode
+                        }
+                    });
+
+                    throwIfResultError(treasuryEntryResult);
                 }
 
                 return newReturn;
@@ -1746,80 +2851,238 @@ const dbService = {
         }
     },
 
-    async addCustomerPayment(paymentData) {
-        const perf = startPerfTimer('db:addCustomerPayment', {
-            hasPaymentDate: Boolean(paymentData?.paymentDate)
+    async previewCustomerPaymentAllocation(params = {}) {
+        try {
+            const customerId = parsePositiveInt(params?.customerId);
+            if (!customerId) return { error: 'Invalid customerId' };
+
+            const requestedAmount = Math.max(0, toNumber(params?.amount));
+            if (requestedAmount <= 0) return { error: 'Invalid amount' };
+
+            return await prisma.$transaction(async (tx) => {
+                const customer = await tx.customer.findUnique({
+                    where: { id: customerId },
+                    select: { id: true, balance: true }
+                });
+                if (!customer) return { error: 'Customer not found' };
+
+                const outstandingRows = await getSaleOutstandingRowsForAllocation(tx, customerId, {
+                    customerBalanceOverride: Math.max(0, toNumber(customer.balance))
+                });
+
+                let remaining = Number(requestedAmount.toFixed(2));
+                const allocations = [];
+                for (const row of outstandingRows) {
+                    if (remaining <= 0) break;
+                    const allocationAmount = Number(Math.min(remaining, row.outstanding).toFixed(2));
+                    if (allocationAmount <= 0) continue;
+                    allocations.push({
+                        saleId: row.saleId,
+                        invoiceDate: row.invoiceDate,
+                        outstandingBefore: row.outstanding,
+                        amount: allocationAmount,
+                        outstandingAfter: Number((row.outstanding - allocationAmount).toFixed(2))
+                    });
+                    remaining = Number((remaining - allocationAmount).toFixed(2));
+                }
+
+                return {
+                    success: true,
+                    data: {
+                        customerId,
+                        customerBalance: toNumber(customer.balance),
+                        requestedAmount,
+                        allocatedAmount: Number((requestedAmount - remaining).toFixed(2)),
+                        unallocatedAmount: remaining,
+                        allocations
+                    }
+                };
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async createCustomerPayment(paymentData = {}) {
+        const perf = startPerfTimer('db:createCustomerPayment', {
+            hasPaymentDate: Boolean(paymentData?.paymentDate),
+            hasSplitPayments: Array.isArray(paymentData?.splitPayments) || Array.isArray(paymentData?.payments)
         });
 
         try {
-            const customerId = parsePositiveInt(paymentData.customerId);
+            const customerId = parsePositiveInt(paymentData?.customerId);
             if (!customerId) {
                 return { error: 'Invalid customerId' };
             }
 
-            const paymentAmount = Math.max(0, toNumber(paymentData.amount));
-            if (paymentAmount <= 0) {
+            const paymentDate = parsePaymentDateInput(paymentData?.paymentDate);
+            const createdByUserId = parsePositiveInt(paymentData?.createdByUserId ?? paymentData?.userId);
+
+            const rawSplitRows = normalizeSplitPaymentsInput(
+                paymentData?.splitPayments ?? paymentData?.payments
+            );
+            const fallbackAmount = Math.max(0, toNumber(paymentData?.amount));
+            const totalAmount = rawSplitRows.length > 0
+                ? rawSplitRows.reduce((sum, row) => sum + row.amount, 0)
+                : fallbackAmount;
+            if (totalAmount <= 0) {
                 return { error: 'Invalid payment amount' };
             }
 
-            const paymentDate = parsePaymentDateInput(paymentData.paymentDate);
-
             const result = await prisma.$transaction(async (tx) => {
-                const paymentMethodId = await resolvePaymentMethodId(
-                    tx,
-                    paymentData?.paymentMethodId ?? paymentData?.paymentMethod,
-                    1
-                );
-                if (!paymentMethodId) {
-                    return { error: 'Invalid paymentMethodId' };
-                }
+                const customer = await tx.customer.findUnique({
+                    where: { id: customerId },
+                    select: { id: true, balance: true }
+                });
+                if (!customer) return { error: 'Customer not found' };
 
-                const payment = await tx.customerPayment.create({
-                    data: {
-                        customer: {
-                            connect: { id: customerId }
-                        },
-                        paymentMethodId,
-                        amount: paymentAmount,
-                        notes: paymentData.notes || null,
-                        paymentDate
-                    },
-                    include: {
-                        paymentMethod: true
-                    }
+                const paymentTreasuryId = await resolveTreasuryId(tx, paymentData?.treasuryId);
+                const splitRows = await resolvePaymentSplits(tx, {
+                    splitPayments: rawSplitRows,
+                    fallbackPaymentMethodId: paymentData?.paymentMethodId ?? paymentData?.paymentMethod ?? 1,
+                    totalAmount
+                });
+                if (splitRows?.error) return { error: splitRows.error };
+
+                const fifoOutstandingRows = await getSaleOutstandingRowsForAllocation(tx, customerId, {
+                    customerBalanceOverride: Math.max(0, toNumber(customer.balance))
                 });
 
-                await tx.customerTransaction.create({
-                    data: {
-                        customer: {
-                            connect: { id: customerId }
+                const payments = [];
+                const treasuryEntries = [];
+                const allocations = [];
+                for (const splitRow of splitRows) {
+                    const splitAmount = Math.max(0, toNumber(splitRow.amount));
+                    if (splitAmount <= 0) continue;
+
+                    const payment = await tx.customerPayment.create({
+                        data: {
+                            customer: {
+                                connect: { id: customerId }
+                            },
+                            paymentMethod: {
+                                connect: { id: splitRow.paymentMethodId }
+                            },
+                            amount: splitAmount,
+                            notes: paymentData?.notes || splitRow?.note || null,
+                            paymentDate
                         },
-                        date: paymentDate,
-                        type: 'PAYMENT',
+                        include: {
+                            paymentMethod: true
+                        }
+                    });
+
+                    await tx.customerTransaction.create({
+                        data: {
+                            customer: {
+                                connect: { id: customerId }
+                            },
+                            date: paymentDate,
+                            type: 'PAYMENT',
+                            referenceType: 'PAYMENT',
+                            referenceId: payment.id,
+                            debit: 0,
+                            credit: splitAmount,
+                            notes: `دفعة #${payment.id} - ${paymentData?.notes || 'دفعة عميل'}`
+                        }
+                    });
+
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: paymentTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT,
+                        direction: TREASURY_DIRECTION.IN,
+                        amount: splitAmount,
+                        notes: `Customer payment #${payment.id}${paymentData?.notes ? ` - ${paymentData.notes}` : ''}`,
                         referenceType: 'PAYMENT',
                         referenceId: payment.id,
-                        debit: 0,
-                        credit: paymentAmount,
-                        notes: `دفعة #${payment.id} - ${paymentData.notes || 'دفعة نقدية'}`
+                        paymentMethodId: splitRow.paymentMethodId,
+                        entryDate: paymentDate,
+                        idempotencyKey: generateIdempotencyKey('CUSTOMER_PAYMENT', [
+                            payment.id,
+                            splitRow.paymentMethodId,
+                            normalizeAmountForKey(splitAmount),
+                            splitRow.index
+                        ]),
+                        createdByUserId,
+                        meta: {
+                            source: 'createCustomerPayment',
+                            splitIndex: splitRow.index,
+                            splitCount: splitRows.length
+                        }
+                    });
+                    throwIfResultError(treasuryEntryResult);
+
+                    const createdAllocations = await applyAllocationsFromOutstandingRows(tx, {
+                        outstandingRows: fifoOutstandingRows,
+                        sourceType: PAYMENT_ALLOCATION_SOURCE_TYPE.CUSTOMER_PAYMENT,
+                        amount: splitAmount,
+                        customerId,
+                        customerPaymentId: payment.id,
+                        createdByUserId,
+                        note: `FIFO allocation for payment #${payment.id}`,
+                        allocationDate: paymentDate
+                    });
+
+                    if (createdAllocations.length > 0) {
+                        await writeAuditLog(tx, {
+                            action: AUDIT_ACTION.PAYMENT_ALLOCATION_CREATE,
+                            entityType: 'PaymentAllocation',
+                            referenceType: 'PAYMENT',
+                            referenceId: payment.id,
+                            performedByUserId: createdByUserId,
+                            note: `FIFO allocations created for payment #${payment.id}`,
+                            meta: {
+                                allocationCount: createdAllocations.length,
+                                amount: splitAmount
+                            }
+                        });
                     }
-                });
+
+                    payments.push(payment);
+                    treasuryEntries.push(treasuryEntryResult.entry);
+                    allocations.push(...createdAllocations);
+                }
 
                 await applyCustomerFinancialDelta(tx, {
                     customerId,
-                    balanceDelta: -paymentAmount,
+                    balanceDelta: -totalAmount,
                     activityDate: paymentDate,
                     paymentDate
                 });
+                await recalculateCustomerActivityDates(tx, customerId);
 
-                return payment;
+                return {
+                    success: true,
+                    data: {
+                        customerId,
+                        totalAmount,
+                        paymentDate,
+                        payments,
+                        treasuryEntries,
+                        allocations
+                    }
+                };
             });
 
-            perf({ rows: 1 });
+            perf({ rows: Array.isArray(result?.data?.payments) ? result.data.payments.length : 0 });
             return result;
         } catch (error) {
             perf({ error });
             return { error: error.message };
         }
+    },
+
+    async addCustomerPayment(paymentData) {
+        const result = await this.createCustomerPayment(paymentData);
+        if (result?.error) {
+            return result;
+        }
+
+        const payments = Array.isArray(result?.data?.payments) ? result.data.payments : [];
+        if (payments.length === 1) {
+            return payments[0];
+        }
+        return result;
     },
 
     async getCustomerPayments(customerId) {
@@ -1954,6 +3217,51 @@ const dbService = {
                     await recalculateCustomerActivityDates(tx, nextCustomerId);
                 }
 
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PAYMENT', parsedPaymentId);
+                throwIfResultError(rollbackResult, 'Failed to rollback payment treasury entries');
+                const paymentTreasuryId = await resolveTreasuryId(tx, paymentData?.treasuryId);
+                const treasuryEntryResult = await createTreasuryEntry(tx, {
+                    treasuryId: paymentTreasuryId,
+                    entryType: TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT,
+                    direction: TREASURY_DIRECTION.IN,
+                    amount,
+                    notes: `Customer payment update #${parsedPaymentId}${paymentData?.notes ? ` - ${paymentData.notes}` : ''}`,
+                    referenceType: 'PAYMENT',
+                    referenceId: parsedPaymentId,
+                    paymentMethodId,
+                    entryDate: paymentDate,
+                    idempotencyKey: generateIdempotencyKey('CUSTOMER_PAYMENT', [
+                        parsedPaymentId,
+                        paymentMethodId,
+                        normalizeAmountForKey(amount),
+                        'UPDATE'
+                    ]),
+                    createdByUserId: parsePositiveInt(paymentData?.createdByUserId ?? paymentData?.userId),
+                    meta: {
+                        source: 'updateCustomerPayment'
+                    }
+                });
+                throwIfResultError(treasuryEntryResult);
+
+                const currentCustomer = await tx.customer.findUnique({
+                    where: { id: nextCustomerId },
+                    select: { balance: true }
+                });
+                const balanceBeforePayment = Math.max(0, toNumber(currentCustomer?.balance) + amount);
+                const fifoOutstandingRows = await getSaleOutstandingRowsForAllocation(tx, nextCustomerId, {
+                    customerBalanceOverride: balanceBeforePayment
+                });
+                await applyAllocationsFromOutstandingRows(tx, {
+                    outstandingRows: fifoOutstandingRows,
+                    sourceType: PAYMENT_ALLOCATION_SOURCE_TYPE.CUSTOMER_PAYMENT,
+                    amount,
+                    customerId: nextCustomerId,
+                    customerPaymentId: parsedPaymentId,
+                    createdByUserId: parsePositiveInt(paymentData?.createdByUserId ?? paymentData?.userId),
+                    note: `FIFO allocation for updated payment #${parsedPaymentId}`,
+                    allocationDate: paymentDate
+                });
+
                 return { success: true, data: updatedPayment };
             });
 
@@ -1993,6 +3301,9 @@ const dbService = {
                         referenceId: parseInt(paymentId)
                     }
                 });
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PAYMENT', parseInt(paymentId));
+                throwIfResultError(rollbackResult, 'Failed to rollback payment treasury entries');
 
                 const deletedPayment = await tx.customerPayment.delete({
                     where: { id: parseInt(paymentId) }
@@ -2158,6 +3469,1663 @@ const dbService = {
         }
     },
 
+    async createDepositReceipt(params = {}) {
+        try {
+            const amount = Math.max(0, toNumber(params?.amount));
+            if (amount <= 0) return { error: 'Invalid deposit amount' };
+
+            const customerId = parsePositiveInt(params?.customerId);
+            const entryDate = parseDateOrDefault(params?.entryDate ?? params?.paymentDate, new Date());
+            const createdByUserId = parsePositiveInt(params?.createdByUserId ?? params?.userId);
+
+            return await prisma.$transaction(async (tx) => {
+                let referenceId = parsePositiveInt(params?.referenceId ?? params?.depositReferenceId);
+                if (!referenceId) {
+                    const latestRef = await tx.treasuryEntry.findFirst({
+                        where: { referenceType: 'DEPOSIT' },
+                        orderBy: { referenceId: 'desc' },
+                        select: { referenceId: true }
+                    });
+                    referenceId = Math.max(100000, parsePositiveInt(latestRef?.referenceId) || 100000) + 1;
+                }
+
+                const treasuryId = await resolveTreasuryId(tx, params?.treasuryId);
+                const paymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    params?.paymentMethodId ?? params?.paymentMethod,
+                    1
+                );
+                if (!paymentMethodId) {
+                    return { error: 'Invalid paymentMethodId' };
+                }
+
+                const entryResult = await createTreasuryEntry(tx, {
+                    treasuryId,
+                    entryType: TREASURY_ENTRY_TYPE.DEPOSIT_IN,
+                    direction: TREASURY_DIRECTION.IN,
+                    amount,
+                    notes: params?.notes || 'Deposit receipt',
+                    referenceType: 'DEPOSIT',
+                    referenceId,
+                    paymentMethodId,
+                    entryDate,
+                    idempotencyKey: generateIdempotencyKey('DEPOSIT_RECEIPT', [
+                        referenceId,
+                        paymentMethodId,
+                        normalizeAmountForKey(amount),
+                        toDayLockDate(entryDate).toISOString()
+                    ]),
+                    createdByUserId,
+                    meta: {
+                        customerId,
+                        referenceType: params?.referenceType || 'DEPOSIT'
+                    }
+                });
+                throwIfResultError(entryResult);
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.DEPOSIT_RECEIPT_CREATE,
+                    entityType: 'TreasuryEntry',
+                    entityId: entryResult.entry.id,
+                    treasuryId,
+                    treasuryEntryId: entryResult.entry.id,
+                    referenceType: 'DEPOSIT',
+                    referenceId,
+                    performedByUserId: createdByUserId,
+                    note: `Deposit receipt #${referenceId}`,
+                    meta: {
+                        customerId,
+                        amount,
+                        paymentMethodId
+                    }
+                });
+
+                return {
+                    success: true,
+                    data: {
+                        referenceId,
+                        entry: entryResult.entry
+                    }
+                };
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async applyDepositToSale(params = {}) {
+        try {
+            const saleId = parsePositiveInt(params?.saleId);
+            const referenceId = parsePositiveInt(params?.depositReferenceId ?? params?.referenceId);
+            const amountApplied = Math.max(0, toNumber(params?.amountApplied ?? params?.amount));
+            const applyDate = parseDateOrDefault(params?.applyDate ?? params?.entryDate, new Date());
+            const createdByUserId = parsePositiveInt(params?.createdByUserId ?? params?.userId);
+
+            if (!saleId) return { error: 'Invalid saleId' };
+            if (!referenceId) return { error: 'Invalid deposit reference' };
+            if (amountApplied <= 0) return { error: 'Invalid amountApplied' };
+
+            return await prisma.$transaction(async (tx) => {
+                const sale = await tx.sale.findUnique({
+                    where: { id: saleId },
+                    select: { id: true, customerId: true }
+                });
+                if (!sale) return { error: 'Sale not found' };
+                const customerId = parsePositiveInt(params?.customerId) || parsePositiveInt(sale.customerId);
+
+                const depositSummary = await getDepositSummary(tx, referenceId);
+                if (depositSummary?.error) return depositSummary;
+                if (depositSummary.remaining + 0.0001 < amountApplied) {
+                    return { error: 'Deposit remaining amount is insufficient' };
+                }
+
+                const depositInEntries = depositSummary.entries
+                    .filter((entry) => entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN)
+                    .sort((a, b) => a.id - b.id);
+                if (depositInEntries.length === 0) {
+                    return { error: 'No deposit receipt found for this reference' };
+                }
+
+                const depositEntryIds = depositInEntries.map((entry) => entry.id);
+                const usedByEntry = await tx.paymentAllocation.groupBy({
+                    by: ['treasuryEntryId'],
+                    where: {
+                        sourceType: PAYMENT_ALLOCATION_SOURCE_TYPE.DEPOSIT,
+                        treasuryEntryId: { in: depositEntryIds }
+                    },
+                    _sum: { amount: true }
+                });
+                const usedMap = new Map();
+                usedByEntry.forEach((row) => {
+                    usedMap.set(row.treasuryEntryId, Math.max(0, toNumber(row?._sum?.amount)));
+                });
+
+                let remainingToApply = Number(amountApplied.toFixed(2));
+                const createdAllocations = [];
+                for (const depositEntry of depositInEntries) {
+                    if (remainingToApply <= 0) break;
+                    const entryAmount = Math.max(0, toNumber(depositEntry.amount));
+                    const alreadyUsed = Math.max(0, toNumber(usedMap.get(depositEntry.id)));
+                    const available = Number(Math.max(0, entryAmount - alreadyUsed).toFixed(2));
+                    if (available <= 0) continue;
+
+                    const allocationAmount = Number(Math.min(remainingToApply, available).toFixed(2));
+                    if (allocationAmount <= 0) continue;
+
+                    const allocation = await tx.paymentAllocation.create({
+                        data: {
+                            customerId: customerId || null,
+                            saleId,
+                            sourceType: PAYMENT_ALLOCATION_SOURCE_TYPE.DEPOSIT,
+                            treasuryEntryId: depositEntry.id,
+                            amount: allocationAmount,
+                            allocationDate: applyDate,
+                            createdByUserId,
+                            note: params?.notes || `Apply deposit #${referenceId} to sale #${saleId}`
+                        }
+                    });
+                    createdAllocations.push(allocation);
+                    remainingToApply = Number((remainingToApply - allocationAmount).toFixed(2));
+                }
+
+                if (remainingToApply > 0.01) {
+                    return { error: 'Unable to allocate requested amount from deposit balance' };
+                }
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.DEPOSIT_APPLY_TO_SALE,
+                    entityType: 'PaymentAllocation',
+                    referenceType: 'DEPOSIT',
+                    referenceId,
+                    performedByUserId: createdByUserId,
+                    note: `Apply deposit #${referenceId} to sale #${saleId}`,
+                    meta: {
+                        saleId,
+                        customerId: customerId || null,
+                        amountApplied,
+                        allocationCount: createdAllocations.length
+                    }
+                });
+
+                return {
+                    success: true,
+                    data: {
+                        referenceId,
+                        saleId,
+                        amountApplied,
+                        allocations: createdAllocations
+                    }
+                };
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async refundDeposit(params = {}) {
+        try {
+            const referenceId = parsePositiveInt(params?.depositReferenceId ?? params?.referenceId);
+            const amount = Math.max(0, toNumber(params?.amount));
+            if (!referenceId) return { error: 'Invalid deposit reference' };
+            if (amount <= 0) return { error: 'Invalid refund amount' };
+
+            const refundDate = parseDateOrDefault(params?.refundDate ?? params?.entryDate, new Date());
+            const refundMode = String(params?.refundMode || REFUND_MODE.SAME_METHOD).trim().toUpperCase();
+            const createdByUserId = parsePositiveInt(params?.createdByUserId ?? params?.userId);
+
+            return await prisma.$transaction(async (tx) => {
+                const depositSummary = await getDepositSummary(tx, referenceId);
+                if (depositSummary?.error) return depositSummary;
+                if (depositSummary.remaining + 0.0001 < amount) {
+                    return { error: 'Deposit remaining amount is insufficient for refund' };
+                }
+
+                const sourceEntry = depositSummary.entries.find(
+                    (entry) => entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN
+                );
+                if (!sourceEntry) {
+                    return { error: 'No deposit receipt found for this reference' };
+                }
+
+                let paymentMethodId;
+                if (refundMode === REFUND_MODE.CASH_ONLY) {
+                    paymentMethodId = await resolveCashPaymentMethodId(tx, 1);
+                } else {
+                    paymentMethodId = await resolvePaymentMethodId(
+                        tx,
+                        params?.paymentMethodId ?? params?.paymentMethod ?? sourceEntry.paymentMethodId,
+                        1
+                    );
+                }
+                if (!paymentMethodId) {
+                    return { error: 'Invalid paymentMethodId for refund' };
+                }
+
+                const customerIdFromMeta = parsePositiveInt(sourceEntry?.meta?.customerId);
+                const customerId = parsePositiveInt(params?.customerId) || customerIdFromMeta;
+
+                const refundEntryResult = await createTreasuryEntry(tx, {
+                    treasuryId: sourceEntry.treasuryId,
+                    entryType: TREASURY_ENTRY_TYPE.DEPOSIT_REFUND,
+                    direction: TREASURY_DIRECTION.OUT,
+                    amount,
+                    notes: params?.notes || `Deposit refund #${referenceId}`,
+                    referenceType: 'DEPOSIT',
+                    referenceId,
+                    paymentMethodId,
+                    entryDate: refundDate,
+                    idempotencyKey: generateIdempotencyKey('DEPOSIT_REFUND', [
+                        referenceId,
+                        paymentMethodId,
+                        normalizeAmountForKey(amount),
+                        refundMode
+                    ]),
+                    createdByUserId,
+                    meta: {
+                        refundMode
+                    }
+                });
+                throwIfResultError(refundEntryResult);
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.DEPOSIT_REFUND,
+                    entityType: 'TreasuryEntry',
+                    entityId: refundEntryResult.entry.id,
+                    treasuryId: refundEntryResult.entry.treasuryId,
+                    treasuryEntryId: refundEntryResult.entry.id,
+                    referenceType: 'DEPOSIT',
+                    referenceId,
+                    performedByUserId: createdByUserId,
+                    note: `Deposit refund #${referenceId}`,
+                    meta: {
+                        amount,
+                        refundMode,
+                        paymentMethodId
+                    }
+                });
+
+                return {
+                    success: true,
+                    data: {
+                        referenceId,
+                        entry: refundEntryResult.entry
+                    }
+                };
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    // ==================== TREASURY ====================
+    async getTreasuries() {
+        try {
+            let treasuries = await prisma.treasury.findMany({
+                where: { isDeleted: false },
+                include: {
+                    _count: {
+                        select: {
+                            entries: true
+                        }
+                    }
+                },
+                orderBy: [
+                    { isDefault: 'desc' },
+                    { isActive: 'desc' },
+                    { createdAt: 'asc' }
+                ]
+            });
+
+            if (treasuries.length === 0) {
+                await getOrCreateDefaultTreasury(prisma);
+                treasuries = await prisma.treasury.findMany({
+                    where: { isDeleted: false },
+                    include: {
+                        _count: {
+                            select: {
+                                entries: true
+                            }
+                        }
+                    },
+                    orderBy: [
+                        { isDefault: 'desc' },
+                        { isActive: 'desc' },
+                        { createdAt: 'asc' }
+                    ]
+                });
+            }
+
+            if (treasuries.length > 0 && !treasuries.some((row) => row.isDefault)) {
+                const fallbackDefault = await getOrCreateDefaultTreasury(prisma);
+                treasuries = treasuries.map((row) => ({
+                    ...row,
+                    isDefault: row.id === fallbackDefault.id
+                }));
+            }
+
+            const activeCount = treasuries.filter((row) => row.isActive).length;
+            const linkedEntryAgg = await prisma.treasuryEntry.groupBy({
+                by: ['treasuryId'],
+                where: {
+                    treasuryId: { in: treasuries.map((row) => row.id) },
+                    entryType: { not: TREASURY_ENTRY_TYPE.OPENING_BALANCE }
+                },
+                _count: { _all: true }
+            });
+            const linkedEntryMap = new Map(
+                linkedEntryAgg.map((row) => [row.treasuryId, row?._count?._all || 0])
+            );
+
+            const enriched = treasuries.map((treasury) => {
+                const nonOpeningEntryCount = linkedEntryMap.get(treasury.id) || 0;
+                const hasLinkedOperations = nonOpeningEntryCount > 0;
+                const canDelete = treasury.isActive
+                    ? activeCount > 1
+                    : activeCount >= 1;
+
+                return {
+                    ...treasury,
+                    nonOpeningEntryCount,
+                    hasLinkedOperations,
+                    canEdit: !hasLinkedOperations,
+                    canDelete
+                };
+            });
+
+            const totalBalance = enriched.reduce(
+                (sum, treasury) => sum + toNumber(treasury.currentBalance),
+                0
+            );
+
+            return {
+                data: enriched,
+                totalBalance
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async createTreasury(treasuryData = {}) {
+        try {
+            const name = String(treasuryData?.name || '').trim();
+            const requestedCode = normalizeTreasuryCode(treasuryData?.code || name);
+            const openingBalance = Math.max(0, toNumber(treasuryData?.openingBalance));
+            const openingDate = parseDateOrDefault(treasuryData?.openingDate, new Date());
+            const requestedDefault = Boolean(treasuryData?.isDefault);
+
+            if (!name) {
+                return { error: 'Treasury name is required' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                let code = requestedCode;
+                if (!code) {
+                    // If name/code contains unsupported chars only, fallback to generated code.
+                    code = generateTreasuryCode();
+                }
+
+                const defaultCount = await tx.treasury.count({
+                    where: { isDefault: true, isDeleted: false }
+                });
+                const shouldSetAsDefault = requestedDefault || defaultCount === 0;
+
+                let createdTreasury = await tx.treasury.create({
+                    data: {
+                        name,
+                        code,
+                        description: treasuryData?.description || null,
+                        openingBalance,
+                        currentBalance: 0,
+                        isActive: true,
+                        isDefault: false
+                    }
+                });
+
+                if (openingBalance > 0) {
+                    const openingEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: createdTreasury.id,
+                        entryType: TREASURY_ENTRY_TYPE.OPENING_BALANCE,
+                        direction: TREASURY_DIRECTION.IN,
+                        amount: openingBalance,
+                        notes: treasuryData?.openingNotes || 'Opening balance',
+                        entryDate: openingDate,
+                        allowNegative: true
+                    });
+                    throwIfResultError(openingEntryResult);
+                }
+
+                if (shouldSetAsDefault) {
+                    const defaultResult = await setDefaultTreasuryInternal(tx, createdTreasury.id, {
+                        forceActivate: true
+                    });
+                    if (defaultResult?.error) {
+                        return { error: defaultResult.error };
+                    }
+                    createdTreasury = defaultResult.treasury;
+                }
+
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.TREASURY_CREATE,
+                    entityType: 'Treasury',
+                    entityId: createdTreasury.id,
+                    treasuryId: createdTreasury.id,
+                    performedByUserId: parsePositiveInt(treasuryData?.createdByUserId ?? treasuryData?.userId),
+                    note: `Create treasury ${createdTreasury.name}`,
+                    meta: {
+                        code: createdTreasury.code,
+                        openingBalance,
+                        isDefault: Boolean(createdTreasury?.isDefault)
+                    }
+                });
+
+                return createdTreasury;
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateTreasury(id, treasuryData = {}) {
+        try {
+            const treasuryId = parsePositiveInt(id);
+            if (!treasuryId) {
+                return { error: 'Invalid treasuryId' };
+            }
+
+            const hasName = Object.prototype.hasOwnProperty.call(treasuryData, 'name');
+            const hasCode = Object.prototype.hasOwnProperty.call(treasuryData, 'code');
+            const hasDescription = Object.prototype.hasOwnProperty.call(treasuryData, 'description');
+            const hasIsActive = Object.prototype.hasOwnProperty.call(treasuryData, 'isActive');
+            const hasIsDefault = Object.prototype.hasOwnProperty.call(treasuryData, 'isDefault');
+            const hasOpeningBalance = Object.prototype.hasOwnProperty.call(treasuryData, 'openingBalance');
+
+            const data = {};
+            if (hasName) {
+                const name = String(treasuryData?.name || '').trim();
+                if (!name) return { error: 'Treasury name cannot be empty' };
+                data.name = name;
+            }
+            if (hasCode) {
+                const code = normalizeTreasuryCode(treasuryData?.code);
+                if (!code) return { error: 'Treasury code cannot be empty' };
+                data.code = code;
+            }
+            if (hasDescription) {
+                data.description = treasuryData?.description || null;
+            }
+            if (hasIsActive) {
+                data.isActive = Boolean(treasuryData.isActive);
+            }
+
+            const openingBalance = hasOpeningBalance
+                ? Math.max(0, toNumber(treasuryData?.openingBalance))
+                : null;
+            const openingDate = parseDateOrDefault(treasuryData?.openingDate, new Date());
+            const requestedDefault = hasIsDefault ? Boolean(treasuryData?.isDefault) : null;
+            const updatedByUserId = parsePositiveInt(treasuryData?.updatedByUserId ?? treasuryData?.userId);
+
+            if (Object.keys(data).length === 0 && !hasIsDefault && !hasOpeningBalance) {
+                return { error: 'No fields to update' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                const existingTreasury = await tx.treasury.findUnique({
+                    where: { id: treasuryId },
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        isActive: true,
+                        isDefault: true,
+                        isDeleted: true,
+                        openingBalance: true
+                    }
+                });
+                if (!existingTreasury) {
+                    return { error: 'Treasury not found' };
+                }
+                if (existingTreasury.isDeleted) {
+                    return { error: 'Treasury is deleted' };
+                }
+
+                const linkStats = await getTreasuryOperationLinkStats(tx, treasuryId);
+                const isMasterDataChangeRequested = (
+                    hasName ||
+                    hasCode ||
+                    hasDescription ||
+                    hasIsActive ||
+                    hasOpeningBalance
+                );
+                if (linkStats.hasLinkedOperations && isMasterDataChangeRequested) {
+                    return { error: 'Cannot edit treasury because it is linked to operations' };
+                }
+
+                if (hasIsActive && data.isActive === false) {
+                    const activeCount = await tx.treasury.count({
+                        where: { isActive: true, id: { not: treasuryId } }
+                    });
+                    if (activeCount === 0) {
+                        return { error: 'At least one active treasury is required' };
+                    }
+                    if (existingTreasury.isDefault && requestedDefault !== false) {
+                        return { error: 'Default treasury cannot be deactivated. Set another default first' };
+                    }
+                }
+
+                if (hasOpeningBalance) {
+                    data.openingBalance = openingBalance;
+                }
+
+                const changedFields = [];
+                let updatedTreasury = existingTreasury;
+
+                if (Object.keys(data).length > 0) {
+                    updatedTreasury = await tx.treasury.update({
+                        where: { id: treasuryId },
+                        data
+                    });
+                    changedFields.push(...Object.keys(data));
+                }
+
+                if (hasOpeningBalance) {
+                    const openingDelta = Number((openingBalance - toNumber(existingTreasury.openingBalance)).toFixed(2));
+                    if (Math.abs(openingDelta) > 0.0001) {
+                        const openingAdjustResult = await createTreasuryEntry(tx, {
+                            treasuryId,
+                            entryType: openingDelta > 0
+                                ? TREASURY_ENTRY_TYPE.OPENING_BALANCE
+                                : TREASURY_ENTRY_TYPE.ADJUSTMENT_OUT,
+                            direction: openingDelta > 0
+                                ? TREASURY_DIRECTION.IN
+                                : TREASURY_DIRECTION.OUT,
+                            amount: Math.abs(openingDelta),
+                            notes: `Opening balance update for treasury #${treasuryId}`,
+                            entryDate: openingDate,
+                            allowNegative: true,
+                            idempotencyKey: generateIdempotencyKey('TREASURY_OPENING_BALANCE_UPDATE', [
+                                treasuryId,
+                                normalizeAmountForKey(openingBalance),
+                                openingDate.toISOString(),
+                            ]),
+                            createdByUserId: updatedByUserId,
+                            meta: {
+                                source: 'updateTreasury',
+                                openingBalanceBefore: toNumber(existingTreasury.openingBalance),
+                                openingBalanceAfter: openingBalance
+                            }
+                        });
+                        throwIfResultError(openingAdjustResult);
+                    }
+                }
+
+                if (hasIsDefault) {
+                    if (requestedDefault) {
+                        const setDefaultResult = await setDefaultTreasuryInternal(tx, treasuryId, {
+                            forceActivate: true
+                        });
+                        if (setDefaultResult?.error) return { error: setDefaultResult.error };
+                        updatedTreasury = setDefaultResult.treasury;
+                        if (!changedFields.includes('isDefault')) changedFields.push('isDefault');
+                    } else if (existingTreasury.isDefault) {
+                        const replacementTreasury = await tx.treasury.findFirst({
+                            where: {
+                                id: { not: treasuryId },
+                                isActive: true,
+                                isDeleted: false
+                            },
+                            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+                            select: { id: true }
+                        });
+                        if (!replacementTreasury?.id) {
+                            return { error: 'Cannot remove default treasury without another active treasury' };
+                        }
+
+                        const replacementSetResult = await setDefaultTreasuryInternal(tx, replacementTreasury.id, {
+                            forceActivate: true
+                        });
+                        if (replacementSetResult?.error) return { error: replacementSetResult.error };
+
+                        updatedTreasury = await tx.treasury.update({
+                            where: { id: treasuryId },
+                            data: { isDefault: false }
+                        });
+                        if (!changedFields.includes('isDefault')) changedFields.push('isDefault');
+                    }
+                }
+
+                if (changedFields.length === 0) {
+                    return { error: 'No fields to update' };
+                }
+
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.TREASURY_UPDATE,
+                    entityType: 'Treasury',
+                    entityId: updatedTreasury.id,
+                    treasuryId: updatedTreasury.id,
+                    performedByUserId: updatedByUserId,
+                    note: `Update treasury ${updatedTreasury.name}`,
+                    meta: {
+                        changedFields
+                    }
+                });
+
+                return updatedTreasury;
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async setDefaultTreasury(id, options = {}) {
+        try {
+            const treasuryId = parsePositiveInt(id ?? options?.treasuryId);
+            if (!treasuryId) {
+                return { error: 'Invalid treasuryId' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                const result = await setDefaultTreasuryInternal(tx, treasuryId, {
+                    forceActivate: true
+                });
+                if (result?.error) return { error: result.error };
+
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.TREASURY_DEFAULT_SET,
+                    entityType: 'Treasury',
+                    entityId: treasuryId,
+                    treasuryId,
+                    performedByUserId: parsePositiveInt(options?.updatedByUserId ?? options?.userId),
+                    note: `Set treasury #${treasuryId} as default`,
+                    meta: {
+                        source: options?.source || 'setDefaultTreasury'
+                    }
+                });
+
+                return result.treasury;
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async deleteTreasury(id, options = {}) {
+        try {
+            const treasuryId = parsePositiveInt(id);
+            if (!treasuryId) {
+                return { error: 'Invalid treasuryId' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                const treasury = await tx.treasury.findUnique({
+                    where: { id: treasuryId },
+                    include: {
+                        _count: {
+                            select: {
+                                entries: true
+                            }
+                        }
+                    }
+                });
+
+                if (!treasury) {
+                    return { error: 'Treasury not found' };
+                }
+                if (treasury.isDeleted) {
+                    return { error: 'Treasury already deleted' };
+                }
+
+                const linkStats = await getTreasuryOperationLinkStats(tx, treasuryId);
+
+                if (treasury.isActive) {
+                    const activeCount = await tx.treasury.count({
+                        where: { isActive: true, isDeleted: false, id: { not: treasuryId } }
+                    });
+                    if (activeCount < 1) {
+                        return { error: 'At least one active treasury is required' };
+                    }
+                }
+
+                if (treasury.isDefault) {
+                    const replacementTreasury = await tx.treasury.findFirst({
+                        where: {
+                            id: { not: treasuryId },
+                            isActive: true,
+                            isDeleted: false
+                        },
+                        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+                        select: { id: true }
+                    });
+                    if (!replacementTreasury?.id) {
+                        return { error: 'Cannot delete default treasury without another active treasury' };
+                    }
+
+                    const replacementSetResult = await setDefaultTreasuryInternal(tx, replacementTreasury.id, {
+                        forceActivate: true
+                    });
+                    if (replacementSetResult?.error) {
+                        return { error: replacementSetResult.error };
+                    }
+                }
+
+                const deletedByUserId = parsePositiveInt(options?.deletedByUserId ?? options?.userId);
+
+                if (linkStats.hasLinkedOperations) {
+                    const archiveCode = normalizeTreasuryCode(
+                        `DEL_${treasury.code}_${treasuryId}_${Date.now().toString(36)}`
+                    ) || `DEL_${treasuryId}_${Date.now().toString(36).toUpperCase()}`;
+                    const archiveName = `${treasury.name} [محذوف]`;
+
+                    const archivedTreasury = await tx.treasury.update({
+                        where: { id: treasuryId },
+                        data: {
+                            isDeleted: true,
+                            isActive: false,
+                            isDefault: false,
+                            code: archiveCode,
+                            name: archiveName
+                        }
+                    });
+
+                    await writeAuditLog(tx, {
+                        action: AUDIT_ACTION.TREASURY_DELETE,
+                        entityType: 'Treasury',
+                        entityId: archivedTreasury.id,
+                        treasuryId: archivedTreasury.id,
+                        performedByUserId: deletedByUserId,
+                        note: `Archive treasury ${treasury.name}`,
+                        meta: {
+                            mode: 'SOFT_DELETE',
+                            deletedTreasuryId: archivedTreasury.id,
+                            previousCode: treasury.code,
+                            previousName: treasury.name,
+                            linkedOperations: linkStats
+                        }
+                    });
+
+                    return {
+                        success: true,
+                        data: archivedTreasury,
+                        softDeleted: true
+                    };
+                }
+
+                if (treasury._count.entries > 0) {
+                    await tx.treasuryEntry.deleteMany({
+                        where: { treasuryId }
+                    });
+                }
+
+                const deletedTreasury = await tx.treasury.delete({
+                    where: { id: treasuryId }
+                });
+
+                await writeAuditLog(tx, {
+                    action: AUDIT_ACTION.TREASURY_DELETE,
+                    entityType: 'Treasury',
+                    entityId: deletedTreasury.id,
+                    treasuryId: null,
+                    performedByUserId: deletedByUserId,
+                    note: `Delete treasury ${deletedTreasury.name}`,
+                    meta: {
+                        mode: 'HARD_DELETE',
+                        deletedTreasuryId: deletedTreasury.id,
+                        code: deletedTreasury.code,
+                        isDefault: Boolean(deletedTreasury?.isDefault)
+                    }
+                });
+
+                return deletedTreasury;
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async createTreasuryTransaction(transactionData = {}) {
+        try {
+            const transactionTypeRaw = String(
+                transactionData?.transactionType || transactionData?.type || 'IN'
+            ).trim().toUpperCase();
+            const transactionType = ['IN', 'OUT', 'TRANSFER'].includes(transactionTypeRaw)
+                ? transactionTypeRaw
+                : 'IN';
+
+            const amount = Math.max(0, toNumber(transactionData?.amount));
+            if (amount <= 0) {
+                return { error: 'Invalid transaction amount' };
+            }
+
+            const entryDate = parseDateOrDefault(transactionData?.entryDate, new Date());
+            const notes = String(transactionData?.notes || '').trim();
+            const createdByUserId = parsePositiveInt(
+                transactionData?.createdByUserId ?? transactionData?.userId
+            );
+
+            return await prisma.$transaction(async (tx) => {
+                if (transactionType === 'TRANSFER') {
+                    const sourceTreasuryId = parsePositiveInt(
+                        transactionData?.sourceTreasuryId ?? transactionData?.fromTreasuryId
+                    );
+                    const targetTreasuryId = parsePositiveInt(
+                        transactionData?.targetTreasuryId ?? transactionData?.toTreasuryId
+                    );
+
+                    if (!sourceTreasuryId || !targetTreasuryId) {
+                        return { error: 'Transfer requires source and target treasuries' };
+                    }
+                    if (sourceTreasuryId === targetTreasuryId) {
+                        return { error: 'Source and target treasuries must be different' };
+                    }
+
+                    const [sourceTreasury, targetTreasury] = await Promise.all([
+                        tx.treasury.findFirst({
+                            where: { id: sourceTreasuryId, isActive: true },
+                            select: { id: true }
+                        }),
+                        tx.treasury.findFirst({
+                            where: { id: targetTreasuryId, isActive: true },
+                            select: { id: true }
+                        })
+                    ]);
+
+                    if (!sourceTreasury || !targetTreasury) {
+                        return { error: 'Source or target treasury is invalid/inactive' };
+                    }
+
+                    const outEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: sourceTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.TRANSFER_OUT,
+                        direction: TREASURY_DIRECTION.OUT,
+                        amount,
+                        notes: notes || `Transfer to treasury #${targetTreasuryId}`,
+                        sourceTreasuryId,
+                        targetTreasuryId,
+                        entryDate,
+                        idempotencyKey: generateIdempotencyKey('TREASURY_TRANSFER', [
+                            sourceTreasuryId,
+                            targetTreasuryId,
+                            normalizeAmountForKey(amount),
+                            toDayLockDate(entryDate).toISOString(),
+                            'OUT'
+                        ]),
+                        createdByUserId
+                    });
+                    throwIfResultError(outEntryResult);
+
+                    const inEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: targetTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.TRANSFER_IN,
+                        direction: TREASURY_DIRECTION.IN,
+                        amount,
+                        notes: notes || `Transfer from treasury #${sourceTreasuryId}`,
+                        sourceTreasuryId,
+                        targetTreasuryId,
+                        entryDate,
+                        allowNegative: true,
+                        idempotencyKey: generateIdempotencyKey('TREASURY_TRANSFER', [
+                            sourceTreasuryId,
+                            targetTreasuryId,
+                            normalizeAmountForKey(amount),
+                            toDayLockDate(entryDate).toISOString(),
+                            'IN'
+                        ]),
+                        createdByUserId
+                    });
+                    throwIfResultError(inEntryResult);
+
+                    return {
+                        success: true,
+                        data: {
+                            sourceEntry: outEntryResult.entry,
+                            targetEntry: inEntryResult.entry
+                        }
+                    };
+                }
+
+                const treasuryId = await resolveTreasuryId(tx, transactionData?.treasuryId);
+                const paymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    transactionData?.paymentMethodId ?? transactionData?.paymentMethod,
+                    1
+                );
+                const direction = transactionType === 'OUT'
+                    ? TREASURY_DIRECTION.OUT
+                    : TREASURY_DIRECTION.IN;
+
+                const providedEntryType = String(transactionData?.entryType || '').trim().toUpperCase();
+                const entryType = TREASURY_ENTRY_TYPE_SET.has(providedEntryType)
+                    ? providedEntryType
+                    : (direction === TREASURY_DIRECTION.OUT
+                        ? TREASURY_ENTRY_TYPE.MANUAL_OUT
+                        : TREASURY_ENTRY_TYPE.MANUAL_IN);
+
+                const entryResult = await createTreasuryEntry(tx, {
+                    treasuryId,
+                    entryType,
+                    direction,
+                    amount,
+                    notes: notes || null,
+                    referenceType: transactionData?.referenceType || null,
+                    referenceId: transactionData?.referenceId || null,
+                    paymentMethodId,
+                    entryDate,
+                    idempotencyKey: normalizeIdempotencyKey(transactionData?.idempotencyKey),
+                    createdByUserId,
+                    meta: transactionData?.meta ?? null
+                });
+
+                throwIfResultError(entryResult);
+
+                return { success: true, data: entryResult.entry };
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getTreasuryEntries(params = {}) {
+        try {
+            const page = Math.max(1, parseInt(params?.page, 10) || 1);
+            const pageSize = Math.min(500, Math.max(1, parseInt(params?.pageSize, 10) || 100));
+            const skip = (page - 1) * pageSize;
+
+            const where = {};
+            const treasuryId = parsePositiveInt(params?.treasuryId);
+            const direction = String(params?.direction || '').trim().toUpperCase();
+            const entryType = String(params?.entryType || '').trim().toUpperCase();
+            const referenceType = String(params?.referenceType || '').trim();
+            const search = String(params?.search || '').trim();
+
+            if (treasuryId) where.treasuryId = treasuryId;
+            if (direction && direction !== 'ALL' && Object.values(TREASURY_DIRECTION).includes(direction)) {
+                where.direction = direction;
+            }
+            if (entryType && entryType !== 'ALL' && TREASURY_ENTRY_TYPE_SET.has(entryType)) {
+                where.entryType = entryType;
+            }
+            if (referenceType) {
+                where.referenceType = referenceType;
+            }
+            if (params?.fromDate || params?.toDate) {
+                where.entryDate = {};
+                if (params?.fromDate) where.entryDate.gte = startOfDay(params.fromDate);
+                if (params?.toDate) where.entryDate.lte = endOfDay(params.toDate);
+            }
+            if (search) {
+                where.OR = [
+                    { notes: { contains: search, mode: 'insensitive' } },
+                    { referenceType: { contains: search, mode: 'insensitive' } }
+                ];
+            }
+
+            const [entries, total, totalsByDirection] = await Promise.all([
+                prisma.treasuryEntry.findMany({
+                    where,
+                    skip,
+                    take: pageSize,
+                    include: {
+                        treasury: true,
+                        paymentMethod: true,
+                        sourceTreasury: true,
+                        targetTreasury: true
+                    },
+                    orderBy: [
+                        { entryDate: 'desc' },
+                        { id: 'desc' }
+                    ]
+                }),
+                prisma.treasuryEntry.count({ where }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['direction'],
+                    where,
+                    _sum: { amount: true }
+                })
+            ]);
+
+            let totalIn = 0;
+            let totalOut = 0;
+            totalsByDirection.forEach((row) => {
+                const amountByDirection = row?._sum?.amount || 0;
+                if (row.direction === TREASURY_DIRECTION.IN) totalIn += amountByDirection;
+                else totalOut += amountByDirection;
+            });
+
+            return {
+                data: entries,
+                total,
+                page,
+                totalPages: Math.max(1, Math.ceil(total / pageSize)),
+                summary: {
+                    totalIn,
+                    totalOut,
+                    net: totalIn - totalOut
+                }
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getDailyRevenueReportLegacy(params = {}) {
+        try {
+            const reportDate = params?.date || new Date();
+            const from = startOfDay(reportDate);
+            const to = endOfDay(reportDate);
+            const previousFrom = new Date(from);
+            previousFrom.setDate(previousFrom.getDate() - 1);
+            const previousTo = new Date(to);
+            previousTo.setDate(previousTo.getDate() - 1);
+            const treasuryId = parsePositiveInt(params?.treasuryId);
+
+            const where = {
+                entryDate: {
+                    gte: from,
+                    lte: to
+                },
+                ...(treasuryId ? { treasuryId } : {})
+            };
+
+            const previousWhere = {
+                entryDate: {
+                    gte: previousFrom,
+                    lte: previousTo
+                },
+                ...(treasuryId ? { treasuryId } : {})
+            };
+
+            const [entries, totalsByDirection, previousTotalsByDirection] = await Promise.all([
+                prisma.treasuryEntry.findMany({
+                    where,
+                    include: {
+                        treasury: true,
+                        paymentMethod: true,
+                        sourceTreasury: true,
+                        targetTreasury: true
+                    },
+                    orderBy: [
+                        { entryDate: 'desc' },
+                        { id: 'desc' }
+                    ]
+                }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['direction'],
+                    where,
+                    _sum: { amount: true }
+                }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['direction'],
+                    where: previousWhere,
+                    _sum: { amount: true }
+                })
+            ]);
+
+            let totalIn = 0;
+            let totalOut = 0;
+            totalsByDirection.forEach((row) => {
+                const amountByDirection = row?._sum?.amount || 0;
+                if (row.direction === TREASURY_DIRECTION.IN) totalIn += amountByDirection;
+                else totalOut += amountByDirection;
+            });
+
+            let previousIn = 0;
+            let previousOut = 0;
+            previousTotalsByDirection.forEach((row) => {
+                const amountByDirection = row?._sum?.amount || 0;
+                if (row.direction === TREASURY_DIRECTION.IN) previousIn += amountByDirection;
+                else previousOut += amountByDirection;
+            });
+
+            const byPaymentMethodMap = new Map();
+            const byEntryTypeMap = new Map();
+
+            entries.forEach((entry) => {
+                const paymentMethodId = entry?.paymentMethod?.id || 0;
+                const paymentMethodCode = entry?.paymentMethod?.code || 'UNSPECIFIED';
+                const paymentMethodName = entry?.paymentMethod?.name || 'غير محدد';
+                const paymentMethodKey = `${paymentMethodId}:${paymentMethodCode}`;
+                const signedAmount = entry.direction === TREASURY_DIRECTION.IN
+                    ? toNumber(entry.amount)
+                    : -toNumber(entry.amount);
+
+                if (!byPaymentMethodMap.has(paymentMethodKey)) {
+                    byPaymentMethodMap.set(paymentMethodKey, {
+                        paymentMethodId: paymentMethodId || null,
+                        code: paymentMethodCode,
+                        name: paymentMethodName,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const methodRow = byPaymentMethodMap.get(paymentMethodKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) methodRow.totalIn += toNumber(entry.amount);
+                else methodRow.totalOut += toNumber(entry.amount);
+                methodRow.net += signedAmount;
+                methodRow.count += 1;
+
+                const typeKey = entry.entryType;
+                if (!byEntryTypeMap.has(typeKey)) {
+                    byEntryTypeMap.set(typeKey, {
+                        entryType: typeKey,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const typeRow = byEntryTypeMap.get(typeKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) typeRow.totalIn += toNumber(entry.amount);
+                else typeRow.totalOut += toNumber(entry.amount);
+                typeRow.net += signedAmount;
+                typeRow.count += 1;
+            });
+
+            const net = totalIn - totalOut;
+            const previousNet = previousIn - previousOut;
+
+            return {
+                date: from.toISOString().split('T')[0],
+                summary: {
+                    totalIn,
+                    totalOut,
+                    net,
+                    previousDayNet: previousNet,
+                    changeFromPreviousDay: net - previousNet
+                },
+                byPaymentMethod: [...byPaymentMethodMap.values()].sort((a, b) => b.net - a.net),
+                byEntryType: [...byEntryTypeMap.values()].sort((a, b) => b.net - a.net),
+                entries
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getDailyRevenueReport(params = {}) {
+        try {
+            const { from, to, isSingleDay } = resolveReportRange(params);
+            const treasuryId = parsePositiveInt(params?.treasuryId);
+            const includeDepositsInRevenue = Boolean(params?.includeDepositsInRevenue);
+            const rangeMs = endOfDay(to).getTime() - startOfDay(from).getTime();
+            const rangeDays = Math.max(1, Math.ceil((rangeMs + 1) / (24 * 60 * 60 * 1000)));
+            const previousRange = shiftDateRange({ from, to }, rangeDays);
+
+            const where = {
+                entryDate: {
+                    gte: from,
+                    lte: to
+                },
+                ...(treasuryId ? { treasuryId } : {})
+            };
+            const previousWhere = {
+                entryDate: {
+                    gte: previousRange.from,
+                    lte: previousRange.to
+                },
+                ...(treasuryId ? { treasuryId } : {})
+            };
+
+            const revenueEntryTypes = [
+                TREASURY_ENTRY_TYPE.SALE_INCOME,
+                TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT,
+                TREASURY_ENTRY_TYPE.DEPOSIT_IN,
+                TREASURY_ENTRY_TYPE.DEPOSIT_REFUND
+            ];
+
+            const [
+                entries,
+                totalsByDirection,
+                previousTotalsByDirection,
+                previousRevenueByType,
+                salesAgg,
+                previousSalesAgg,
+                returnsAgg,
+                previousReturnsAgg
+            ] = await Promise.all([
+                prisma.treasuryEntry.findMany({
+                    where,
+                    include: {
+                        treasury: true,
+                        paymentMethod: true,
+                        sourceTreasury: true,
+                        targetTreasury: true
+                    },
+                    orderBy: [
+                        { entryDate: 'desc' },
+                        { id: 'desc' }
+                    ]
+                }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['direction'],
+                    where,
+                    _sum: { amount: true }
+                }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['direction'],
+                    where: previousWhere,
+                    _sum: { amount: true }
+                }),
+                prisma.treasuryEntry.groupBy({
+                    by: ['entryType', 'direction'],
+                    where: {
+                        ...previousWhere,
+                        entryType: { in: revenueEntryTypes }
+                    },
+                    _sum: { amount: true }
+                }),
+                prisma.sale.aggregate({
+                    where: {
+                        invoiceDate: {
+                            gte: from,
+                            lte: to
+                        }
+                    },
+                    _sum: { total: true },
+                    _count: { id: true }
+                }),
+                prisma.sale.aggregate({
+                    where: {
+                        invoiceDate: {
+                            gte: previousRange.from,
+                            lte: previousRange.to
+                        }
+                    },
+                    _sum: { total: true },
+                    _count: { id: true }
+                }),
+                prisma.return.aggregate({
+                    where: {
+                        createdAt: {
+                            gte: from,
+                            lte: to
+                        }
+                    },
+                    _sum: { total: true },
+                    _count: { id: true }
+                }),
+                prisma.return.aggregate({
+                    where: {
+                        createdAt: {
+                            gte: previousRange.from,
+                            lte: previousRange.to
+                        }
+                    },
+                    _sum: { total: true },
+                    _count: { id: true }
+                })
+            ]);
+
+            let totalIn = 0;
+            let totalOut = 0;
+            totalsByDirection.forEach((row) => {
+                const amountByDirection = toNumber(row?._sum?.amount);
+                if (row.direction === TREASURY_DIRECTION.IN) totalIn += amountByDirection;
+                else totalOut += amountByDirection;
+            });
+
+            let previousIn = 0;
+            let previousOut = 0;
+            previousTotalsByDirection.forEach((row) => {
+                const amountByDirection = toNumber(row?._sum?.amount);
+                if (row.direction === TREASURY_DIRECTION.IN) previousIn += amountByDirection;
+                else previousOut += amountByDirection;
+            });
+
+            let previousSaleIncome = 0;
+            let previousCustomerPayments = 0;
+            let previousDepositsIn = 0;
+            let previousDepositsRefund = 0;
+            previousRevenueByType.forEach((row) => {
+                const amount = toNumber(row?._sum?.amount);
+                const signedAmount = row.direction === TREASURY_DIRECTION.IN ? amount : -amount;
+
+                if (row.entryType === TREASURY_ENTRY_TYPE.SALE_INCOME) {
+                    previousSaleIncome += signedAmount;
+                } else if (row.entryType === TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT) {
+                    previousCustomerPayments += signedAmount;
+                } else if (row.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN) {
+                    previousDepositsIn += signedAmount;
+                } else if (row.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_REFUND) {
+                    previousDepositsRefund += Math.abs(signedAmount);
+                }
+            });
+
+            const byPaymentMethodMap = new Map();
+            const byEntryTypeMap = new Map();
+            const byTreasuryMap = new Map();
+            const revenueByPaymentMethodMap = new Map();
+            const revenueByTreasuryMap = new Map();
+            const revenueEntries = [];
+
+            const saleReferences = new Set();
+            const customerPaymentReferences = new Set();
+            const depositInReferences = new Set();
+            const depositRefundReferences = new Set();
+            const sourceCountByType = new Map();
+
+            const revenueChannelTotals = {
+                cash: 0,
+                vodafoneCash: 0,
+                instaPay: 0,
+                other: 0
+            };
+
+            let totalSaleIncome = 0;
+            let totalCustomerPayments = 0;
+            let totalDepositsIn = 0;
+            let totalDepositsRefund = 0;
+            let cashIn = 0;
+            let cashOut = 0;
+
+            entries.forEach((entry) => {
+                const amount = Math.max(0, toNumber(entry.amount));
+                const signedAmount = entry.direction === TREASURY_DIRECTION.IN ? amount : -amount;
+                const paymentMethodId = entry?.paymentMethod?.id || 0;
+                const paymentMethodCode = resolveReportPaymentMethodCode(entry?.paymentMethod);
+                const paymentMethodName = entry?.paymentMethod?.name || 'غير محدد';
+                const paymentMethodKey = `${paymentMethodId}:${paymentMethodCode}`;
+                const treasuryKey = entry?.treasury?.id || entry?.treasuryId || 0;
+                const treasuryName = entry?.treasury?.name || `Treasury #${treasuryKey}`;
+
+                if (!byPaymentMethodMap.has(paymentMethodKey)) {
+                    byPaymentMethodMap.set(paymentMethodKey, {
+                        paymentMethodId: paymentMethodId || null,
+                        code: paymentMethodCode,
+                        name: paymentMethodName,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const methodRow = byPaymentMethodMap.get(paymentMethodKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) methodRow.totalIn += amount;
+                else methodRow.totalOut += amount;
+                methodRow.net += signedAmount;
+                methodRow.count += 1;
+
+                if (!byEntryTypeMap.has(entry.entryType)) {
+                    byEntryTypeMap.set(entry.entryType, {
+                        entryType: entry.entryType,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const typeRow = byEntryTypeMap.get(entry.entryType);
+                if (entry.direction === TREASURY_DIRECTION.IN) typeRow.totalIn += amount;
+                else typeRow.totalOut += amount;
+                typeRow.net += signedAmount;
+                typeRow.count += 1;
+
+                if (!byTreasuryMap.has(treasuryKey)) {
+                    byTreasuryMap.set(treasuryKey, {
+                        treasuryId: treasuryKey || null,
+                        treasuryName,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const treasurySummaryRow = byTreasuryMap.get(treasuryKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) treasurySummaryRow.totalIn += amount;
+                else treasurySummaryRow.totalOut += amount;
+                treasurySummaryRow.net += signedAmount;
+                treasurySummaryRow.count += 1;
+
+                if (paymentMethodCode === 'CASH') {
+                    if (entry.direction === TREASURY_DIRECTION.IN) cashIn += amount;
+                    else cashOut += amount;
+                }
+
+                if (!TREASURY_REVENUE_ENTRY_TYPES.has(entry.entryType)) {
+                    return;
+                }
+
+                revenueEntries.push(entry);
+
+                const sourceCountKey = `${entry.entryType}:${entry.direction}`;
+                sourceCountByType.set(sourceCountKey, (sourceCountByType.get(sourceCountKey) || 0) + 1);
+
+                if (entry.entryType === TREASURY_ENTRY_TYPE.SALE_INCOME) {
+                    totalSaleIncome += signedAmount;
+                    if (entry.referenceId) saleReferences.add(entry.referenceId);
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT) {
+                    totalCustomerPayments += signedAmount;
+                    if (entry.referenceId) customerPaymentReferences.add(entry.referenceId);
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN) {
+                    totalDepositsIn += signedAmount;
+                    if (entry.referenceId) depositInReferences.add(entry.referenceId);
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_REFUND) {
+                    totalDepositsRefund += Math.abs(signedAmount);
+                    if (entry.referenceId) depositRefundReferences.add(entry.referenceId);
+                }
+
+                if (!revenueByPaymentMethodMap.has(paymentMethodKey)) {
+                    revenueByPaymentMethodMap.set(paymentMethodKey, {
+                        paymentMethodId: paymentMethodId || null,
+                        code: paymentMethodCode,
+                        name: paymentMethodName,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0,
+                        saleIncomeAmount: 0,
+                        customerPaymentAmount: 0,
+                        depositsInAmount: 0,
+                        depositsRefundAmount: 0,
+                        revenueAmount: 0
+                    });
+                }
+                const revenueMethodRow = revenueByPaymentMethodMap.get(paymentMethodKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) revenueMethodRow.totalIn += amount;
+                else revenueMethodRow.totalOut += amount;
+                revenueMethodRow.net += signedAmount;
+                revenueMethodRow.count += 1;
+
+                if (entry.entryType === TREASURY_ENTRY_TYPE.SALE_INCOME) {
+                    revenueMethodRow.saleIncomeAmount += signedAmount;
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT) {
+                    revenueMethodRow.customerPaymentAmount += signedAmount;
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_IN) {
+                    revenueMethodRow.depositsInAmount += signedAmount;
+                } else if (entry.entryType === TREASURY_ENTRY_TYPE.DEPOSIT_REFUND) {
+                    revenueMethodRow.depositsRefundAmount += Math.abs(signedAmount);
+                }
+
+                const channelKey = resolveRevenueChannelFromCode(paymentMethodCode);
+                revenueChannelTotals[channelKey] += signedAmount;
+
+                if (!revenueByTreasuryMap.has(treasuryKey)) {
+                    revenueByTreasuryMap.set(treasuryKey, {
+                        treasuryId: treasuryKey || null,
+                        treasuryName,
+                        totalIn: 0,
+                        totalOut: 0,
+                        net: 0,
+                        count: 0
+                    });
+                }
+                const revenueTreasuryRow = revenueByTreasuryMap.get(treasuryKey);
+                if (entry.direction === TREASURY_DIRECTION.IN) revenueTreasuryRow.totalIn += amount;
+                else revenueTreasuryRow.totalOut += amount;
+                revenueTreasuryRow.net += signedAmount;
+                revenueTreasuryRow.count += 1;
+            });
+
+            const totalSales = Math.max(0, toNumber(salesAgg?._sum?.total));
+            const totalReturns = Math.max(0, toNumber(returnsAgg?._sum?.total));
+            const netSales = totalSales - totalReturns;
+            const saleCount = parseInt(salesAgg?._count?.id, 10) || 0;
+            const returnCount = parseInt(returnsAgg?._count?.id, 10) || 0;
+
+            const previousTotalSales = Math.max(0, toNumber(previousSalesAgg?._sum?.total));
+            const previousTotalReturns = Math.max(0, toNumber(previousReturnsAgg?._sum?.total));
+            const previousNetSales = previousTotalSales - previousTotalReturns;
+
+            const depositsNet = totalDepositsIn - totalDepositsRefund;
+            const previousDepositsNet = previousDepositsIn - previousDepositsRefund;
+            const totalRevenue = totalSaleIncome
+                + totalCustomerPayments
+                + (includeDepositsInRevenue ? totalDepositsIn : 0);
+            const previousPeriodRevenue = previousSaleIncome
+                + previousCustomerPayments
+                + (includeDepositsInRevenue ? previousDepositsIn : 0);
+
+            const net = totalIn - totalOut;
+            const previousNet = previousIn - previousOut;
+            const cashNet = cashIn - cashOut;
+
+            const revenueByPaymentMethod = [...revenueByPaymentMethodMap.values()]
+                .map((row) => {
+                    const rowRevenueAmount = row.saleIncomeAmount
+                        + row.customerPaymentAmount
+                        + (includeDepositsInRevenue ? row.depositsInAmount : 0);
+
+                    return {
+                        ...row,
+                        amount: row.net,
+                        revenueAmount: rowRevenueAmount,
+                        percentOfRevenue: totalRevenue > 0
+                            ? Number(((rowRevenueAmount / totalRevenue) * 100).toFixed(2))
+                            : 0
+                    };
+                })
+                .sort((a, b) => b.revenueAmount - a.revenueAmount);
+
+            const revenueByTreasury = [...revenueByTreasuryMap.values()]
+                .map((row) => ({
+                    ...row,
+                    amount: row.net
+                }))
+                .sort((a, b) => b.net - a.net);
+
+            const byPaymentMethod = [...byPaymentMethodMap.values()]
+                .sort((a, b) => b.net - a.net);
+
+            const byEntryType = [...byEntryTypeMap.values()]
+                .sort((a, b) => b.net - a.net);
+
+            const byTreasury = [...byTreasuryMap.values()]
+                .sort((a, b) => b.net - a.net);
+
+            return {
+                date: from.toISOString().split('T')[0],
+                fromDate: from.toISOString().split('T')[0],
+                toDate: to.toISOString().split('T')[0],
+                period: {
+                    from: from.toISOString(),
+                    to: to.toISOString(),
+                    previousFrom: previousRange.from.toISOString(),
+                    previousTo: previousRange.to.toISOString(),
+                    days: rangeDays,
+                    isSingleDay
+                },
+                summary: {
+                    totalIn,
+                    totalOut,
+                    net,
+                    cashIn,
+                    cashOut,
+                    cashNet,
+                    netCashIn: cashNet,
+                    previousDayNet: previousNet,
+                    previousPeriodNet: previousNet,
+                    changeFromPreviousDay: net - previousNet,
+                    changeFromPreviousPeriod: net - previousNet
+                },
+                sales: {
+                    totalSales,
+                    totalReturns,
+                    netSales,
+                    saleCount,
+                    returnCount,
+                    previousPeriodNetSales: previousNetSales,
+                    changeFromPreviousPeriodNetSales: netSales - previousNetSales
+                },
+                byPaymentMethod,
+                byEntryType,
+                byTreasury,
+                revenue: {
+                    config: {
+                        includeDepositsInRevenue
+                    },
+                    summary: {
+                        totalRevenue,
+                        saleIncome: totalSaleIncome,
+                        customerPayments: totalCustomerPayments,
+                        depositsIn: totalDepositsIn,
+                        depositsRefund: totalDepositsRefund,
+                        depositsNet,
+                        invoiceCount: saleReferences.size,
+                        customerPaymentCount: customerPaymentReferences.size,
+                        depositReceiptCount: depositInReferences.size,
+                        depositRefundCount: depositRefundReferences.size,
+                        previousDayRevenue: previousPeriodRevenue,
+                        previousPeriodRevenue,
+                        changeFromPreviousDayRevenue: totalRevenue - previousPeriodRevenue,
+                        changeFromPreviousPeriodRevenue: totalRevenue - previousPeriodRevenue,
+                        previousPeriodDepositsNet: previousDepositsNet,
+                        channelTotals: {
+                            cash: Number(revenueChannelTotals.cash.toFixed(2)),
+                            vodafoneCash: Number(revenueChannelTotals.vodafoneCash.toFixed(2)),
+                            instaPay: Number(revenueChannelTotals.instaPay.toFixed(2)),
+                            other: Number(revenueChannelTotals.other.toFixed(2))
+                        }
+                    },
+                    bySource: [
+                        {
+                            entryType: TREASURY_ENTRY_TYPE.SALE_INCOME,
+                            direction: TREASURY_DIRECTION.IN,
+                            amount: totalSaleIncome,
+                            totalIn: totalSaleIncome,
+                            totalOut: 0,
+                            net: totalSaleIncome,
+                            count: sourceCountByType.get(`${TREASURY_ENTRY_TYPE.SALE_INCOME}:${TREASURY_DIRECTION.IN}`) || 0,
+                            referenceCount: saleReferences.size
+                        },
+                        {
+                            entryType: TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT,
+                            direction: TREASURY_DIRECTION.IN,
+                            amount: totalCustomerPayments,
+                            totalIn: totalCustomerPayments,
+                            totalOut: 0,
+                            net: totalCustomerPayments,
+                            count: sourceCountByType.get(`${TREASURY_ENTRY_TYPE.CUSTOMER_PAYMENT}:${TREASURY_DIRECTION.IN}`) || 0,
+                            referenceCount: customerPaymentReferences.size
+                        },
+                        {
+                            entryType: TREASURY_ENTRY_TYPE.DEPOSIT_IN,
+                            direction: TREASURY_DIRECTION.IN,
+                            amount: totalDepositsIn,
+                            totalIn: totalDepositsIn,
+                            totalOut: 0,
+                            net: totalDepositsIn,
+                            count: sourceCountByType.get(`${TREASURY_ENTRY_TYPE.DEPOSIT_IN}:${TREASURY_DIRECTION.IN}`) || 0,
+                            referenceCount: depositInReferences.size
+                        },
+                        {
+                            entryType: TREASURY_ENTRY_TYPE.DEPOSIT_REFUND,
+                            direction: TREASURY_DIRECTION.OUT,
+                            amount: totalDepositsRefund,
+                            totalIn: 0,
+                            totalOut: totalDepositsRefund,
+                            net: -totalDepositsRefund,
+                            count: sourceCountByType.get(`${TREASURY_ENTRY_TYPE.DEPOSIT_REFUND}:${TREASURY_DIRECTION.OUT}`) || 0,
+                            referenceCount: depositRefundReferences.size
+                        }
+                    ],
+                    byPaymentMethod: revenueByPaymentMethod,
+                    byTreasury: revenueByTreasury,
+                    entries: revenueEntries
+                },
+                entries
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
     // ==================== SUPPLIERS ====================
     async getSuppliers() {
         try {
@@ -2211,19 +5179,44 @@ const dbService = {
 
     async addSupplierPayment(paymentData) {
         try {
+            const supplierId = parsePositiveInt(paymentData?.supplierId);
+            const amount = Math.max(0, toNumber(paymentData?.amount));
+            const paymentDate = parseDateOrDefault(paymentData?.paymentDate, new Date());
+
+            if (!supplierId) {
+                return { error: 'Invalid supplierId' };
+            }
+            if (amount <= 0) {
+                return { error: 'Invalid payment amount' };
+            }
+
             return await prisma.$transaction(async (tx) => {
                 const payment = await tx.supplierPayment.create({
                     data: {
-                        supplierId: parseInt(paymentData.supplierId),
-                        amount: parseFloat(paymentData.amount),
-                        notes: paymentData.notes || null
+                        supplierId,
+                        amount,
+                        notes: paymentData?.notes || null,
+                        createdAt: paymentDate
                     }
                 });
 
                 await tx.supplier.update({
-                    where: { id: parseInt(paymentData.supplierId) },
-                    data: { balance: { increment: parseFloat(paymentData.amount) } }
+                    where: { id: supplierId },
+                    data: { balance: { increment: amount } }
                 });
+
+                const supplierPaymentTreasuryId = await resolveTreasuryId(tx, paymentData?.treasuryId);
+                const treasuryEntryResult = await createTreasuryEntry(tx, {
+                    treasuryId: supplierPaymentTreasuryId,
+                    entryType: TREASURY_ENTRY_TYPE.SUPPLIER_PAYMENT,
+                    direction: TREASURY_DIRECTION.OUT,
+                    amount,
+                    notes: `Supplier payment #${payment.id}${paymentData?.notes ? ` - ${paymentData.notes}` : ''}`,
+                    referenceType: 'SUPPLIER_PAYMENT',
+                    referenceId: payment.id,
+                    entryDate: paymentDate
+                });
+                throwIfResultError(treasuryEntryResult);
 
                 return payment;
             });
@@ -2256,11 +5249,47 @@ const dbService = {
 
     async addExpense(expenseData) {
         try {
-            return await prisma.expense.create({
-                data: {
-                    title: expenseData.title,
-                    amount: parseFloat(expenseData.amount)
-                }
+            const title = String(expenseData?.title || '').trim();
+            const amount = Math.max(0, toNumber(expenseData?.amount));
+            const expenseDate = parseDateOrDefault(expenseData?.expenseDate, new Date());
+
+            if (!title) {
+                return { error: 'Expense title is required' };
+            }
+            if (amount <= 0) {
+                return { error: 'Invalid expense amount' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                const expense = await tx.expense.create({
+                    data: {
+                        title,
+                        amount,
+                        createdAt: expenseDate
+                    }
+                });
+
+                const expenseTreasuryId = await resolveTreasuryId(tx, expenseData?.treasuryId);
+                const paymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    expenseData?.paymentMethodId ?? expenseData?.paymentMethod,
+                    1
+                );
+
+                const treasuryEntryResult = await createTreasuryEntry(tx, {
+                    treasuryId: expenseTreasuryId,
+                    entryType: TREASURY_ENTRY_TYPE.EXPENSE_PAYMENT,
+                    direction: TREASURY_DIRECTION.OUT,
+                    amount,
+                    notes: `Expense #${expense.id}${expenseData?.title ? ` - ${expenseData.title}` : ''}`,
+                    referenceType: 'EXPENSE',
+                    referenceId: expense.id,
+                    paymentMethodId,
+                    entryDate: expenseDate
+                });
+                throwIfResultError(treasuryEntryResult);
+
+                return expense;
             });
         } catch (error) {
             return { error: error.message };
@@ -2269,8 +5298,27 @@ const dbService = {
 
     async deleteExpense(id) {
         try {
-            return await prisma.expense.delete({
-                where: { id: parseInt(id) }
+            const parsedExpenseId = parsePositiveInt(id);
+            if (!parsedExpenseId) {
+                return { error: 'Invalid expenseId' };
+            }
+
+            return await prisma.$transaction(async (tx) => {
+                const expense = await tx.expense.findUnique({
+                    where: { id: parsedExpenseId },
+                    select: { id: true }
+                });
+
+                if (!expense) {
+                    return { error: 'Expense not found' };
+                }
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'EXPENSE', parsedExpenseId);
+                throwIfResultError(rollbackResult, 'Failed to rollback expense treasury entries');
+
+                return tx.expense.delete({
+                    where: { id: parsedExpenseId }
+                });
             });
         } catch (error) {
             return { error: error.message };

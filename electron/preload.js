@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('api', {
     getCustomerSales: (customerId) => ipcRenderer.invoke('db:getCustomerSales', customerId),
     getCustomerReturns: (customerId) => ipcRenderer.invoke('db:getCustomerReturns', customerId),
     addCustomerPayment: (paymentData) => ipcRenderer.invoke('db:addCustomerPayment', paymentData),
+    createCustomerPayment: (paymentData) => ipcRenderer.invoke('db:createCustomerPayment', paymentData),
+    previewCustomerPaymentAllocation: (params) => ipcRenderer.invoke('db:previewCustomerPaymentAllocation', params),
     getCustomerPayments: (customerId) => ipcRenderer.invoke('db:getCustomerPayments', customerId),
     updateCustomerPayment: (paymentId, paymentData) => ipcRenderer.invoke('db:updateCustomerPayment', paymentId, paymentData),
     deleteCustomerPayment: (paymentId) => ipcRenderer.invoke('db:deleteCustomerPayment', paymentId),
@@ -62,6 +64,19 @@ contextBridge.exposeInMainWorld('api', {
     checkCustomerFinancialsHealth: () => ipcRenderer.invoke('db:checkCustomerFinancialsHealth'),
     getPaymentMethods: () => ipcRenderer.invoke('db:getPaymentMethods'),
     getPaymentMethodStats: () => ipcRenderer.invoke('db:getPaymentMethodStats'),
+
+    // Treasury
+    getTreasuries: () => ipcRenderer.invoke('db:getTreasuries'),
+    createTreasury: (treasuryData) => ipcRenderer.invoke('db:createTreasury', treasuryData),
+    updateTreasury: (id, treasuryData) => ipcRenderer.invoke('db:updateTreasury', id, treasuryData),
+    setDefaultTreasury: (id, options) => ipcRenderer.invoke('db:setDefaultTreasury', id, options),
+    deleteTreasury: (id, options) => ipcRenderer.invoke('db:deleteTreasury', id, options),
+    createTreasuryTransaction: (transactionData) => ipcRenderer.invoke('db:createTreasuryTransaction', transactionData),
+    createDepositReceipt: (params) => ipcRenderer.invoke('db:createDepositReceipt', params),
+    applyDepositToSale: (params) => ipcRenderer.invoke('db:applyDepositToSale', params),
+    refundDeposit: (params) => ipcRenderer.invoke('db:refundDeposit', params),
+    getTreasuryEntries: (params) => ipcRenderer.invoke('db:getTreasuryEntries', params),
+    getDailyRevenueReport: (params) => ipcRenderer.invoke('db:getDailyRevenueReport', params),
 
     // Suppliers
     getSuppliers: () => ipcRenderer.invoke('db:getSuppliers'),

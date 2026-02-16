@@ -161,6 +161,36 @@ ipcMain.handle('dialog:showMessageBox', async (event, options) => {
     }
 });
 
+// Print action handler from print preview windows
+ipcMain.handle('trigger-print', async (event) => {
+    try {
+        const senderContents = event.sender;
+        const senderWindow = BrowserWindow.fromWebContents(senderContents);
+
+        if (!senderWindow || senderWindow.isDestroyed()) {
+            return { success: false, error: 'Print window is not available' };
+        }
+
+        return await new Promise((resolve) => {
+            senderContents.print(
+                {
+                    silent: false,
+                    printBackground: true,
+                    color: true,
+                    margins: { marginType: 'printableArea' },
+                    pageSize: 'A4'
+                },
+                (success, errorType) => {
+                    resolve({ success, error: errorType || null });
+                }
+            );
+        });
+    } catch (err) {
+        console.error('Trigger Print Error:', err);
+        return { success: false, error: err.message };
+    }
+});
+
 // HTML Printing Handler (for safePrint)
 ipcMain.handle('print:html', async (event, options) => {
     try {
@@ -179,23 +209,6 @@ ipcMain.handle('print:html', async (event, options) => {
         await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(options.html)}`);
 
         // Handler للطباعة من داخل النافذة
-        ipcMain.handleOnce('trigger-print', async () => {
-            return new Promise((resolve) => {
-                printWindow.webContents.print(
-                    {
-                        silent: false,
-                        printBackground: true,
-                        color: true,
-                        margins: { marginType: 'printableArea' },
-                        pageSize: 'A4'
-                    },
-                    (success, errorType) => {
-                        resolve({ success, error: errorType });
-                    }
-                );
-            });
-        });
-
         return new Promise((resolve) => {
             printWindow.on('closed', () => {
                 resolve({ success: true, windowOpened: true });
@@ -324,6 +337,12 @@ ipcMain.handle('db:addCustomerPayment', async (event, paymentData) => {
     console.log('IPC db:addCustomerPayment received:', paymentData);
     return await dbService.addCustomerPayment(paymentData);
 });
+ipcMain.handle('db:createCustomerPayment', async (event, paymentData) => {
+    return await dbService.createCustomerPayment(paymentData || {});
+});
+ipcMain.handle('db:previewCustomerPaymentAllocation', async (event, params) => {
+    return await dbService.previewCustomerPaymentAllocation(params || {});
+});
 ipcMain.handle('db:getCustomerPayments', async (event, customerId) => {
     return await dbService.getCustomerPayments(customerId);
 });
@@ -347,6 +366,41 @@ ipcMain.handle('db:getPaymentMethods', async () => {
 });
 ipcMain.handle('db:getPaymentMethodStats', async () => {
     return await dbService.getPaymentMethodStats();
+});
+
+// Treasury
+ipcMain.handle('db:getTreasuries', async () => {
+    return await dbService.getTreasuries();
+});
+ipcMain.handle('db:createTreasury', async (event, treasuryData) => {
+    return await dbService.createTreasury(treasuryData);
+});
+ipcMain.handle('db:updateTreasury', async (event, id, treasuryData) => {
+    return await dbService.updateTreasury(id, treasuryData);
+});
+ipcMain.handle('db:setDefaultTreasury', async (event, id, options) => {
+    return await dbService.setDefaultTreasury(id, options || {});
+});
+ipcMain.handle('db:deleteTreasury', async (event, id, options) => {
+    return await dbService.deleteTreasury(id, options || {});
+});
+ipcMain.handle('db:createTreasuryTransaction', async (event, transactionData) => {
+    return await dbService.createTreasuryTransaction(transactionData);
+});
+ipcMain.handle('db:createDepositReceipt', async (event, params) => {
+    return await dbService.createDepositReceipt(params || {});
+});
+ipcMain.handle('db:applyDepositToSale', async (event, params) => {
+    return await dbService.applyDepositToSale(params || {});
+});
+ipcMain.handle('db:refundDeposit', async (event, params) => {
+    return await dbService.refundDeposit(params || {});
+});
+ipcMain.handle('db:getTreasuryEntries', async (event, params) => {
+    return await dbService.getTreasuryEntries(params || {});
+});
+ipcMain.handle('db:getDailyRevenueReport', async (event, params) => {
+    return await dbService.getDailyRevenueReport(params || {});
 });
 
 // Supplier Payments

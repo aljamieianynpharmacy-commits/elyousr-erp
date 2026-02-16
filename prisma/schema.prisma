@@ -346,11 +346,29 @@ model SupplierPayment {
  * =========================
  */
 
-model Expense {
+model ExpenseCategory {
   id        Int      @id @default(autoincrement())
-  title     String
-  amount    Float
+  name      String   @unique
+  color     String?
+  icon      String?
   createdAt DateTime @default(now())
+
+  expenses Expense[]
+}
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  title       String
+  amount      Float
+  categoryId  Int?
+  notes       String?
+  expenseDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  category ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+  @@index([expenseDate])
 }
 
 /**

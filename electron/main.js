@@ -205,7 +205,7 @@ ipcMain.handle('print:html', async (event, options) => {
                 contextIsolation: true
             }
         });
-        
+
         await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(options.html)}`);
 
         // Handler للطباعة من داخل النافذة
@@ -213,7 +213,7 @@ ipcMain.handle('print:html', async (event, options) => {
             printWindow.on('closed', () => {
                 resolve({ success: true, windowOpened: true });
             });
-            
+
             printWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
                 printWindow.close();
                 resolve({ success: false, error: errorDescription });
@@ -292,14 +292,31 @@ ipcMain.handle('db:deleteSupplier', async (event, id) => {
 });
 
 // Expenses
-ipcMain.handle('db:getExpenses', async () => {
-    return await dbService.getExpenses();
+ipcMain.handle('db:getExpenses', async (event, params) => {
+    return await dbService.getExpenses(params || {});
 });
 ipcMain.handle('db:addExpense', async (event, expenseData) => {
     return await dbService.addExpense(expenseData);
 });
+ipcMain.handle('db:updateExpense', async (event, id, expenseData) => {
+    return await dbService.updateExpense(id, expenseData);
+});
 ipcMain.handle('db:deleteExpense', async (event, id) => {
     return await dbService.deleteExpense(id);
+});
+
+// Expense Categories
+ipcMain.handle('db:getExpenseCategories', async () => {
+    return await dbService.getExpenseCategories();
+});
+ipcMain.handle('db:addExpenseCategory', async (event, data) => {
+    return await dbService.addExpenseCategory(data);
+});
+ipcMain.handle('db:updateExpenseCategory', async (event, id, data) => {
+    return await dbService.updateExpenseCategory(id, data);
+});
+ipcMain.handle('db:deleteExpenseCategory', async (event, id) => {
+    return await dbService.deleteExpenseCategory(id);
 });
 
 // Users

@@ -5237,10 +5237,20 @@ const dbService = {
     },
 
     // ==================== EXPENSES ====================
-    async getExpenses() {
+    async getExpenses(params = {}) {
         try {
+            const where = {};
+            const categoryId = parsePositiveInt(params?.categoryId);
+            if (categoryId) where.categoryId = categoryId;
+            if (params?.fromDate || params?.toDate) {
+                where.expenseDate = {};
+                if (params.fromDate) where.expenseDate.gte = startOfDay(new Date(params.fromDate));
+                if (params.toDate) where.expenseDate.lte = endOfDay(new Date(params.toDate));
+            }
             return await prisma.expense.findMany({
-                orderBy: { createdAt: 'desc' }
+                where,
+                include: { category: true },
+                orderBy: { expenseDate: 'desc' }
             });
         } catch (error) {
             return { error: error.message };
@@ -5265,8 +5275,12 @@ const dbService = {
                     data: {
                         title,
                         amount,
+                        categoryId: parsePositiveInt(expenseData?.categoryId) || null,
+                        notes: String(expenseData?.notes || '').trim() || null,
+                        expenseDate,
                         createdAt: expenseDate
-                    }
+                    },
+                    include: { category: true }
                 });
 
                 const expenseTreasuryId = await resolveTreasuryId(tx, expenseData?.treasuryId);
@@ -5320,6 +5334,72 @@ const dbService = {
                     where: { id: parsedExpenseId }
                 });
             });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateExpense(id, expenseData) {
+        try {
+            const parsedId = parsePositiveInt(id);
+            if (!parsedId) return { error: 'Invalid expenseId' };
+            const title = String(expenseData?.title || '').trim();
+            const amount = Math.max(0, toNumber(expenseData?.amount));
+            if (!title) return { error: 'Expense title is required' };
+            if (amount <= 0) return { error: 'Invalid expense amount' };
+            const categoryId = parsePositiveInt(expenseData?.categoryId) || null;
+            const notes = String(expenseData?.notes || '').trim() || null;
+            const expenseDate = parseDateOrDefault(expenseData?.expenseDate, undefined);
+            const data = { title, amount, categoryId, notes };
+            if (expenseDate) data.expenseDate = expenseDate;
+            return await prisma.expense.update({ where: { id: parsedId }, data, include: { category: true } });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    // ==================== EXPENSE CATEGORIES ====================
+    async getExpenseCategories() {
+        try {
+            return await prisma.expenseCategory.findMany({
+                orderBy: { name: 'asc' },
+                include: { _count: { select: { expenses: true } } }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async addExpenseCategory(data) {
+        try {
+            const name = String(data?.name || '').trim();
+            if (!name) return { error: 'Category name is required' };
+            return await prisma.expenseCategory.create({ data: { name, color: data?.color || null, icon: data?.icon || null } });
+        } catch (error) {
+            if (error?.code === 'P2002') return { error: 'اسم التصنيف موجود بالفعل' };
+            return { error: error.message };
+        }
+    },
+
+    async updateExpenseCategory(id, data) {
+        try {
+            const parsedId = parsePositiveInt(id);
+            if (!parsedId) return { error: 'Invalid categoryId' };
+            const name = String(data?.name || '').trim();
+            if (!name) return { error: 'Category name is required' };
+            return await prisma.expenseCategory.update({ where: { id: parsedId }, data: { name, color: data?.color || null, icon: data?.icon || null } });
+        } catch (error) {
+            if (error?.code === 'P2002') return { error: 'اسم التصنيف موجود بالفعل' };
+            return { error: error.message };
+        }
+    },
+
+    async deleteExpenseCategory(id) {
+        try {
+            const parsedId = parsePositiveInt(id);
+            if (!parsedId) return { error: 'Invalid categoryId' };
+            await prisma.expense.updateMany({ where: { categoryId: parsedId }, data: { categoryId: null } });
+            return await prisma.expenseCategory.delete({ where: { id: parsedId } });
         } catch (error) {
             return { error: error.message };
         }

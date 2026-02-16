@@ -87,9 +87,16 @@ contextBridge.exposeInMainWorld('api', {
     getSupplierPayments: (supplierId) => ipcRenderer.invoke('db:getSupplierPayments', supplierId),
 
     // Expenses
-    getExpenses: () => ipcRenderer.invoke('db:getExpenses'),
+    getExpenses: (params) => ipcRenderer.invoke('db:getExpenses', params),
     addExpense: (expenseData) => ipcRenderer.invoke('db:addExpense', expenseData),
+    updateExpense: (id, expenseData) => ipcRenderer.invoke('db:updateExpense', id, expenseData),
     deleteExpense: (id) => ipcRenderer.invoke('db:deleteExpense', id),
+
+    // Expense Categories
+    getExpenseCategories: () => ipcRenderer.invoke('db:getExpenseCategories'),
+    addExpenseCategory: (data) => ipcRenderer.invoke('db:addExpenseCategory', data),
+    updateExpenseCategory: (id, data) => ipcRenderer.invoke('db:updateExpenseCategory', id, data),
+    deleteExpenseCategory: (id) => ipcRenderer.invoke('db:deleteExpenseCategory', id),
 
     // Users
     getUsers: () => ipcRenderer.invoke('db:getUsers'),

@@ -21,10 +21,15 @@ const ENTRY_TYPE_OPTIONS = [
 ];
 
 const TAB_OPTIONS = [
-  { id: 'treasuries', label: 'الخزن' },
-  { id: 'transactions', label: 'الحركات' },
-  { id: 'daily', label: 'الإيراد اليومي' },
-  { id: 'zreport', label: 'تقرير Z' }
+  { id: 'treasuries', label: '🏦 الخزن' },
+  { id: 'transactions', label: '🔄 الحركات' },
+  { id: 'daily', label: '📈 الإيراد اليومي' },
+  { id: 'expenses', label: '💸 المصروفات' }
+];
+
+const EXPENSE_CATEGORY_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#22c55e', '#06b6d4',
+  '#3b82f6', '#8b5cf6', '#ec4899', '#64748b', '#0d9488'
 ];
 
 const ENTRY_TYPE_LABELS = {
@@ -199,6 +204,18 @@ export default function Treasury() {
     transactionType: 'IN', treasuryId: '', sourceTreasuryId: '', targetTreasuryId: '', amount: '',
     paymentMethodId: '', entryType: '', notes: '', entryDate: todayDate()
   });
+
+  // ── Expense state ──
+  const [expenses, setExpenses] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [expensesLoading, setExpensesLoading] = useState(false);
+  const [expenseFilters, setExpenseFilters] = useState({ fromDate: todayDate(), toDate: todayDate(), categoryId: '' });
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [expenseForm, setExpenseForm] = useState({ title: '', amount: '', categoryId: '', notes: '', expenseDate: todayDate(), treasuryId: '', paymentMethodId: '' });
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ name: '', color: EXPENSE_CATEGORY_COLORS[0] });
+  const [editingCategory, setEditingCategory] = useState(null);
 
   const selectedReportTreasuryId = useMemo(
     () => toInt(reportFilters.treasuryId) || toInt(filters.treasuryId) || treasuries[0]?.id || null,
@@ -517,27 +534,109 @@ export default function Treasury() {
     if (result?.error) await safeAlert(result.error);
   };
 
+  // ── Expense handlers ──
+  const loadExpenses = useCallback(async () => {
+    setExpensesLoading(true);
+    try {
+      const [expRes, catRes] = await Promise.all([
+        window.api.getExpenses({ fromDate: expenseFilters.fromDate, toDate: expenseFilters.toDate, categoryId: toInt(expenseFilters.categoryId) || undefined }),
+        window.api.getExpenseCategories()
+      ]);
+      if (!expRes?.error) setExpenses(Array.isArray(expRes) ? expRes : []);
+      if (!catRes?.error) setExpenseCategories(Array.isArray(catRes) ? catRes : []);
+    } catch (e) { /* silent */ }
+    setExpensesLoading(false);
+  }, [expenseFilters]);
+
+  useEffect(() => { if (!bootstrapping) void loadExpenses(); }, [bootstrapping, loadExpenses]);
+
+  const totalExpenses = useMemo(() => expenses.reduce((s, e) => s + Number(e.amount || 0), 0), [expenses]);
+
+  const openExpenseModal = (expense = null) => {
+    if (expense) {
+      setEditingExpense(expense);
+      setExpenseForm({ title: expense.title, amount: String(expense.amount), categoryId: expense.categoryId ? String(expense.categoryId) : '', notes: expense.notes || '', expenseDate: expense.expenseDate ? new Date(expense.expenseDate).toISOString().split('T')[0] : todayDate(), treasuryId: '', paymentMethodId: '' });
+    } else {
+      setEditingExpense(null);
+      setExpenseForm({ title: '', amount: '', categoryId: '', notes: '', expenseDate: todayDate(), treasuryId: '', paymentMethodId: '' });
+    }
+    setExpenseModalOpen(true);
+  };
+
+  const handleSaveExpense = async (e) => {
+    e.preventDefault();
+    const title = expenseForm.title.trim();
+    const amount = toAmount(expenseForm.amount);
+    if (!title) { await safeAlert('عنوان المصروف مطلوب'); return; }
+    if (amount <= 0) { await safeAlert('المبلغ غير صحيح'); return; }
+    setSubmitting(true);
+    try {
+      const payload = { title, amount, categoryId: toInt(expenseForm.categoryId) || null, notes: expenseForm.notes, expenseDate: expenseForm.expenseDate, treasuryId: toInt(expenseForm.treasuryId) || undefined, paymentMethodId: toInt(expenseForm.paymentMethodId) || undefined };
+      let res;
+      if (editingExpense) {
+        res = await window.api.updateExpense(editingExpense.id, payload);
+      } else {
+        res = await window.api.addExpense(payload);
+      }
+      if (res?.error) throw new Error(res.error);
+      setExpenseModalOpen(false);
+      setEditingExpense(null);
+      await Promise.all([loadExpenses(), refreshAll()]);
+    } catch (err) { await safeAlert(`تعذّر حفظ المصروف: ${err.message}`); }
+    setSubmitting(false);
+  };
+
+  const handleDeleteExpense = async (expense) => {
+    const confirmed = await safeConfirm(`هل تريد حذف المصروف "${expense.title}"؟`, { title: 'تأكيد حذف مصروف', buttons: ['حذف', 'إلغاء'] });
+    if (!confirmed) return;
+    setSubmitting(true);
+    try {
+      const res = await window.api.deleteExpense(expense.id);
+      if (res?.error) throw new Error(res.error);
+      await Promise.all([loadExpenses(), refreshAll()]);
+    } catch (err) { await safeAlert(`تعذّر حذف المصروف: ${err.message}`); }
+    setSubmitting(false);
+  };
+
+  const handleSaveCategory = async (e) => {
+    e.preventDefault();
+    const name = categoryForm.name.trim();
+    if (!name) { await safeAlert('اسم التصنيف مطلوب'); return; }
+    setSubmitting(true);
+    try {
+      let res;
+      if (editingCategory) {
+        res = await window.api.updateExpenseCategory(editingCategory.id, { name, color: categoryForm.color });
+      } else {
+        res = await window.api.addExpenseCategory({ name, color: categoryForm.color });
+      }
+      if (res?.error) throw new Error(res.error);
+      setCategoryFormOpen(false);
+      setEditingCategory(null);
+      setCategoryForm({ name: '', color: EXPENSE_CATEGORY_COLORS[0] });
+      await loadExpenses();
+    } catch (err) { await safeAlert(`تعذّر حفظ التصنيف: ${err.message}`); }
+    setSubmitting(false);
+  };
+
+  const handleDeleteCategory = async (cat) => {
+    const confirmed = await safeConfirm(`هل تريد حذف تصنيف "${cat.name}"؟`, { title: 'تأكيد حذف تصنيف', buttons: ['حذف', 'إلغاء'] });
+    if (!confirmed) return;
+    try {
+      const res = await window.api.deleteExpenseCategory(cat.id);
+      if (res?.error) throw new Error(res.error);
+      await loadExpenses();
+    } catch (err) { await safeAlert(`تعذّر حذف التصنيف: ${err.message}`); }
+  };
+
   if (bootstrapping) {
     return <div className="treasury-loading">جاري تحميل بيانات الخزنة...</div>;
   }
 
   return (
     <div className="treasury-page">
-      <section className="treasury-panel treasury-top-strip">
-        <div className="panel-head">
-          <h2>الخزنة والإيراد اليومي</h2>
-          <div className="panel-head-actions">
-            <button className="treasury-btn ghost neutral" type="button" onClick={() => void refreshAll()}>تحديث البيانات</button>
-          </div>
-        </div>
-        <div className="mini-stats-row">
-          <div className="mini-stat"><span>إجمالي أرصدة الخزن</span><strong>{formatMoney(totalTreasuryBalance)}</strong></div>
-          <div className="mini-stat"><span>إجمالي الإيراد</span><strong>{formatMoney(revenueSummary.totalRevenue || 0)}</strong></div>
-          <div className="mini-stat"><span>صافي الحركة</span><strong>{formatMoney(movementSummary.net || 0)}</strong></div>
-          <div className="mini-stat"><span>صافي التدفق النقدي</span><strong>{formatMoney(movementSummary.netCashIn || 0)}</strong></div>
-        </div>
-      </section>
 
+      {/* ── Tab Navigation ── */}
       <section className="treasury-panel">
         <div className="treasury-tabs">
           {TAB_OPTIONS.map((tab) => (
@@ -549,10 +648,9 @@ export default function Treasury() {
       {activeTab === 'treasuries' && (
         <section className="treasury-panel">
           <div className="panel-head">
-            <h2>الخزن</h2>
+            <h2>🏦 الخزن</h2>
             <div className="panel-head-actions">
-              <span>{selectedTreasuryName}</span>
-              <button className="treasury-btn secondary" type="button" onClick={openCreateTreasuryModal}>إضافة خزنة</button>
+              <button className="treasury-btn secondary" type="button" onClick={openCreateTreasuryModal}>+ إضافة خزنة</button>
             </div>
           </div>
           <div className="treasury-balance-grid">
@@ -606,7 +704,7 @@ export default function Treasury() {
 
       {activeTab === 'transactions' && (
         <section className="treasury-panel">
-          <div className="panel-head"><h2>تسجيل حركة خزنة</h2><span>وارد / منصرف / تحويل</span></div>
+          <div className="panel-head"><h2>🔄 تسجيل حركة خزنة</h2><span>وارد / منصرف / تحويل</span></div>
           <form className="treasury-form" onSubmit={handleCreateTransaction}>
             <div className="treasury-form-grid">
               <label className="field"><span>نوع الحركة</span><select className="treasury-input" value={transactionForm.transactionType} onChange={(event) => setTransactionForm((prev) => ({ ...prev, transactionType: event.target.value }))}><option value="IN">وارد</option><option value="OUT">منصرف</option><option value="TRANSFER">تحويل</option></select></label>
@@ -641,7 +739,7 @@ export default function Treasury() {
 
       {activeTab === 'daily' && (
         <section className="treasury-panel">
-          <div className="panel-head"><h2>لوحة الإيراد اليومي</h2></div>
+          <div className="panel-head"><h2>📈 لوحة الإيراد اليومي</h2></div>
           <div className="daily-filter-shell">
             <div className="daily-filter-grid">
               <label className="daily-filter-field">
@@ -701,17 +799,136 @@ export default function Treasury() {
         </section>
       )}
 
-      {activeTab === 'zreport' && (
+      {activeTab === 'expenses' && (
         <section className="treasury-panel">
-          <div className="panel-head"><h2>تقرير Z (A4)</h2><span>طباعة تفصيلية بالمراجع وتجميع وسائل الدفع</span></div>
-          <div className="zreport-grid">
-            <div className="zreport-card"><span>الفترة</span><strong>{reportFilters.fromDate} - {reportFilters.toDate}</strong></div>
-            <div className="zreport-card"><span>الخزنة</span><strong>{selectedTreasuryName}</strong></div>
-            <div className="zreport-card"><span>إجمالي الإيراد</span><strong>{formatMoney(revenueSummary.totalRevenue || 0)}</strong></div>
-            <div className="zreport-card"><span>صافي التدفق النقدي</span><strong>{formatMoney(movementSummary.netCashIn || 0)}</strong></div>
+          <div className="panel-head">
+            <h2>المصروفات</h2>
+            <div className="panel-head-actions">
+              <button className="treasury-btn secondary" type="button" onClick={() => openExpenseModal()}>+ إضافة مصروف</button>
+              <button className="treasury-btn ghost neutral" type="button" onClick={() => setCategoryFormOpen(!categoryFormOpen)}>{categoryFormOpen ? 'إخفاء التصنيفات' : '⚙ التصنيفات'}</button>
+            </div>
           </div>
-          <button className="treasury-btn primary" type="button" onClick={handlePrintZReport}>طباعة تقرير Z</button>
+
+          {/* Category manager */}
+          {categoryFormOpen && (
+            <div className="expense-category-manager">
+              <div className="expense-category-chips">
+                {expenseCategories.map((cat) => (
+                  <div key={cat.id} className="expense-category-chip" style={{ borderColor: cat.color || '#64748b' }}>
+                    <span className="chip-dot" style={{ background: cat.color || '#64748b' }} />
+                    <span>{cat.name}</span>
+                    <span className="chip-count">{cat._count?.expenses || 0}</span>
+                    <button type="button" className="chip-edit" onClick={() => { setEditingCategory(cat); setCategoryForm({ name: cat.name, color: cat.color || EXPENSE_CATEGORY_COLORS[0] }); }}>✏</button>
+                    <button type="button" className="chip-delete" onClick={() => void handleDeleteCategory(cat)}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <form className="expense-category-form" onSubmit={handleSaveCategory}>
+                <input className="treasury-input" placeholder="اسم التصنيف" value={categoryForm.name} onChange={(e) => setCategoryForm(p => ({ ...p, name: e.target.value }))} required />
+                <div className="color-picker-row">
+                  {EXPENSE_CATEGORY_COLORS.map((c) => (
+                    <button key={c} type="button" className={`color-dot ${categoryForm.color === c ? 'active' : ''}`} style={{ background: c }} onClick={() => setCategoryForm(p => ({ ...p, color: c }))} />
+                  ))}
+                </div>
+                <div className="expense-category-form-actions">
+                  <button className="treasury-btn small primary" type="submit" disabled={submitting}>{editingCategory ? 'تحديث' : 'إضافة'}</button>
+                  {editingCategory && <button className="treasury-btn small ghost" type="button" onClick={() => { setEditingCategory(null); setCategoryForm({ name: '', color: EXPENSE_CATEGORY_COLORS[0] }); }}>إلغاء</button>}
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Filters */}
+          <div className="daily-filter-shell">
+            <div className="daily-filter-grid">
+              <label className="daily-filter-field"><span>من تاريخ</span><input className="treasury-input" type="date" value={expenseFilters.fromDate} onChange={(e) => setExpenseFilters(p => ({ ...p, fromDate: e.target.value }))} /></label>
+              <label className="daily-filter-field"><span>إلى تاريخ</span><input className="treasury-input" type="date" value={expenseFilters.toDate} onChange={(e) => setExpenseFilters(p => ({ ...p, toDate: e.target.value }))} /></label>
+              <label className="daily-filter-field"><span>التصنيف</span>
+                <select className="treasury-input" value={expenseFilters.categoryId} onChange={(e) => setExpenseFilters(p => ({ ...p, categoryId: e.target.value }))}>
+                  <option value="">الكل</option>
+                  {expenseCategories.map((cat) => (<option key={cat.id} value={cat.id}>{cat.name}</option>))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="kpi-grid" style={{ marginBottom: 12 }}>
+            <div className="kpi-card tone-returns"><span>إجمالي المصروفات</span><strong>{formatMoney(totalExpenses)}</strong></div>
+            <div className="kpi-card tone-cashflow"><span>عدد المصروفات</span><strong>{expenses.length}</strong></div>
+          </div>
+
+          {/* Table */}
+          <div className="table-wrap">
+            <table className="treasury-table">
+              <thead><tr><th>#</th><th>العنوان</th><th>المبلغ</th><th>التصنيف</th><th>التاريخ</th><th>ملاحظات</th><th>إجراءات</th></tr></thead>
+              <tbody>
+                {expensesLoading ? (<tr><td colSpan="7" className="empty-cell">جاري التحميل...</td></tr>)
+                  : expenses.length === 0 ? (<tr><td colSpan="7" className="empty-cell">لا توجد مصروفات</td></tr>)
+                    : expenses.map((exp) => (
+                      <tr key={exp.id}>
+                        <td>{exp.id}</td>
+                        <td><strong>{exp.title}</strong></td>
+                        <td className="out-text">{formatMoney(exp.amount)}</td>
+                        <td>{exp.category ? <span className="expense-category-badge" style={{ background: exp.category.color || '#64748b' }}>{exp.category.name}</span> : <span style={{ color: '#64748b' }}>—</span>}</td>
+                        <td>{formatDateTime(exp.expenseDate || exp.createdAt)}</td>
+                        <td>{exp.notes || '—'}</td>
+                        <td>
+                          <div className="treasury-card-actions">
+                            <button className="treasury-btn small secondary" type="button" onClick={() => openExpenseModal(exp)}>تعديل</button>
+                            <button className="treasury-btn small danger" type="button" disabled={submitting} onClick={() => void handleDeleteExpense(exp)}>حذف</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+              </tbody>
+            </table>
+          </div>
         </section>
+      )}
+
+      {/* Expense Modal */}
+      {expenseModalOpen && (
+        <div className="treasury-modal-overlay" onClick={() => setExpenseModalOpen(false)}>
+          <div className="treasury-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="treasury-modal-head">
+              <h3>{editingExpense ? 'تعديل مصروف' : 'إضافة مصروف جديد'}</h3>
+              <button type="button" className="treasury-close-btn" onClick={() => setExpenseModalOpen(false)}>إغلاق</button>
+            </div>
+            <form className="treasury-form" onSubmit={handleSaveExpense}>
+              <div className="treasury-form-grid">
+                <label className="field"><span>عنوان المصروف</span><input className="treasury-input" value={expenseForm.title} onChange={(e) => setExpenseForm(p => ({ ...p, title: e.target.value }))} required /></label>
+                <label className="field"><span>المبلغ</span><input className="treasury-input" type="number" min="0" step="0.01" value={expenseForm.amount} onChange={(e) => setExpenseForm(p => ({ ...p, amount: e.target.value }))} required /></label>
+                <label className="field"><span>التصنيف</span>
+                  <select className="treasury-input" value={expenseForm.categoryId} onChange={(e) => setExpenseForm(p => ({ ...p, categoryId: e.target.value }))}>
+                    <option value="">بدون تصنيف</option>
+                    {expenseCategories.map((cat) => (<option key={cat.id} value={cat.id}>{cat.name}</option>))}
+                  </select>
+                </label>
+                <label className="field"><span>التاريخ</span><input className="treasury-input" type="date" value={expenseForm.expenseDate} onChange={(e) => setExpenseForm(p => ({ ...p, expenseDate: e.target.value }))} /></label>
+                {!editingExpense && (<>
+                  <label className="field"><span>الخزنة</span>
+                    <select className="treasury-input" value={expenseForm.treasuryId} onChange={(e) => setExpenseForm(p => ({ ...p, treasuryId: e.target.value }))}>
+                      <option value="">الافتراضية</option>
+                      {treasuries.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+                    </select>
+                  </label>
+                  <label className="field"><span>وسيلة الدفع</span>
+                    <select className="treasury-input" value={expenseForm.paymentMethodId} onChange={(e) => setExpenseForm(p => ({ ...p, paymentMethodId: e.target.value }))}>
+                      <option value="">الافتراضية</option>
+                      {paymentMethods.map((m) => (<option key={m.id} value={m.id}>{resolveMethodName(m)}</option>))}
+                    </select>
+                  </label>
+                </>)}
+                <label className="field field-full"><span>ملاحظات</span><input className="treasury-input" value={expenseForm.notes} onChange={(e) => setExpenseForm(p => ({ ...p, notes: e.target.value }))} /></label>
+              </div>
+              <div className="treasury-card-actions">
+                <button className="treasury-btn primary" type="submit" disabled={submitting}>حفظ</button>
+                <button className="treasury-btn ghost" type="button" onClick={() => setExpenseModalOpen(false)}>إلغاء</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {treasuryModalState.isOpen && (

@@ -536,8 +536,6 @@ export default function Customers() {
   // البحث فوري = بدون debounce (زي نقطة البيع)
   const trimmedSearch = searchTerm.trim().toLowerCase();
   const debouncedColumnSearch = useDebouncedValue(columnSearch, 80);
-  // الـ highlight يتأخر 30ms عشان الـ regex مكلف - الليست تتحدث فوراً والألوان بعدها بلحظة
-  const deferredHighlight = useDebouncedValue(searchTerm.trim(), 30);
 
   // Reset الصفحة عند تغيير البحث أو الفلتر
   useEffect(() => {
@@ -623,17 +621,20 @@ export default function Customers() {
 
   // ============ فلترة خفيفة O(n) فقط - بدون sort ============
   const filteredCustomers = useMemo(() => {
-    let result = sortedCustomers;
-
     // 1. البحث العام (الاسم، الهاتف، المدينة)
+    // عند البحث: نستخدم allCustomers مباشرة (بدون ترتيب) ونعرض أول 50 فقط (زي نقطة البيع)
     if (trimmedSearch) {
-      result = result.filter(c =>
+      const result = allCustomers.filter(c =>
         (c.name && c.name.toLowerCase().includes(trimmedSearch)) ||
         (c.phone && c.phone.includes(trimmedSearch)) ||
         (c.city && c.city.toLowerCase().includes(trimmedSearch)) ||
         (c.address && c.address.toLowerCase().includes(trimmedSearch))
       );
+      return result.slice(0, 50); // أقصى عدد 50 نتيجة لسرعة خرافية
     }
+
+    // في عدم وجود بحث: نستخدم القائمة المرتبة كاملة مع الفلاتر العادية
+    let result = sortedCustomers;
 
     // 2. فلترة حسب النوع
     if (filterType && filterType !== 'all') {
@@ -659,7 +660,7 @@ export default function Customers() {
     }
 
     return result;
-  }, [sortedCustomers, trimmedSearch, filterType, debouncedColumnSearch]);
+  }, [allCustomers, sortedCustomers, trimmedSearch, filterType, debouncedColumnSearch]);
 
   const totalItems = filteredCustomers.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -1777,7 +1778,7 @@ export default function Customers() {
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
-          highlightTerm={deferredHighlight}
+          highlightTerm=""
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}

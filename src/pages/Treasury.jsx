@@ -875,6 +875,105 @@ export default function Treasury() {
     if (result?.error) await safeAlert(result.error);
   };
 
+  const handlePrintPaymentMethodReport = async (treasury, methodItem) => {
+    // 1. Fetch data
+    const res = await window.api.getPaymentMethodReport({
+      treasuryId: treasury.id,
+      paymentMethodId: paymentMethods.find(pm => pm.code === methodItem.code)?.id,
+      fromDate: reportFilters.fromDate,
+      toDate: reportFilters.toDate
+    });
+
+    if (res.error) {
+      await safeAlert(res.error);
+      return;
+    }
+
+    const { data, summary } = res;
+
+    // 2. Build HTML
+    const html = `
+      <!DOCTYPE html>
+      <html lang="ar" dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <title>كشف حساب ${methodItem.name}</title>
+        <style>
+          body { font-family: 'Cairo', sans-serif; padding: 20px; direction: rtl; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+          h1 { margin: 0; font-size: 24px; color: #0f3553; }
+          .meta { margin-top: 5px; font-size: 14px; color: #666; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }
+          th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; }
+          th { background-color: #f3f4f6; font-weight: bold; color: #1f2937; }
+          tr:nth-child(even) { background-color: #f9fafb; }
+          .amount { font-weight: bold; direction: ltr; text-align: left; }
+          .in-color { color: #16a34a; }
+          .out-color { color: #dc2626; }
+          .summary-box { display: flex; gap: 20px; margin-bottom: 20px; justify-content: center; background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; }
+          .summary-item { text-align: center; }
+          .summary-item strong { display: block; font-size: 16px; margin-top: 4px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>كشف حساب - ${methodItem.name}</h1>
+          <div class="meta">
+            الخزنة: ${treasury.name} | الفترة: ${reportFilters.fromDate || 'البداية'} إلي ${reportFilters.toDate || 'الآن'}
+          </div>
+        </div>
+
+        <div class="summary-box">
+          <div class="summary-item">
+            <span>إجمالي الوارد</span>
+            <strong style="color: #16a34a;">${formatMoney(summary.totalIn)}</strong>
+          </div>
+           <div class="summary-item">
+            <span>إجمالي المنصرف</span>
+            <strong style="color: #dc2626;">${formatMoney(summary.totalOut)}</strong>
+          </div>
+           <div class="summary-item">
+            <span>الصافي</span>
+            <strong style="color: #0f3553;">${formatMoney(summary.net)}</strong>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>النوع</th>
+              <th>الاسم (العميل/المورد)</th>
+              <th>المبلغ</th>
+              <th>ملاحظات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map(row => `
+              <tr>
+                <td>${formatDateTime(row.entryDate)}</td>
+                <td>${resolveEntryTypeLabel(row.entryType)}</td>
+                <td>${row.entityName || '-'}</td>
+                <td class="amount ${row.direction === 'IN' ? 'in-color' : 'out-color'}">
+                  ${formatMoney(row.amount)}
+                </td>
+                <td>${row.notes || '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        <div style="margin-top: 20px; font-size: 10px; color: #999; text-align: center;">
+          تمت الطباعة: ${new Date().toLocaleString('ar-EG')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    // 3. Print
+    await safePrint(html, { title: `كشف حساب ${methodItem.name}` });
+  };
+
   // ── Expense handlers ──
   const loadExpenses = useCallback(async () => {
     setExpensesLoading(true);
@@ -1027,7 +1126,21 @@ export default function Treasury() {
                       <div key={item.code} className="breakdown-item">
                         <div className="breakdown-info">
                           <span className="breakdown-name">{item.name}</span>
-                          <span className="breakdown-count">{item.count} عملية</span>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <span className="breakdown-count">{item.count} عملية</span>
+                            <button
+                              type="button"
+                              className="treasury-btn small ghost"
+                              style={{ padding: '2px 6px', fontSize: '10px' }}
+                              title="طباعة كشف حساب"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePrintPaymentMethodReport(treasury, item);
+                              }}
+                            >
+                              🖨️
+                            </button>
+                          </div>
                         </div>
                         <span className="breakdown-balance" style={{ direction: 'ltr' }}>{formatMoney(item.balance)}</span>
                       </div>

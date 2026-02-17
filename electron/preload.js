@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
     checkCustomerFinancialsHealth: () => ipcRenderer.invoke('db:checkCustomerFinancialsHealth'),
     getPaymentMethods: () => ipcRenderer.invoke('db:getPaymentMethods'),
     getPaymentMethodStats: () => ipcRenderer.invoke('db:getPaymentMethodStats'),
+    getPaymentMethodReport: (params) => ipcRenderer.invoke('db:getPaymentMethodReport', params),
 
     // Treasury
     getTreasuries: () => ipcRenderer.invoke('db:getTreasuries'),

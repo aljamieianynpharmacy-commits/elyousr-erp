@@ -453,6 +453,9 @@ ipcMain.handle('db:refundDeposit', async (event, params) => {
 ipcMain.handle('db:getTreasuryEntries', async (event, params) => {
     return await dbService.getTreasuryEntries(params || {});
 });
+ipcMain.handle('db:getPaymentMethodReport', async (event, params) => {
+    return await dbService.getPaymentMethodReport(params || {});
+});
 ipcMain.handle('db:getDailyRevenueReport', async (event, params) => {
     return await dbService.getDailyRevenueReport(params || {});
 });

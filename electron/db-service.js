@@ -4490,6 +4490,87 @@ const dbService = {
             return { error: error.message };
         }
     },
+    async getPaymentMethodReport(params = {}) {
+        try {
+            const treasuryId = parsePositiveInt(params.treasuryId);
+            const paymentMethodId = parsePositiveInt(params.paymentMethodId);
+            if (!treasuryId || !paymentMethodId) return { error: 'Missing treasuryId or paymentMethodId' };
+
+            const where = {
+                treasuryId,
+                paymentMethodId,
+                entryType: { not: TREASURY_ENTRY_TYPE.OPENING_BALANCE },
+                isDeleted: false // Assuming we might add soft delete later
+            };
+
+            if (params.fromDate) where.entryDate = { ...where.entryDate, gte: startOfDay(params.fromDate) };
+            if (params.toDate) where.entryDate = { ...where.entryDate, lte: endOfDay(params.toDate) };
+
+            // Fetch entries
+            const entries = await prisma.treasuryEntry.findMany({
+                where: {
+                    treasuryId,
+                    paymentMethodId,
+                    entryType: { not: TREASURY_ENTRY_TYPE.OPENING_BALANCE }
+                },
+                include: {
+                    paymentMethod: true
+                },
+                orderBy: { entryDate: 'desc' }
+            });
+
+            // Enrich with entity names (Customer/Supplier)
+            // We need to look up referenceType/referenceId
+            // Optimization: Collect IDs and fetch in batches
+            const customerPaymentIds = [];
+            const saleIds = [];
+            const supplierPaymentIds = [];
+
+            entries.forEach(e => {
+                if (e.referenceType === 'PAYMENT') customerPaymentIds.push(e.referenceId);
+                else if (e.referenceType === 'SALE') saleIds.push(e.referenceId);
+                else if (e.referenceType === 'SUPPLIER_PAYMENT') supplierPaymentIds.push(e.referenceId);
+            });
+
+            const customerPayments = customerPaymentIds.length > 0
+                ? await prisma.customerPayment.findMany({ where: { id: { in: customerPaymentIds } }, include: { customer: true } })
+                : [];
+            const sales = saleIds.length > 0
+                ? await prisma.sale.findMany({ where: { id: { in: saleIds } }, include: { customer: true } })
+                : [];
+            const supplierPayments = supplierPaymentIds.length > 0
+                ? await prisma.supplierPayment.findMany({ where: { id: { in: supplierPaymentIds } }, include: { supplier: true } })
+                : [];
+
+            const cpMap = new Map(customerPayments.map(i => [i.id, i.customer?.name || 'Unknown Customer']));
+            const saleMap = new Map(sales.map(i => [i.id, i.customer?.name || 'Unknown Customer']));
+            const spMap = new Map(supplierPayments.map(i => [i.id, i.supplier?.name || 'Unknown Supplier']));
+
+            const enrichedEntries = entries.map(e => {
+                let entityName = '-';
+                if (e.referenceType === 'PAYMENT') entityName = cpMap.get(e.referenceId) || '-';
+                else if (e.referenceType === 'SALE') entityName = saleMap.get(e.referenceId) || '-';
+                else if (e.referenceType === 'SUPPLIER_PAYMENT') entityName = spMap.get(e.referenceId) || '-';
+
+                return {
+                    ...e,
+                    entityName
+                };
+            });
+
+            // Calculate totals
+            const totalIn = enrichedEntries.reduce((sum, e) => e.direction === 'IN' ? sum + e.amount : sum, 0);
+            const totalOut = enrichedEntries.reduce((sum, e) => e.direction === 'OUT' ? sum + e.amount : sum, 0);
+
+            return {
+                data: enrichedEntries,
+                summary: { totalIn, totalOut, net: totalIn - totalOut }
+            };
+
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
 
     async getTreasuryEntries(params = {}) {
         try {
@@ -4503,8 +4584,10 @@ const dbService = {
             const entryType = String(params?.entryType || '').trim().toUpperCase();
             const referenceType = String(params?.referenceType || '').trim();
             const search = String(params?.search || '').trim();
+            const paymentMethodId = parsePositiveInt(params?.paymentMethodId);
 
             if (treasuryId) where.treasuryId = treasuryId;
+            if (paymentMethodId) where.paymentMethodId = paymentMethodId;
             if (direction && direction !== 'ALL' && Object.values(TREASURY_DIRECTION).includes(direction)) {
                 where.direction = direction;
             }

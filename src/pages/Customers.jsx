@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue, memo } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
@@ -533,8 +533,10 @@ export default function Customers() {
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [allCustomers, setAllCustomers] = useState([]);
 
-  // البحث فوري = بدون debounce (زي نقطة البيع)
-  const trimmedSearch = searchTerm.trim().toLowerCase();
+  // تحسين سلاسة الإدخال: نؤخر حساب نتائج البحث الثقيلة عن الكتابة الفورية
+  const debouncedSearchTerm = useDebouncedValue(searchTerm, 120);
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
+  const trimmedSearch = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm]);
   const debouncedColumnSearch = useDebouncedValue(columnSearch, 80);
 
   // Reset الصفحة عند تغيير البحث أو الفلتر
@@ -629,14 +631,22 @@ export default function Customers() {
 
   // ============ فلترة خفيفة O(n) فقط - بدون sort ============
   const filteredCustomers = useMemo(() => {
-    // 1. البحث العام (الاسم، الهاتف، المدينة)
+    // 1. البحث العام (الاسم فقط)
     // عند البحث: نستخدم allCustomers مباشرة (بدون ترتيب) ونعرض أول 50 فقط (زي نقطة البيع)
     if (trimmedSearch) {
-      // البحث باستخدام النص المجهز مسبقاً - أسرع 4 مرات
-      const result = allCustomers.filter(c =>
-        c.normalizedSearchString && c.normalizedSearchString.includes(trimmedSearch)
-      );
-      return result.slice(0, 50); // أقصى عدد 50 نتيجة لسرعة خرافية
+      const result = [];
+      const MAX_RESULTS = 50;
+
+      // استخدام حلقة تكرار مع Break للتوقف فوراً عند الوصول للعدد المطلوب
+      // هذا يجعل البحث عن الحروف الأولى (الشائعة) فوري تماماً بدلاً من فحص كل القائمة
+      for (let i = 0; i < allCustomers.length; i++) {
+        const c = allCustomers[i];
+        if (c.normalizedSearchString && c.normalizedSearchString.includes(trimmedSearch)) {
+          result.push(c);
+          if (result.length >= MAX_RESULTS) break;
+        }
+      }
+      return result;
     }
 
     // في عدم وجود بحث: نستخدم القائمة المرتبة كاملة مع الفلاتر العادية

@@ -315,8 +315,45 @@ ipcMain.handle('db:addExpenseCategory', async (event, data) => {
 ipcMain.handle('db:updateExpenseCategory', async (event, id, data) => {
     return await dbService.updateExpenseCategory(id, data);
 });
-ipcMain.handle('db:deleteExpenseCategory', async (event, id) => {
-    return await dbService.deleteExpenseCategory(id);
+// Print HTML
+ipcMain.handle('print:printHTML', async (event, { html, title, silent }) => {
+    let printWindow = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+
+    try {
+        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+        const options = {
+            silent: silent || false,
+            printBackground: true,
+            deviceName: '' // Default printer,
+        };
+
+        return new Promise((resolve) => {
+            printWindow.webContents.print(options, (success, errorType) => {
+                if (!success) {
+                    resolve({ error: errorType });
+                } else {
+                    resolve({ success: true });
+                }
+                printWindow.close();
+                printWindow = null;
+            });
+        });
+    } catch (error) {
+        if (printWindow) {
+            printWindow.close();
+            printWindow = null;
+        }
+        return { error: error.message };
+    }
 });
 
 // Users

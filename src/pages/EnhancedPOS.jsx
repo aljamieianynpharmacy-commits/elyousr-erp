@@ -1137,7 +1137,9 @@ export default function EnhancedPOS() {
                 customerId: paymentEdit.customerId || activeInvoice.customer?.id,
                 paymentMethodId: parseInt(paymentEdit.paymentMethodId, 10) || getDefaultPaymentMethodId(),
                 amount,
-                paymentDate: paymentEdit.paymentDate,
+                paymentDate: (paymentEdit.paymentDate === getTodayDate())
+                    ? new Date().toISOString()
+                    : (paymentEdit.paymentDate || new Date().toISOString()),
                 notes: paymentEdit.notes || "",
             });
 
@@ -1466,7 +1468,9 @@ export default function EnhancedPOS() {
                 saleType: finalSaleType,
                 discount: parseFloat(currentInvoice.discount || 0),
                 notes: currentInvoice.notes || "",
-                invoiceDate: currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
+                invoiceDate: (currentInvoice.invoiceDate === getTodayDate())
+                    ? new Date().toISOString()
+                    : (currentInvoice.invoiceDate || new Date().toISOString()),
             };
 
             if (shouldPreview && isEditingSale) {

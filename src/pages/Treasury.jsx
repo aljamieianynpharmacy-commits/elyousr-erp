@@ -547,10 +547,11 @@ export default function Treasury() {
     }
 
     const payload = {
+      entryType: transactionForm.entryType,
       transactionType: transactionForm.transactionType,
       amount,
       notes: transactionForm.notes,
-      entryDate: transactionForm.entryDate,
+      entryDate: transactionForm.entryDate === todayDate() ? new Date() : transactionForm.entryDate,
       createdByUserId: toInt(currentUser?.id)
     };
 
@@ -584,6 +585,80 @@ export default function Treasury() {
     }
   };
 
+  const buildTransactionsReportHtml = ({ entries, summary, filters, treasuryName }) => {
+    return `
+      <!DOCTYPE html>
+      <html dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <title>تقرير الحركات</title>
+        <style>
+          body { font-family: 'Cairo', sans-serif; padding: 20px; direction: rtl; }
+          h1, h2, h3 { text-align: center; margin: 10px 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+          th { background-color: #f3f4f6; color: #374151; }
+          .in-row { color: #166534; }
+          .out-row { color: #991b1b; }
+          .summary-box { margin-top: 30px; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; display: flex; justify-content: space-around; background: #f9fafb; }
+          .summary-item { text-align: center; }
+          .summary-item strong { display: block; font-size: 16px; margin-top: 5px; }
+          .print-meta { text-align: center; color: #6b7280; font-size: 12px; margin-top: 40px; }
+        </style>
+      </head>
+      <body>
+        <h1>تقرير حركة الخزنة</h1>
+        <h3>${treasuryName}</h3>
+        <p style="text-align: center;">من: ${filters.fromDate} - إلى: ${filters.toDate}</p>
+        
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>التاريخ</th>
+              <th>النوع</th>
+              <th>المبلغ</th>
+              <th>البيان</th>
+              <th>بواسطة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${entries.map((row, i) => `
+              <tr class="${row.direction === 'IN' ? 'in-row' : 'out-row'}">
+                <td>${i + 1}</td>
+                <td>${formatDateTime(row.entryDate)}</td>
+                <td>${resolveEntryTypeLabel(row.entryType)}</td>
+                <td style="font-weight: bold;">${formatMoney(row.amount)}</td>
+                <td>${row.notes || '-'}</td>
+                <td>${row.createdByUserId || '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="summary-box">
+          <div class="summary-item">
+            <span>إجمالي الوارد</span>
+            <strong style="color: #16a34a;">${formatMoney(summary.totalIn)}</strong>
+          </div>
+          <div class="summary-item">
+            <span>إجمالي المنصرف</span>
+            <strong style="color: #dc2626;">${formatMoney(summary.totalOut)}</strong>
+          </div>
+          <div class="summary-item">
+            <span>الصافي</span>
+            <strong style="color: #0f3553;">${formatMoney(summary.net)}</strong>
+          </div>
+        </div>
+
+        <div class="print-meta">
+          تمت الطباعة بواسطة النظام يوم ${new Date().toLocaleString('ar-EG')}
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
   const handlePrintZReport = async () => {
     if (!dailyReport) {
       await safeAlert('لا يوجد تقرير متاح للطباعة');
@@ -592,6 +667,22 @@ export default function Treasury() {
 
     const html = buildZReportHtml({ report: dailyReport, treasuryName: selectedTreasuryName, fromDate: reportFilters.fromDate, toDate: reportFilters.toDate });
     const result = await safePrint(html, { title: `تقرير Z ${reportFilters.fromDate} - ${reportFilters.toDate}` });
+    if (result?.error) await safeAlert(result.error);
+  };
+
+  const handlePrintTransactionsReport = async () => {
+    if (!entries || entries.length === 0) {
+      await safeAlert('لا توجد حركات للطباعة');
+      return;
+    }
+
+    const html = buildTransactionsReportHtml({
+      entries,
+      summary: entriesSummary,
+      filters,
+      treasuryName: filters.treasuryId ? treasuries.find(t => t.id === Number(filters.treasuryId))?.name : 'كل الخزن'
+    });
+    const result = await safePrint(html, { title: `تقرير الحركات ${filters.fromDate}` });
     if (result?.error) await safeAlert(result.error);
   };
 
@@ -789,7 +880,7 @@ export default function Treasury() {
               </div>
             </div>
             <div className="panel-head-actions">
-              <button className="treasury-btn ghost" type="button" onClick={() => safePrint()}>
+              <button className="treasury-btn ghost" type="button" onClick={handlePrintTransactionsReport}>
                 🖨️ التقارير
               </button>
               <button className="treasury-btn secondary" type="button" onClick={() => setTransactionFormOpen(prev => !prev)}>
@@ -840,9 +931,9 @@ export default function Treasury() {
             <div className="kpi-card tone-net"><span>⬇ إجمالي الوارد</span><strong className="in-text">{formatMoney(entriesSummary.totalIn)}</strong></div>
             <div className="kpi-card tone-returns"><span>⬆ إجمالي المنصرف</span><strong className="out-text">{formatMoney(entriesSummary.totalOut)}</strong></div>
             <div className="kpi-card tone-cashflow"><span>📊 الصافي</span><strong>{formatMoney(entriesSummary.net)}</strong></div>
-            <div className="kpi-card" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }}>
+            <div className="kpi-card tone-balance">
               <span>💰 رصيد الخزنة الحالي</span>
-              <strong style={{ color: '#0f172a' }}>
+              <strong>
                 {filters.treasuryId
                   ? formatMoney(treasuries.find(t => t.id === Number(filters.treasuryId))?.currentBalance || 0)
                   : formatMoney(treasuries.reduce((sum, t) => sum + Number(t.currentBalance || 0), 0))}

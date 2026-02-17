@@ -617,12 +617,37 @@
   background: #0f766e;
 }
 
-.kpi-card.tone-sales::before { background: linear-gradient(180deg, #0ea5e9, #0284c7); }
-.kpi-card.tone-returns::before { background: linear-gradient(180deg, #ef4444, #dc2626); }
-.kpi-card.tone-net::before { background: linear-gradient(180deg, #16a34a, #15803d); }
-.kpi-card.tone-revenue::before { background: linear-gradient(180deg, #0284c7, #0369a1); }
-.kpi-card.tone-payments::before { background: linear-gradient(180deg, #0891b2, #0e7490); }
-.kpi-card.tone-cashflow::before { background: linear-gradient(180deg, #0f766e, #115e59); }
+.kpi-card.tone-net {
+  background: linear-gradient(135deg, #dcfce7 0%, #ffffff 100%);
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+.kpi-card.tone-net::before { background: #16a34a; }
+.kpi-card.tone-net span, .kpi-card.tone-net strong { color: #15803d; }
+
+.kpi-card.tone-returns {
+  background: linear-gradient(135deg, #fee2e2 0%, #ffffff 100%);
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+.kpi-card.tone-returns::before { background: #dc2626; }
+.kpi-card.tone-returns span, .kpi-card.tone-returns strong { color: #b91c1c; }
+
+.kpi-card.tone-cashflow {
+  background: linear-gradient(135deg, #e0f2fe 0%, #ffffff 100%);
+  border: 1px solid #bae6fd;
+  color: #075985;
+}
+.kpi-card.tone-cashflow::before { background: #0284c7; }
+.kpi-card.tone-cashflow span, .kpi-card.tone-cashflow strong { color: #0369a1; }
+
+.kpi-card.tone-balance {
+  background: linear-gradient(135deg, #eef2ff 0%, #ffffff 100%);
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+}
+.kpi-card.tone-balance::before { background: #4f46e5; }
+.kpi-card.tone-balance span, .kpi-card.tone-balance strong { color: #4338ca; }
 
 .kpi-card span,
 .report-card h3,

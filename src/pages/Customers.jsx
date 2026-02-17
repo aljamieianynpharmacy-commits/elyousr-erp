@@ -61,7 +61,6 @@ const getBalanceClass = (balance) => {
   return 'customers-balance-zero';
 };
 
-const normalizeSearchValue = (value) => String(value ?? '').toLowerCase().trim();
 const SEARCH_HIGHLIGHT_STYLE = { backgroundColor: '#fbbf24', fontWeight: 'bold' };
 
 const highlightMatch = (value, searchTerm) => {
@@ -70,15 +69,38 @@ const highlightMatch = (value, searchTerm) => {
 
   if (!text || !normalizedTerm) return text;
 
-  const escapedTerm = normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`(${escapedTerm})`, 'gi');
-  const parts = text.split(regex);
+  const lowerText = text.toLowerCase();
+  const lowerTerm = normalizedTerm.toLowerCase();
+  const termLength = normalizedTerm.length;
 
-  return parts.map((part, index) => (
-    part.toLowerCase() === normalizedTerm.toLowerCase()
-      ? <span key={index} style={SEARCH_HIGHLIGHT_STYLE}>{part}</span>
-      : part
-  ));
+  // Fast path: no match -> return plain text (avoid allocations/JSX work)
+  if (!lowerText.includes(lowerTerm)) return text;
+
+  const parts = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerTerm, cursor);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(text.slice(cursor, matchIndex));
+    }
+
+    const end = matchIndex + termLength;
+    parts.push(
+      <span key={`h-${matchIndex}-${end}`} style={SEARCH_HIGHLIGHT_STYLE}>
+        {text.slice(matchIndex, end)}
+      </span>
+    );
+
+    cursor = end;
+    matchIndex = lowerText.indexOf(lowerTerm, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return parts;
 };
 
 const useDebouncedValue = (value, delayMs) => {
@@ -138,7 +160,7 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
 
   return (
     <div className={rowClassName} style={style} role="row">
-      {visibleColumns.id && <div className="customers-cell" role="cell">{highlightMatch(customer.id, highlightTerm)}</div>}
+      {visibleColumns.id && <div className="customers-cell" role="cell">{customer.id}</div>}
       {visibleColumns.name && (
         <div className="customers-cell customers-name-cell" role="cell">
           <div className="customers-name-content">
@@ -155,16 +177,16 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
       {visibleColumns.type && (
         <div className="customers-cell" role="cell">
           <span className={`customers-type-badge ${getCustomerTypeClass(customer.customerType)}`}>
-            {highlightMatch(customer.customerType, highlightTerm)}
+            {customer.customerType}
           </span>
         </div>
       )}
-      {visibleColumns.phone && <div className="customers-cell customers-muted" role="cell">{customer.phone ? highlightMatch(customer.phone, highlightTerm) : '-'}</div>}
-      {visibleColumns.phone2 && <div className="customers-cell customers-muted" role="cell">{customer.phone2 ? highlightMatch(customer.phone2, highlightTerm) : '-'}</div>}
-      {visibleColumns.address && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.address ? highlightMatch(customer.address, highlightTerm) : '-'}</div>}
-      {visibleColumns.city && <div className="customers-cell customers-muted" role="cell">{customer.city ? highlightMatch(customer.city, highlightTerm) : '-'}</div>}
-      {visibleColumns.district && <div className="customers-cell customers-muted" role="cell">{customer.district ? highlightMatch(customer.district, highlightTerm) : '-'}</div>}
-      {visibleColumns.notes && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.notes ? highlightMatch(customer.notes, highlightTerm) : '-'}</div>}
+      {visibleColumns.phone && <div className="customers-cell customers-muted" role="cell">{customer.phone || '-'}</div>}
+      {visibleColumns.phone2 && <div className="customers-cell customers-muted" role="cell">{customer.phone2 || '-'}</div>}
+      {visibleColumns.address && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.address || '-'}</div>}
+      {visibleColumns.city && <div className="customers-cell customers-muted" role="cell">{customer.city || '-'}</div>}
+      {visibleColumns.district && <div className="customers-cell customers-muted" role="cell">{customer.district || '-'}</div>}
+      {visibleColumns.notes && <div className="customers-cell customers-muted customers-ellipsis" role="cell">{customer.notes || '-'}</div>}
       {visibleColumns.creditLimit && (
         <div className="customers-cell customers-muted customers-bold" role="cell">
           {(customer.creditLimit || 0).toFixed(2)}
@@ -487,7 +509,6 @@ export default function Customers() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
-  const paymentInputRef = useRef(null);
   const listRef = useRef(null);
   const [showReports, setShowReports] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState({
@@ -536,13 +557,13 @@ export default function Customers() {
   // تحسين سلاسة الإدخال: نؤخر حساب نتائج البحث الثقيلة عن الكتابة الفورية
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 120);
   const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
-  const trimmedSearch = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm]);
+  const filteredSearchTerm = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm]);
   const debouncedColumnSearch = useDebouncedValue(columnSearch, 80);
 
   // Reset الصفحة عند تغيير البحث أو الفلتر
   useEffect(() => {
     setCurrentPage(1);
-  }, [trimmedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
+  }, [filteredSearchTerm, filterType, debouncedColumnSearch, sortCol, sortDir]);
 
   const loadPaymentMethods = useCallback(async () => {
     try {
@@ -633,7 +654,7 @@ export default function Customers() {
   const filteredCustomers = useMemo(() => {
     // 1. البحث العام (الاسم فقط)
     // عند البحث: نستخدم allCustomers مباشرة (بدون ترتيب) ونعرض أول 50 فقط (زي نقطة البيع)
-    if (trimmedSearch) {
+    if (filteredSearchTerm) {
       const result = [];
       const MAX_RESULTS = 50;
 
@@ -641,7 +662,7 @@ export default function Customers() {
       // هذا يجعل البحث عن الحروف الأولى (الشائعة) فوري تماماً بدلاً من فحص كل القائمة
       for (let i = 0; i < allCustomers.length; i++) {
         const c = allCustomers[i];
-        if (c.normalizedSearchString && c.normalizedSearchString.includes(trimmedSearch)) {
+        if (c.normalizedSearchString && c.normalizedSearchString.includes(filteredSearchTerm)) {
           result.push(c);
           if (result.length >= MAX_RESULTS) break;
         }
@@ -676,7 +697,7 @@ export default function Customers() {
     }
 
     return result;
-  }, [allCustomers, sortedCustomers, trimmedSearch, filterType, debouncedColumnSearch]);
+  }, [allCustomers, sortedCustomers, filteredSearchTerm, filterType, debouncedColumnSearch]);
 
   const totalItems = filteredCustomers.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -731,11 +752,6 @@ export default function Customers() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    await saveCustomer();
-  };
-
   const closeCustomerModal = () => {
     setShowModal(false);
     setEditingCustomer(null);
@@ -751,47 +767,6 @@ export default function Customers() {
   const openSettings = () => {
     setTempThreshold(overdueThreshold);
     setShowSettings(true);
-  };
-
-  const handleEdit = (customer) => {
-    setEditingCustomer(customer);
-    setFormData({
-      name: customer.name,
-      phone: customer.phone || '',
-      phone2: customer.phone2 || '',
-      address: customer.address || '',
-      city: customer.city || '',
-      district: customer.district || '',
-      notes: customer.notes || '',
-      creditLimit: customer.creditLimit || 0,
-      customerType: customer.customerType || 'عادي'
-    });
-    setShowModal(true);
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm('هل أنت متأكد من الحذف؟')) return;
-
-    try {
-      const result = await window.api.deleteCustomer(id);
-
-      if (result.error) {
-        console.error('Error deleting customer:', result.error);
-        safeAlert('خطأ في الحذف');
-      } else {
-        await refreshCustomers();
-        safeAlert('تم الحذف بنجاح');
-      }
-    } catch (err) {
-      console.error('Exception deleting customer:', err);
-      safeAlert('خطأ في الحذف');
-    }
-  };
-
-  const handlePayment = (customer) => {
-    setSelectedCustomer(customer);
-    setPaymentData({ amount: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
-    setShowPaymentModal(true);
   };
 
   const submitPayment = async (paymentFormData) => {
@@ -869,13 +844,6 @@ export default function Customers() {
     () => allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length,
     [allCustomers, tempThreshold]
   );
-
-  // Auto-focus على مربع الدفع عند فتح الموديل
-  useEffect(() => {
-    if (showPaymentModal && paymentInputRef.current) {
-      setTimeout(() => paymentInputRef.current?.focus(), 0);
-    }
-  }, [showPaymentModal]);
 
   // Callbacks للأزرار - تمنع إعادة إنشاء الدوال في كل render
   const handleShowLedger = useCallback((customerId) => {
@@ -971,7 +939,7 @@ export default function Customers() {
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
-  }, [trimmedSearch, filterType]);
+  }, [filteredSearchTerm, filterType]);
 
   useEffect(() => {
     if (selectedSearchIndex >= 0 && listRef.current) {
@@ -1794,7 +1762,7 @@ export default function Customers() {
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
-          highlightTerm={trimmedSearch}
+          highlightTerm={filteredSearchTerm}
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}

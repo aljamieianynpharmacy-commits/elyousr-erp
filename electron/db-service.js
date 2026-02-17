@@ -3821,6 +3821,63 @@ const dbService = {
                 linkedEntryAgg.map((row) => [row.treasuryId, row?._count?._all || 0])
             );
 
+            // Fetch payment methods to map IDs to codes
+            const paymentMethods = await prisma.paymentMethod.findMany();
+            const pmMap = new Map(paymentMethods.map(pm => [pm.id, { code: pm.code, name: pm.name }]));
+
+            // Aggregate balances by Treasury + PaymentMethod
+            // We need to sum amounts based on direction (IN vs OUT)
+            // Group by: treasuryId, paymentMethodId, direction
+            const breakdownAgg = await prisma.treasuryEntry.groupBy({
+                by: ['treasuryId', 'paymentMethodId', 'direction'],
+                where: {
+                    treasuryId: { in: treasuries.map((row) => row.id) },
+                    entryType: { not: TREASURY_ENTRY_TYPE.OPENING_BALANCE } // Optional: exclude opening balance if it doesn't have PM?
+                },
+                _sum: { amount: true },
+                _count: { _all: true }
+            });
+
+            // Process aggregation into a map: treasuryId -> { [pmCode]: { balance, count, name } }
+            const breakdownMap = {}; // { [treasuryId]: [ { code, name, balance, count } ] }
+
+            breakdownAgg.forEach(row => {
+                const tid = row.treasuryId;
+                const pmid = row.paymentMethodId;
+                const direction = row.direction;
+                const amount = row._sum.amount || 0;
+                const count = row._count._all || 0;
+
+                if (!breakdownMap[tid]) breakdownMap[tid] = {};
+
+                // key for the method in the map (e.g., 'CASH', 'VODAFONE_CASH')
+                // If paymentMethodId is null, usually means CASH or internal. Let's assume CASH default for now or 'OTHER'
+                let code = 'CASH';
+                let name = 'نقدي';
+
+                if (pmid && pmMap.has(pmid)) {
+                    code = pmMap.get(pmid).code;
+                    name = pmMap.get(pmid).name;
+                } else if (pmid === null) {
+                    code = 'CASH';
+                    name = 'نقدي';
+                } else {
+                    code = 'OTHER';
+                    name = 'أخرى';
+                }
+
+                if (!breakdownMap[tid][code]) {
+                    breakdownMap[tid][code] = { code, name, balance: 0, count: 0 };
+                }
+
+                if (direction === 'IN') {
+                    breakdownMap[tid][code].balance += amount;
+                } else {
+                    breakdownMap[tid][code].balance -= amount;
+                }
+                breakdownMap[tid][code].count += count;
+            });
+
             const enriched = treasuries.map((treasury) => {
                 const nonOpeningEntryCount = linkedEntryMap.get(treasury.id) || 0;
                 const hasLinkedOperations = nonOpeningEntryCount > 0;
@@ -3828,12 +3885,17 @@ const dbService = {
                     ? activeCount > 1
                     : activeCount >= 1;
 
+                // NEW: Get breakdown
+                const breakdownObj = breakdownMap[treasury.id] || {};
+                const breakdown = Object.values(breakdownObj).sort((a, b) => b.balance - a.balance);
+
                 return {
                     ...treasury,
                     nonOpeningEntryCount,
                     hasLinkedOperations,
                     canEdit: true, // Always allow editing (name, description, etc.)
-                    canDelete
+                    canDelete,
+                    breakdown
                 };
             });
 

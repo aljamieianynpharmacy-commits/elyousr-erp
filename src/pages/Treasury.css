@@ -1200,3 +1200,52 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Wallet Breakdown inside Treasury Card ── */
+.treasury-breakdown {
+  margin: 0 16px 16px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #cbd5e1;
+}
+
+.breakdown-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.breakdown-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.breakdown-name {
+  font-weight: 700;
+  color: #334155;
+}
+
+.breakdown-count {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.breakdown-balance {
+  font-weight: 700;
+  color: #0f172a;
+  font-family: 'Tajawal', sans-serif;
+  letter-spacing: 0.5px;
+}

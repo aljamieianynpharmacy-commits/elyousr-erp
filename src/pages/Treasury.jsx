@@ -1019,6 +1019,22 @@ export default function Treasury() {
                   <div className="card-amount">{formatMoney(treasury.currentBalance)}</div>
                   <div className="card-meta"><span>الكود: {treasury.code || '-'}</span><span>القيود: {treasury?._count?.entries || 0}</span></div>
                 </div>
+
+                {/* Wallet Breakdown Section */}
+                {treasury.breakdown && treasury.breakdown.length > 0 && (
+                  <div className="treasury-breakdown">
+                    {treasury.breakdown.map((item) => (
+                      <div key={item.code} className="breakdown-item">
+                        <div className="breakdown-info">
+                          <span className="breakdown-name">{item.name}</span>
+                          <span className="breakdown-count">{item.count} عملية</span>
+                        </div>
+                        <span className="breakdown-balance" style={{ direction: 'ltr' }}>{formatMoney(item.balance)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="treasury-card-hint">
                   {treasury.hasLinkedOperations
                     ? '⚠️ مرتبطة بعمليات (أرشفة آمنة)'

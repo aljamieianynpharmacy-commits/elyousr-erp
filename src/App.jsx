@@ -122,7 +122,7 @@ function App() {
   );
 
   return (
-    <div className="app-container" style={{ display: 'flex', minHeight: '100vh', direction: 'rtl' }}>
+    <div className="app-container" style={{ display: 'flex', height: '100vh', overflow: 'hidden', direction: 'rtl' }}>
       <div
         className="sidebar"
         style={{

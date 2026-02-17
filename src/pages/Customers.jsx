@@ -1794,7 +1794,7 @@ export default function Customers() {
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
-          highlightTerm=""
+          highlightTerm={trimmedSearch}
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}

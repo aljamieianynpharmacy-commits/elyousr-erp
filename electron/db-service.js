@@ -4468,7 +4468,6 @@ const dbService = {
                         targetTreasury: true
                     },
                     orderBy: [
-                        { entryDate: 'desc' },
                         { id: 'desc' }
                     ]
                 }),

@@ -766,9 +766,28 @@ export default function Treasury() {
       )}
 
       {activeTab === 'transactions' && (
-        <section className="treasury-panel">
-          <div className="panel-head">
-            <h2>🔄 حركات الخزنة</h2>
+        <section className="treasury-panel" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="panel-head" style={{ flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+              <h2>🔄 حركات الخزنة</h2>
+              <div className="inline-filters" style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, marginRight: '16px' }}>
+                <select className="treasury-input small" value={filters.treasuryId} onChange={(e) => setFilters(p => ({ ...p, treasuryId: e.target.value }))} style={{ padding: '6px', fontSize: '0.9rem', width: 'auto' }}>
+                  <option value="">كل الخزن</option>
+                  {treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name}</option>))}
+                </select>
+                <input className="treasury-input small" type="date" value={filters.fromDate} onChange={(e) => setFilters(p => ({ ...p, fromDate: e.target.value }))} style={{ padding: '6px', fontSize: '0.9rem', width: 'auto' }} />
+                <input className="treasury-input small" type="date" value={filters.toDate} onChange={(e) => setFilters(p => ({ ...p, toDate: e.target.value }))} style={{ padding: '6px', fontSize: '0.9rem', width: 'auto' }} />
+                <select className="treasury-input small" value={filters.direction} onChange={(e) => setFilters(p => ({ ...p, direction: e.target.value }))} style={{ padding: '6px', fontSize: '0.9rem', width: 'auto' }}>
+                  <option value="ALL">كل الاتجاهات</option>
+                  <option value="IN">وارد</option>
+                  <option value="OUT">منصرف</option>
+                </select>
+                <select className="treasury-input small" value={filters.entryType} onChange={(e) => setFilters(p => ({ ...p, entryType: e.target.value }))} style={{ padding: '6px', fontSize: '0.9rem', width: 'auto' }}>
+                  <option value="ALL">كل القيود</option>
+                  {ENTRY_TYPE_OPTIONS.map((row) => (<option key={row} value={row}>{resolveEntryTypeLabel(row)}</option>))}
+                </select>
+              </div>
+            </div>
             <div className="panel-head-actions">
               <button className="treasury-btn ghost" type="button" onClick={() => safePrint()}>
                 🖨️ التقارير
@@ -814,38 +833,21 @@ export default function Treasury() {
             </div>
           )}
 
-          {/* ── Filters ── */}
-          <div className="daily-filter-shell">
-            <div className="daily-filter-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-              <label className="daily-filter-field"><span>الخزنة</span>
-                <select className="treasury-input" value={filters.treasuryId} onChange={(e) => setFilters(p => ({ ...p, treasuryId: e.target.value }))}>
-                  <option value="">كل الخزن</option>
-                  {treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name}</option>))}
-                </select>
-              </label>
-              <label className="daily-filter-field"><span>من تاريخ</span><input className="treasury-input" type="date" value={filters.fromDate} onChange={(e) => setFilters(p => ({ ...p, fromDate: e.target.value }))} /></label>
-              <label className="daily-filter-field"><span>إلى تاريخ</span><input className="treasury-input" type="date" value={filters.toDate} onChange={(e) => setFilters(p => ({ ...p, toDate: e.target.value }))} /></label>
-              <label className="daily-filter-field"><span>الاتجاه</span>
-                <select className="treasury-input" value={filters.direction} onChange={(e) => setFilters(p => ({ ...p, direction: e.target.value }))}>
-                  <option value="ALL">الكل</option>
-                  <option value="IN">وارد</option>
-                  <option value="OUT">منصرف</option>
-                </select>
-              </label>
-              <label className="daily-filter-field"><span>نوع القيد</span>
-                <select className="treasury-input" value={filters.entryType} onChange={(e) => setFilters(p => ({ ...p, entryType: e.target.value }))}>
-                  <option value="ALL">الكل</option>
-                  {ENTRY_TYPE_OPTIONS.map((row) => (<option key={row} value={row}>{resolveEntryTypeLabel(row)}</option>))}
-                </select>
-              </label>
-            </div>
-          </div>
+
 
           {/* ── KPI Summary ── */}
-          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 14 }}>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 14 }}>
             <div className="kpi-card tone-net"><span>⬇ إجمالي الوارد</span><strong className="in-text">{formatMoney(entriesSummary.totalIn)}</strong></div>
             <div className="kpi-card tone-returns"><span>⬆ إجمالي المنصرف</span><strong className="out-text">{formatMoney(entriesSummary.totalOut)}</strong></div>
             <div className="kpi-card tone-cashflow"><span>📊 الصافي</span><strong>{formatMoney(entriesSummary.net)}</strong></div>
+            <div className="kpi-card" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }}>
+              <span>💰 رصيد الخزنة الحالي</span>
+              <strong style={{ color: '#0f172a' }}>
+                {filters.treasuryId
+                  ? formatMoney(treasuries.find(t => t.id === Number(filters.treasuryId))?.currentBalance || 0)
+                  : formatMoney(treasuries.reduce((sum, t) => sum + Number(t.currentBalance || 0), 0))}
+              </strong>
+            </div>
           </div>
 
           {/* ── Entries Count ── */}
@@ -855,7 +857,7 @@ export default function Treasury() {
 
           {/* ── Grouped Tables ── */}
           {/* ── Main Table (All Transactions) ── */}
-          <div className="table-wrap" style={{ marginBottom: '24px' }}>
+          <div className="table-wrap" style={{ marginBottom: '24px', flex: 1, overflowY: 'auto' }}>
             <table className="treasury-table">
               <thead>
                 <tr>

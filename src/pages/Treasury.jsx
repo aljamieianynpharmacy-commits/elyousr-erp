@@ -174,7 +174,7 @@ const buildZReportHtml = ({ report, treasuryName, fromDate, toDate }) => {
   .no-print button { border: none; border-radius: 8px; padding: 8px 14px; background: #0f766e; color: #fff; cursor: pointer; }
   @media print { .no-print { display: none; } }
   </style></head><body><div class="page">
-  <h1>تقرير Z للخزنة</h1>
+  <h1>تقرير  للخزنة</h1>
   <div class="meta">الفترة: ${escapeHtml(fromDate)} - ${escapeHtml(toDate)} | الخزنة: ${escapeHtml(treasuryName)} | وقت الطباعة: ${escapeHtml(formatDateTime(new Date()))}</div>
   <div class="grid">
     <div class="card"><div class="label">إجمالي المبيعات</div><div class="value">${escapeHtml(formatMoney(sales.totalSales || 0))}</div></div>
@@ -854,7 +854,7 @@ export default function Treasury() {
     }
 
     const html = buildZReportHtml({ report: dailyReport, treasuryName: selectedTreasuryName, fromDate: reportFilters.fromDate, toDate: reportFilters.toDate });
-    const result = await safePrint(html, { title: `تقرير Z ${reportFilters.fromDate} - ${reportFilters.toDate}` });
+    const result = await safePrint(html, { title: `تقرير  ${reportFilters.fromDate} - ${reportFilters.toDate}` });
     if (result?.error) await safeAlert(result.error);
   };
 
@@ -1244,7 +1244,7 @@ export default function Treasury() {
           <div className="panel-head">
             <h2>📈 لوحة الإيراد اليومي</h2>
             <div className="panel-head-actions">
-              <button className="treasury-btn ghost" type="button" onClick={handlePrintZReport} disabled={!dailyReport}>🖨️ طباعة تقرير Z</button>
+              <button className="treasury-btn ghost" type="button" onClick={handlePrintZReport} disabled={!dailyReport}>🖨️ طباعة تقرير </button>
             </div>
           </div>
 

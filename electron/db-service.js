@@ -2915,7 +2915,15 @@ const dbService = {
                 return { error: 'Invalid customerId' };
             }
 
-            const paymentDate = parsePaymentDateInput(paymentData?.paymentDate);
+            // If payment date is today, use current time. Otherwise use start of day.
+            // Parse the input date (user selected day)
+            const paymentDateInput = paymentData?.paymentDate ? new Date(paymentData.paymentDate) : new Date();
+
+            // Apply current time to the selected date
+            // This ensures even backdated payments have a time component (preserving entry order)
+            const now = new Date();
+            const paymentDate = new Date(paymentDateInput);
+            paymentDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
             const createdByUserId = parsePositiveInt(paymentData?.createdByUserId ?? paymentData?.userId);
 
             const rawSplitRows = normalizeSplitPaymentsInput(
@@ -5180,7 +5188,12 @@ const dbService = {
         try {
             const supplierId = parsePositiveInt(paymentData?.supplierId);
             const amount = Math.max(0, toNumber(paymentData?.amount));
-            const paymentDate = parseDateOrDefault(paymentData?.paymentDate, new Date());
+
+            const paymentDateInput = paymentData?.paymentDate ? new Date(paymentData.paymentDate) : new Date();
+            // If payment date is today, use current time. Otherwise use start of day.
+            const today = new Date();
+            const isToday = paymentDateInput.toDateString() === today.toDateString();
+            const paymentDate = isToday ? new Date() : startOfDay(paymentDateInput);
 
             if (!supplierId) {
                 return { error: 'Invalid supplierId' };

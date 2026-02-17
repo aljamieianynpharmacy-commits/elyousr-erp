@@ -22,14 +22,13 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
   font-family: 'Tajawal', sans-serif;
   font-weight: 400;
 }
 
 #root {
   width: 100%;
-  min-height: 100vh;
+  min-height: 0;
 }
 
 /* Card Styling */

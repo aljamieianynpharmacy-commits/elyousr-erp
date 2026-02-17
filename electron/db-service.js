@@ -5342,16 +5342,42 @@ const dbService = {
         try {
             const parsedId = parsePositiveInt(id);
             if (!parsedId) return { error: 'Invalid expenseId' };
+
             const title = String(expenseData?.title || '').trim();
             const amount = Math.max(0, toNumber(expenseData?.amount));
             if (!title) return { error: 'Expense title is required' };
             if (amount <= 0) return { error: 'Invalid expense amount' };
+
             const categoryId = parsePositiveInt(expenseData?.categoryId) || null;
             const notes = String(expenseData?.notes || '').trim() || null;
             const expenseDate = parseDateOrDefault(expenseData?.expenseDate, undefined);
+
             const data = { title, amount, categoryId, notes };
             if (expenseDate) data.expenseDate = expenseDate;
-            return await prisma.expense.update({ where: { id: parsedId }, data, include: { category: true } });
+
+            return await prisma.$transaction(async (tx) => {
+                const updatedExpense = await tx.expense.update({
+                    where: { id: parsedId },
+                    data,
+                    include: { category: true }
+                });
+
+                // Update associated TreasuryEntry to keep balance/totals in sync
+                // Note: Treasury/PaymentMethod cannot be changed in edit mode currently, so we focus on amount/date/notes
+                await tx.treasuryEntry.updateMany({
+                    where: {
+                        referenceType: 'EXPENSE',
+                        referenceId: parsedId
+                    },
+                    data: {
+                        amount,
+                        entryDate: updatedExpense.expenseDate,
+                        notes: `Expense #${updatedExpense.id}${updatedExpense.title ? ` - ${updatedExpense.title}` : ''}`
+                    }
+                });
+
+                return updatedExpense;
+            });
         } catch (error) {
             return { error: error.message };
         }

@@ -194,7 +194,7 @@ function App() {
         </div>
       </div>
 
-      <div className="main-content" style={{ flex: 1, padding: '30px', backgroundColor: '#f9fafb', overflowY: 'auto' }}>
+      <div className="main-content" style={{ flex: 1, padding: '30px 30px 10px 30px', backgroundColor: '#f9fafb', overflowY: 'auto' }}>
         {renderPage()}
       </div>
     </div>

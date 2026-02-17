@@ -3824,7 +3824,7 @@ const dbService = {
                     ...treasury,
                     nonOpeningEntryCount,
                     hasLinkedOperations,
-                    canEdit: !hasLinkedOperations,
+                    canEdit: true, // Always allow editing (name, description, etc.)
                     canDelete
                 };
             });

@@ -1057,7 +1057,7 @@ export default function Treasury() {
       )}
 
       {activeTab === 'transactions' && (
-        <section className="treasury-panel" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+        <section className="treasury-panel" style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
           <div className="panel-head" style={{ flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
               <h2>🔄 حركات الخزنة</h2>
@@ -1408,7 +1408,7 @@ export default function Treasury() {
       )}
 
       {activeTab === 'expenses' && (
-        <section className="treasury-panel" style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <section className="treasury-panel" style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div className="panel-head">
             <h2>المصروفات</h2>
             <div className="panel-head-actions">

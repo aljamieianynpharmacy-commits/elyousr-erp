@@ -533,14 +533,16 @@ export default function Customers() {
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [allCustomers, setAllCustomers] = useState([]);
 
-  // Debounce خفيف فقط لتجنب lag مع الكتابة السريعة جداً (الفلترة محلية = فورية)
-  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 100);
-  const debouncedColumnSearch = useDebouncedValue(columnSearch, 100);
+  // البحث فوري = بدون debounce (زي نقطة البيع)
+  const trimmedSearch = searchTerm.trim().toLowerCase();
+  const debouncedColumnSearch = useDebouncedValue(columnSearch, 80);
+  // الـ highlight يتأخر 30ms عشان الـ regex مكلف - الليست تتحدث فوراً والألوان بعدها بلحظة
+  const deferredHighlight = useDebouncedValue(searchTerm.trim(), 30);
 
   // Reset الصفحة عند تغيير البحث أو الفلتر
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
+  }, [trimmedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
 
   const loadPaymentMethods = useCallback(async () => {
     try {
@@ -597,18 +599,39 @@ export default function Customers() {
     loadPaymentMethods();
   }, [loadPaymentMethods]);
 
-  // ============ فلترة + بحث + ترتيب + ترقيم - كله محلي = فوري ============
+  // ============ الترتيب مرة واحدة - لا يتأثر بالبحث ============
+  const sortedCustomers = useMemo(() => {
+    return [...allCustomers].sort((a, b) => {
+      let aVal, bVal;
+      if (sortCol === 'balance') {
+        aVal = a.balance || 0;
+        bVal = b.balance || 0;
+      } else if (sortCol === 'lastPaymentDate') {
+        aVal = a.lastPaymentDate ? new Date(a.lastPaymentDate).getTime() : 0;
+        bVal = b.lastPaymentDate ? new Date(b.lastPaymentDate).getTime() : 0;
+      } else if (sortCol === 'name') {
+        aVal = (a.name || '').toLowerCase();
+        bVal = (b.name || '').toLowerCase();
+        return sortDir === 'asc' ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      } else {
+        aVal = a.id || 0;
+        bVal = b.id || 0;
+      }
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+  }, [allCustomers, sortCol, sortDir]);
+
+  // ============ فلترة خفيفة O(n) فقط - بدون sort ============
   const filteredCustomers = useMemo(() => {
-    let result = allCustomers;
+    let result = sortedCustomers;
 
     // 1. البحث العام (الاسم، الهاتف، المدينة)
-    if (debouncedSearch) {
-      const term = debouncedSearch.toLowerCase();
+    if (trimmedSearch) {
       result = result.filter(c =>
-        (c.name && c.name.toLowerCase().includes(term)) ||
-        (c.phone && c.phone.includes(term)) ||
-        (c.city && c.city.toLowerCase().includes(term)) ||
-        (c.address && c.address.toLowerCase().includes(term))
+        (c.name && c.name.toLowerCase().includes(trimmedSearch)) ||
+        (c.phone && c.phone.includes(trimmedSearch)) ||
+        (c.city && c.city.toLowerCase().includes(trimmedSearch)) ||
+        (c.address && c.address.toLowerCase().includes(trimmedSearch))
       );
     }
 
@@ -635,29 +658,8 @@ export default function Customers() {
       );
     }
 
-    // 4. الترتيب
-    result = [...result].sort((a, b) => {
-      let aVal, bVal;
-      if (sortCol === 'balance') {
-        aVal = a.balance || 0;
-        bVal = b.balance || 0;
-      } else if (sortCol === 'lastPaymentDate') {
-        aVal = a.lastPaymentDate ? new Date(a.lastPaymentDate).getTime() : 0;
-        bVal = b.lastPaymentDate ? new Date(b.lastPaymentDate).getTime() : 0;
-      } else if (sortCol === 'name') {
-        aVal = (a.name || '').toLowerCase();
-        bVal = (b.name || '').toLowerCase();
-        return sortDir === 'asc' ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
-      } else {
-        // createdAt or id
-        aVal = a.id || 0;
-        bVal = b.id || 0;
-      }
-      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
-    });
-
     return result;
-  }, [allCustomers, debouncedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
+  }, [sortedCustomers, trimmedSearch, filterType, debouncedColumnSearch]);
 
   const totalItems = filteredCustomers.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -952,7 +954,7 @@ export default function Customers() {
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
-  }, [debouncedSearch, filterType]);
+  }, [trimmedSearch, filterType]);
 
   useEffect(() => {
     if (selectedSearchIndex >= 0 && listRef.current) {
@@ -1775,7 +1777,7 @@ export default function Customers() {
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
-          highlightTerm={debouncedSearch}
+          highlightTerm={deferredHighlight}
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}

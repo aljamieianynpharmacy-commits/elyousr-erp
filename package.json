@@ -14,7 +14,61 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status",
     "rebuild:customer-financials": "node scripts/rebuild-customer-financials.js",
-    "db:legacy:customer-financial-guard": "node scripts/legacy/legacy-customer-financial-guard.js"
+    "db:legacy:customer-financial-guard": "node scripts/legacy/legacy-customer-financial-guard.js",
+    "dist": "npm run build && node scripts/prepare-dist.js && electron-builder"
+  },
+  "build": {
+    "appId": "com.erp.desktop",
+    "productName": "ERP System",
+    "directories": {
+      "output": "release-build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "node_modules/.prisma/client/**/*",
+      "node_modules/@prisma/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/.prisma/client/**/*",
+      "node_modules/@prisma/engines/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/.prisma",
+        "to": "node_modules/.prisma",
+        "filter": [
+          "**/*",
+          "!**/*.tmp*"
+        ]
+      },
+      {
+        "from": "node_modules/@prisma/client",
+        "to": "node_modules/@prisma/client",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "keywords": [],
   "author": "",
@@ -28,7 +82,6 @@
     "@vitejs/plugin-react": "^5.1.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
-    "electron": "^40.0.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.563.0",
@@ -37,5 +90,9 @@
     "react-dom": "^19.2.4",
     "react-window": "^1.8.10",
     "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "electron": "^40.0.0",
+    "electron-builder": "^26.7.0"
   }
 }

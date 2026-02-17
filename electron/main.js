@@ -1,5 +1,50 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const dotenv = require('dotenv')
+const Module = require('module')
+
+if (app.isPackaged && process.resourcesPath) {
+    const packagedNodeModules = path.join(process.resourcesPath, 'node_modules');
+    const currentNodePath = process.env.NODE_PATH || '';
+    const alreadyIncluded = currentNodePath
+        .split(path.delimiter)
+        .filter(Boolean)
+        .includes(packagedNodeModules);
+
+    if (!alreadyIncluded) {
+        process.env.NODE_PATH = currentNodePath
+            ? `${packagedNodeModules}${path.delimiter}${currentNodePath}`
+            : packagedNodeModules;
+        Module._initPaths();
+    }
+}
+
+const loadEnvironmentVariables = () => {
+    const candidates = [];
+    candidates.push(path.join(__dirname, 'runtime.env'));
+
+    if (app.isPackaged && process.resourcesPath) {
+        candidates.push(path.join(process.resourcesPath, '.env'));
+        candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', '.env'));
+    } else {
+        candidates.push(path.join(process.cwd(), '.env'));
+        candidates.push(path.join(__dirname, '..', '.env'));
+    }
+
+    for (const envPath of candidates) {
+        if (fs.existsSync(envPath)) {
+            dotenv.config({ path: envPath, override: false });
+        }
+    }
+
+    if (!process.env.DATABASE_URL) {
+        console.warn('DATABASE_URL is not defined. Expected .env in one of:', candidates);
+    }
+};
+
+loadEnvironmentVariables();
+
 const dbService = require('./db-service')
 
 function createWindow() {

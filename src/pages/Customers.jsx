@@ -95,10 +95,10 @@ const useDebouncedValue = (value, delayMs) => {
 const formatCurrency = (value) => {
   try {
     const num = typeof value === 'string' ? parseFloat(value || 0) : (value || 0);
-    return new Intl.NumberFormat('ar-EG', { 
-      style: 'currency', 
-      currency: 'EGP', 
-      maximumFractionDigits: 2 
+    return new Intl.NumberFormat('ar-EG', {
+      style: 'currency',
+      currency: 'EGP',
+      maximumFractionDigits: 2
     }).format(num);
   } catch (e) {
     return value;
@@ -477,9 +477,7 @@ const CustomersQuickStats = memo(function CustomersQuickStats({
 });
 
 export default function Customers() {
-  const [loading, setLoading] = useState(true);
-  const [customersTotalCount, setCustomersTotalCount] = useState(0);
-  const [apiTotalPages, setApiTotalPages] = useState(1);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showLedger, setShowLedger] = useState(null);
@@ -487,11 +485,10 @@ export default function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); // all, VIP, عادي, تاجر جملة
+  const [filterType, setFilterType] = useState('all');
   const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
   const paymentInputRef = useRef(null);
   const listRef = useRef(null);
-  const cacheRef = useRef(new Map());
   const [showReports, setShowReports] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState({
     id: true,
@@ -527,37 +524,23 @@ export default function Customers() {
   });
   const [tempThreshold, setTempThreshold] = useState(overdueThreshold);
 
-  // Pagination State
+  // Client-side pagination & sorting state
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(50);
+  const PAGE_SIZE = 50;
   const [sortCol, setSortCol] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
   const [columnSearch, setColumnSearch] = useState({});
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [allCustomers, setAllCustomers] = useState([]);
 
-  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 250);
-  const debouncedNameSearch = useDebouncedValue((columnSearch.name || '').trim(), 250);
-  const debouncedPhoneSearch = useDebouncedValue((columnSearch.phone || '').trim(), 250);
-  const debouncedCityFilter = useDebouncedValue((columnSearch.city || '').trim(), 250);
-  const debouncedColumnSearch = useDebouncedValue(columnSearch, 180);
+  // Debounce خفيف فقط لتجنب lag مع الكتابة السريعة جداً (الفلترة محلية = فورية)
+  const debouncedSearch = useDebouncedValue(searchTerm.trim(), 100);
+  const debouncedColumnSearch = useDebouncedValue(columnSearch, 100);
 
-  const effectiveSearchTerm = debouncedSearch || debouncedNameSearch || debouncedPhoneSearch;
-
+  // Reset الصفحة عند تغيير البحث أو الفلتر
   useEffect(() => {
     setCurrentPage(1);
-  }, [effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir]);
-
-  const cacheKey = useMemo(() => JSON.stringify({
-    page: currentPage,
-    pageSize,
-    searchTerm: effectiveSearchTerm,
-    customerType: filterType,
-    city: debouncedCityFilter,
-    sortCol,
-    sortDir,
-    overdueThreshold
-  }), [currentPage, pageSize, effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir, overdueThreshold]);
+  }, [debouncedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
 
   const loadPaymentMethods = useCallback(async () => {
     try {
@@ -570,70 +553,40 @@ export default function Customers() {
     }
   }, []);
 
-  const loadAllCustomers = useCallback(async ({ force = false } = {}) => {
-    const CACHE_TTL_MS = 15000;
-
+  // تحميل كل العملاء مرة واحدة - البحث والفلترة تتم محلياً
+  const loadAllCustomers = useCallback(async () => {
     try {
-      const cached = cacheRef.current.get(cacheKey);
-      if (!force && cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
-        setAllCustomers(cached.data);
-        setCustomersTotalCount(cached.total);
-        setApiTotalPages(cached.totalPages);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
+      setInitialLoading(true);
 
       const result = await window.api.getCustomers({
-        page: currentPage,
-        pageSize,
-        searchTerm: effectiveSearchTerm,
-        customerType: filterType,
-        city: debouncedCityFilter,
-        sortCol,
-        sortDir,
+        page: 1,
+        pageSize: 10000,
+        searchTerm: '',
+        customerType: 'all',
+        city: '',
+        sortCol: 'createdAt',
+        sortDir: 'desc',
         overdueThreshold
       });
 
       if (result?.error) {
         console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
         setAllCustomers([]);
-        setCustomersTotalCount(0);
-        setApiTotalPages(1);
         return;
       }
 
       const data = Array.isArray(result?.data) ? result.data : [];
-      const total = Math.max(0, parseInt(result?.total, 10) || 0);
-      const pages = Math.max(1, parseInt(result?.totalPages, 10) || 1);
-
-      if (currentPage > pages) {
-        setCurrentPage(pages);
-      }
-
       setAllCustomers(data);
-      setCustomersTotalCount(total);
-      setApiTotalPages(pages);
-      cacheRef.current.set(cacheKey, {
-        ts: Date.now(),
-        data,
-        total,
-        totalPages: pages
-      });
     } catch (err) {
       console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
       setAllCustomers([]);
-      setCustomersTotalCount(0);
-      setApiTotalPages(1);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
-  }, [cacheKey, currentPage, pageSize, effectiveSearchTerm, filterType, debouncedCityFilter, sortCol, sortDir, overdueThreshold]);
+  }, [overdueThreshold]);
 
   const refreshCustomers = useCallback(async () => {
-    cacheRef.current.clear();
-    await loadAllCustomers({ force: true });
+    await loadAllCustomers();
   }, [loadAllCustomers]);
 
   useEffect(() => {
@@ -644,30 +597,76 @@ export default function Customers() {
     loadPaymentMethods();
   }, [loadPaymentMethods]);
 
-  const activeColumnFilters = useMemo(() => (
-    Object.entries(debouncedColumnSearch)
-      .filter(([, value]) => value && String(value).trim() !== '')
-      .map(([key, value]) => [key, normalizeSearchValue(value)])
-  ), [debouncedColumnSearch]);
-
+  // ============ فلترة + بحث + ترتيب + ترقيم - كله محلي = فوري ============
   const filteredCustomers = useMemo(() => {
-    if (activeColumnFilters.length === 0) return allCustomers;
+    let result = allCustomers;
 
-    return allCustomers.filter((customer) => (
-      activeColumnFilters.every(([key, value]) => {
-        let itemValue = '';
-        if (key === 'type') itemValue = customer.customerType || '';
-        else if (key === 'balance') itemValue = customer.balance || 0;
-        else if (key === 'creditLimit') itemValue = customer.creditLimit || 0;
-        else itemValue = customer[key] || '';
+    // 1. البحث العام (الاسم، الهاتف، المدينة)
+    if (debouncedSearch) {
+      const term = debouncedSearch.toLowerCase();
+      result = result.filter(c =>
+        (c.name && c.name.toLowerCase().includes(term)) ||
+        (c.phone && c.phone.includes(term)) ||
+        (c.city && c.city.toLowerCase().includes(term)) ||
+        (c.address && c.address.toLowerCase().includes(term))
+      );
+    }
 
-        return normalizeSearchValue(itemValue).includes(value);
-      })
-    ));
-  }, [allCustomers, activeColumnFilters]);
+    // 2. فلترة حسب النوع
+    if (filterType && filterType !== 'all') {
+      result = result.filter(c => c.customerType === filterType);
+    }
 
-  const totalItems = customersTotalCount;
-  const totalPages = apiTotalPages;
+    // 3. فلترة الأعمدة (صف البحث)
+    const activeColFilters = Object.entries(debouncedColumnSearch)
+      .filter(([, value]) => value && String(value).trim() !== '')
+      .map(([key, value]) => [key, String(value).toLowerCase().trim()]);
+
+    if (activeColFilters.length > 0) {
+      result = result.filter(customer =>
+        activeColFilters.every(([key, value]) => {
+          let itemValue = '';
+          if (key === 'type') itemValue = customer.customerType || '';
+          else if (key === 'balance') itemValue = String(customer.balance || 0);
+          else if (key === 'creditLimit') itemValue = String(customer.creditLimit || 0);
+          else itemValue = customer[key] || '';
+          return String(itemValue).toLowerCase().includes(value);
+        })
+      );
+    }
+
+    // 4. الترتيب
+    result = [...result].sort((a, b) => {
+      let aVal, bVal;
+      if (sortCol === 'balance') {
+        aVal = a.balance || 0;
+        bVal = b.balance || 0;
+      } else if (sortCol === 'lastPaymentDate') {
+        aVal = a.lastPaymentDate ? new Date(a.lastPaymentDate).getTime() : 0;
+        bVal = b.lastPaymentDate ? new Date(b.lastPaymentDate).getTime() : 0;
+      } else if (sortCol === 'name') {
+        aVal = (a.name || '').toLowerCase();
+        bVal = (b.name || '').toLowerCase();
+        return sortDir === 'asc' ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      } else {
+        // createdAt or id
+        aVal = a.id || 0;
+        bVal = b.id || 0;
+      }
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+
+    return result;
+  }, [allCustomers, debouncedSearch, filterType, debouncedColumnSearch, sortCol, sortDir]);
+
+  const totalItems = filteredCustomers.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+
+  // الصفحة الحالية من النتائج
+  const paginatedCustomers = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredCustomers.slice(start, start + PAGE_SIZE);
+  }, [filteredCustomers, currentPage]);
 
   const resetCustomerForm = () => {
     setFormData({
@@ -702,7 +701,7 @@ export default function Customers() {
           return;
         }
       }
-      
+
       setShowModal(false);
       resetCustomerForm();
       setEditingCustomer(null);
@@ -778,7 +777,7 @@ export default function Customers() {
 
   const submitPayment = async (paymentFormData) => {
     const paymentAmount = parseFloat(paymentFormData.amount);
-    
+
     if (isNaN(paymentAmount) || paymentAmount === 0) {
       safeAlert('الرجاء إدخال مبلغ صالح (غير صفر)');
       return;
@@ -787,7 +786,7 @@ export default function Customers() {
     const previewNewBalance = (selectedCustomer.balance - paymentAmount).toFixed(2);
     const paymentDate = new Date(paymentFormData.paymentDate);
     const confirmText = `سوف تُسجّل دفعة بقيمة ${formatCurrency(paymentAmount)} بتاريخ ${paymentDate.toLocaleDateString('ar-EG')}\nالرصيد بعد التسجيل: ${previewNewBalance}\n\nهل تريد المتابعة؟`;
-    
+
     if (!window.confirm(confirmText)) return;
 
     setPaymentSubmitting(true);
@@ -953,7 +952,7 @@ export default function Customers() {
   // Reset الاختيار عند تغيير البحث
   useEffect(() => {
     setSelectedSearchIndex(-1);
-  }, [searchTerm, filterType, debouncedSearch, columnSearch]);
+  }, [debouncedSearch, filterType]);
 
   useEffect(() => {
     if (selectedSearchIndex >= 0 && listRef.current) {
@@ -1537,7 +1536,7 @@ export default function Customers() {
     printWindow.document.close();
   };
 
-  if (loading) return <div>جاري التحميل...</div>;
+  if (initialLoading) return <div>جاري التحميل...</div>;
 
   return (
     <div>
@@ -1653,7 +1652,7 @@ export default function Customers() {
           ))}
         </div>
 
-        {/* الترتيب */} 
+        {/* الترتيب */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <select
             value={sortCol}
@@ -1769,14 +1768,14 @@ export default function Customers() {
 
       <div className="card customers-table-card">
         <CustomersTable
-          customers={filteredCustomers}
+          customers={paginatedCustomers}
           visibleColumns={visibleColumns}
           showSearchRow={showSearchRow}
           columnSearch={columnSearch}
           onColumnSearchChange={handleColumnSearchChange}
           selectedIndex={selectedSearchIndex}
           overdueThreshold={overdueThreshold}
-          highlightTerm={searchTerm.trim()}
+          highlightTerm={debouncedSearch}
           onShowLedger={handleShowLedger}
           onPayment={handlePaymentCallback}
           onEdit={handleEditCallback}

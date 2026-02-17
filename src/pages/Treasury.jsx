@@ -63,10 +63,8 @@ const REFERENCE_TYPE_LABELS = {
 const DIRECTION_LABELS = { IN: 'وارد', OUT: 'منصرف', TRANSFER: 'تحويل' };
 
 const moneyFormatter = new Intl.NumberFormat('ar-EG', {
-  style: 'currency',
-  currency: 'EGP',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0
 });
 
 const formatMoney = (value) => moneyFormatter.format(Number(value || 0));
@@ -80,11 +78,21 @@ const toAmount = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const formatDateTime = (value) => {
+  if (!value) return '-';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return '-';
-  return date.toLocaleString('ar-EG', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-  });
+
+  // Format using local timezone
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'م' : 'ص';
+  const displayHours = hours % 12 || 12;
+
+  return `${year}/${month}/${day} ${displayHours}:${minutes}:${seconds} ${ampm}`;
 };
 
 const resolveMethodName = (entryOrRow) => {
@@ -260,7 +268,48 @@ export default function Treasury() {
   }, [byEntryType]);
   const totalPaidFromSales = Number(revenueSummary.saleIncome || 0);
   const totalRemaining = Math.max(0, Number(salesSummary.totalSales || 0) - totalPaidFromSales);
+
+  // Net Revenue after deducting expenses and disbursements
+  const finalNetRevenue = (revenueSummary.totalRevenue || 0) - dailyExpenseTotal - dailyManualOutTotal;
+
   const totalTreasuryBalance = useMemo(() => treasuries.reduce((sum, row) => sum + Number(row.currentBalance || 0), 0), [treasuries]);
+
+  // Group transactions by Payment Method for the split view
+  const groupedTransactions = useMemo(() => {
+    const groups = {
+      CASH: { code: 'CASH', title: 'الخزينة النقدية', icon: '💵', entries: [], totalIn: 0, totalOut: 0 },
+      VODAFONE_CASH: { code: 'VODAFONE_CASH', title: 'فودافون كاش', icon: '📱', entries: [], totalIn: 0, totalOut: 0 },
+      INSTAPAY: { code: 'INSTAPAY', title: 'إنستا باي', icon: '🏦', entries: [], totalIn: 0, totalOut: 0 },
+      OTHER: { code: 'OTHER', title: 'أخرى', icon: '❓', entries: [], totalIn: 0, totalOut: 0 }
+    };
+
+    entries.forEach(entry => {
+      // Resolve code: check paymentMethod code first, fall back to CASH if no method and no code? 
+      // User transactions usually have paymentMethodId. If null, it's often CASH or internal.
+      // I'll check entry.paymentMethod?.code
+      const methodCode = entry.paymentMethod?.code;
+      let targetGroup = 'CASH'; // Default
+
+      if (methodCode) {
+        const c = String(methodCode).toUpperCase();
+        if (groups[c]) targetGroup = c;
+        else targetGroup = 'OTHER';
+      } else {
+        // If no payment method, check if it implies cash?
+        // Usually system defaults to Cash if null.
+        targetGroup = 'CASH';
+      }
+
+      const group = groups[targetGroup];
+      group.entries.push(entry);
+
+      const amount = Number(entry.amount || 0);
+      if (entry.direction === 'IN') group.totalIn += amount;
+      else if (entry.direction === 'OUT') group.totalOut += amount;
+    });
+
+    return groups;
+  }, [entries]);
 
   const loadTreasuryBaseData = useCallback(async () => {
     const [treasuryResponse, paymentMethodsResponse] = await Promise.all([
@@ -675,12 +724,14 @@ export default function Treasury() {
                     <span className={treasury.isActive ? 'status-active' : 'status-inactive'}>{treasury.isActive ? 'نشطة' : 'موقوفة'}</span>
                   </div>
                 </div>
-                <div className="card-amount">{formatMoney(treasury.currentBalance)}</div>
-                <div className="card-meta"><span>الكود: {treasury.code || '-'}</span><span>القيود: {treasury?._count?.entries || 0}</span></div>
+                <div className="card-amount-wrapper">
+                  <div className="card-amount">{formatMoney(treasury.currentBalance)}</div>
+                  <div className="card-meta"><span>الكود: {treasury.code || '-'}</span><span>القيود: {treasury?._count?.entries || 0}</span></div>
+                </div>
                 <div className="treasury-card-hint">
                   {treasury.hasLinkedOperations
-                    ? 'مرتبطة بعمليات: الحذف يتم بشكل آمن (أرشفة) بدون فقد بيانات'
-                    : 'غير مرتبطة بعمليات: يمكن الحذف النهائي'}
+                    ? '⚠️ مرتبطة بعمليات (أرشفة آمنة)'
+                    : '✅ يمكن الحذف النهائي'}
                 </div>
                 <div className="treasury-card-actions">
                   <button
@@ -719,6 +770,9 @@ export default function Treasury() {
           <div className="panel-head">
             <h2>🔄 حركات الخزنة</h2>
             <div className="panel-head-actions">
+              <button className="treasury-btn ghost" type="button" onClick={() => safePrint()}>
+                🖨️ التقارير
+              </button>
               <button className="treasury-btn secondary" type="button" onClick={() => setTransactionFormOpen(prev => !prev)}>
                 {transactionFormOpen ? '✕ إغلاق النموذج' : '+ تسجيل حركة'}
               </button>
@@ -799,8 +853,9 @@ export default function Treasury() {
             <span>عدد الحركات: <strong>{entries.length}</strong></span>
           </div>
 
-          {/* ── Table ── */}
-          <div className="table-wrap">
+          {/* ── Grouped Tables ── */}
+          {/* ── Main Table (All Transactions) ── */}
+          <div className="table-wrap" style={{ marginBottom: '24px' }}>
             <table className="treasury-table">
               <thead>
                 <tr>
@@ -835,6 +890,58 @@ export default function Treasury() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* ── Wallet Analysis Cards (Cash, Vodafone, InstaPay) ── */}
+          <div className="report-grid">
+            {['CASH', 'VODAFONE_CASH', 'INSTAPAY'].map(groupKey => {
+              const group = groupedTransactions[groupKey];
+              if (!group) return null;
+
+              // Aggregate by entryType
+              const analysis = {};
+              group.entries.forEach(e => {
+                const type = e.entryType;
+                if (!analysis[type]) {
+                  analysis[type] = {
+                    type,
+                    direction: e.direction,
+                    amount: 0,
+                    count: 0
+                  };
+                }
+                analysis[type].amount += Number(e.amount || 0);
+                analysis[type].count++;
+              });
+
+              const sortedAnalysis = Object.values(analysis).sort((a, b) => b.amount - a.amount);
+
+              return (
+                <div key={groupKey} className="report-card">
+                  <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{group.icon} {group.title}</span>
+                    <span className={group.totalIn - group.totalOut >= 0 ? 'in-text' : 'out-text'} style={{ fontSize: '0.9rem' }}>
+                      الصافي: {formatMoney(group.totalIn - group.totalOut)}
+                    </span>
+                  </h3>
+                  <table className="treasury-table compact">
+                    <thead><tr><th>المصدر</th><th>الاتجاه</th><th>المبلغ</th><th>العدد</th></tr></thead>
+                    <tbody>
+                      {sortedAnalysis.length === 0 ? (
+                        <tr><td colSpan="4" className="empty-cell">لا توجد حركات</td></tr>
+                      ) : sortedAnalysis.map(row => (
+                        <tr key={row.type}>
+                          <td><span className="entry-type-badge">{resolveEntryTypeLabel(row.type)}</span></td>
+                          <td><span className={`direction-badge ${row.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(row.direction)}</span></td>
+                          <td className={row.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(row.amount)}</td>
+                          <td>{row.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -875,62 +982,72 @@ export default function Treasury() {
 
           {reportLoading ? (<div className="section-loading">جاري تحميل التقرير...</div>) : (
             <>
-              {/* ── Financial Summary Table ── */}
-              <div className="financial-summary-card">
-                <h3>📊 ملخص مالي</h3>
-                <table className="financial-summary-table">
-                  <tbody>
-                    <tr><td>💰 إجمالي المبيعات</td><td className="summary-value">{formatMoney(salesSummary.totalSales || 0)}</td></tr>
-                    <tr><td>💵 إجمالي المدفوع من المبيعات</td><td className="summary-value in-text">{formatMoney(totalPaidFromSales)}</td></tr>
-                    <tr><td>📌 إجمالي المتبقي</td><td className="summary-value out-text">{formatMoney(totalRemaining)}</td></tr>
-                    <tr className="summary-divider"><td colSpan="2"></td></tr>
-                    <tr><td>↩️ إجمالي المرتجعات</td><td className="summary-value out-text">{formatMoney(salesSummary.totalReturns || 0)}</td></tr>
-                    <tr><td>📋 إجمالي دفع قسط</td><td className="summary-value in-text">{formatMoney(revenueSummary.customerPayments || 0)}</td></tr>
-                    <tr><td>📦 إجمالي المصروفات</td><td className="summary-value out-text">{formatMoney(dailyExpenseTotal)}</td></tr>
-                    <tr><td>📤 إجمالي إذن الصرف</td><td className="summary-value out-text">{formatMoney(dailyManualOutTotal)}</td></tr>
-                    <tr className="summary-divider"><td colSpan="2"></td></tr>
-                    <tr className="summary-total-row"><td>📈 صافي الإيراد</td><td className="summary-value">{formatMoney(revenueSummary.totalRevenue || 0)}</td></tr>
-                  </tbody>
-                </table>
-              </div>
+              {/* ── Financial Summary Grid ── */}
+              <div className="financial-summary-wrapper">
+                <h3 className="financial-summary-title">📊 الملخص المالي</h3>
+                <div className="financial-summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                  {/* Row 1: Sales, Paid, Remaining, Installments */}
+                  <div className="fin-card revenue">
+                    <div className="fin-icon">💰</div>
+                    <div className="fin-content">
+                      <div className="fin-label">إجمالي المبيعات</div>
+                      <div className="fin-value">{formatMoney(salesSummary.totalSales || 0)}</div>
+                    </div>
+                  </div>
+                  <div className="fin-card in">
+                    <div className="fin-icon">💵</div>
+                    <div className="fin-content">
+                      <div className="fin-label">المدفوع من المبيعات</div>
+                      <div className="fin-value">{formatMoney(totalPaidFromSales)}</div>
+                    </div>
+                  </div>
+                  <div className="fin-card out">
+                    <div className="fin-icon">📌</div>
+                    <div className="fin-content">
+                      <div className="fin-label">المتبقي من المبيعات</div>
+                      <div className="fin-value">{formatMoney(totalRemaining)}</div>
+                    </div>
+                  </div>
+                  <div className="fin-card in">
+                    <div className="fin-icon">📋</div>
+                    <div className="fin-content">
+                      <div className="fin-label">أقساط العملاء</div>
+                      <div className="fin-value">{formatMoney(revenueSummary.customerPayments || 0)}</div>
+                    </div>
+                  </div>
 
-              {/* ── Entries Count ── */}
-              <div className="entries-count-bar">
-                <span>عدد قيود الإيراد: <strong>{revenueEntries.length}</strong></span>
-              </div>
+                  {/* Row 2: Returns (2 cols), Expenses (2 cols) */}
+                  <div className="fin-card out" style={{ gridColumn: 'span 1' }}>
+                    <div className="fin-icon">↩️</div>
+                    <div className="fin-content">
+                      <div className="fin-label">المرتجعات</div>
+                      <div className="fin-value">{formatMoney(salesSummary.totalReturns || 0)}</div>
+                    </div>
+                  </div>
+                  <div className="fin-card out" style={{ gridColumn: 'span 1' }}>
+                    <div className="fin-icon">📦</div>
+                    <div className="fin-content">
+                      <div className="fin-label">المصروفات</div>
+                      <div className="fin-value">{formatMoney(dailyExpenseTotal)}</div>
+                    </div>
+                  </div>
 
-              {/* ── Revenue Entries Table ── */}
-              <div className="table-wrap">
-                <table className="treasury-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>التاريخ</th>
-                      <th>الخزنة</th>
-                      <th>النوع</th>
-                      <th>الاتجاه</th>
-                      <th>الوسيلة</th>
-                      <th>المبلغ</th>
-                      <th>المرجع</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {revenueEntries.length === 0 ? (
-                      <tr><td colSpan="8" className="empty-cell">لا توجد قيود إيراد في هذه الفترة</td></tr>
-                    ) : revenueEntries.map((entry) => (
-                      <tr key={`rev-${entry.id}`}>
-                        <td>{entry.id}</td>
-                        <td>{formatDateTime(entry.entryDate || entry.createdAt)}</td>
-                        <td>{entry?.treasury?.name || '-'}</td>
-                        <td><span className="entry-type-badge">{resolveEntryTypeLabel(entry.entryType)}</span></td>
-                        <td><span className={`direction-badge ${entry.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(entry.direction)}</span></td>
-                        <td>{resolveMethodName(entry)}</td>
-                        <td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(entry.amount)}</td>
-                        <td>{formatReference(entry)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  {/* Row 3: Disbursements (1 col), Net Revenue (3 cols) */}
+                  <div className="fin-card out">
+                    <div className="fin-icon">📤</div>
+                    <div className="fin-content">
+                      <div className="fin-label">أذون الصرف</div>
+                      <div className="fin-value">{formatMoney(dailyManualOutTotal)}</div>
+                    </div>
+                  </div>
+                  <div className="fin-card total" style={{ gridColumn: 'span 1' }}>
+                    <div className="fin-icon">📈</div>
+                    <div className="fin-content">
+                      <div className="fin-label">صافي الإيراد (بعد خصم المصروفات)</div>
+                      <div className="fin-value">{formatMoney(finalNetRevenue)}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* ── Aggregation Reports ── */}
@@ -940,30 +1057,34 @@ export default function Treasury() {
                   <table className="treasury-table compact">
                     <thead><tr><th>المصدر</th><th>الاتجاه</th><th>المبلغ</th><th>العدد</th></tr></thead>
                     <tbody>
-                      {revenueBySourceVisible.length === 0 ? (
+                      {byEntryType.filter(r => !['DEPOSIT_IN', 'DEPOSIT_REFUND'].includes(r.entryType)).length === 0 ? (
                         <tr><td colSpan="4" className="empty-cell">لا توجد بيانات</td></tr>
-                      ) : revenueBySourceVisible.map((row) => (
-                        <tr key={`${row.entryType}-${row.direction}`}>
-                          <td><span className="entry-type-badge">{resolveEntryTypeLabel(row.entryType)}</span></td>
-                          <td><span className={`direction-badge ${row.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(row.direction)}</span></td>
-                          <td className={row.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(row.amount || row.net || 0)}</td>
-                          <td>{row.count || row.referenceCount || 0}</td>
-                        </tr>
-                      ))}
+                      ) : byEntryType
+                        .filter(r => !['DEPOSIT_IN', 'DEPOSIT_REFUND'].includes(r.entryType))
+                        .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
+                        .map((row) => (
+                          <tr key={row.entryType}>
+                            <td><span className="entry-type-badge">{resolveEntryTypeLabel(row.entryType)}</span></td>
+                            <td><span className={`direction-badge ${row.net < 0 ? 'direction-out' : 'direction-in'}`}>{row.net < 0 ? 'منصرف' : 'وارد'}</span></td>
+                            <td className={row.net < 0 ? 'out-text' : 'in-text'}>{formatMoney(Math.abs(row.net))}</td>
+                            <td>{row.count}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
                 <div className="report-card">
                   <h3>💳 التجميع حسب وسيلة الدفع</h3>
                   <table className="treasury-table compact">
-                    <thead><tr><th>الوسيلة</th><th>الإيراد</th><th>النسبة</th></tr></thead>
+                    <thead><tr><th>الوسيلة</th><th>الإيراد</th><th>العدد</th><th>النسبة</th></tr></thead>
                     <tbody>
                       {revenueByMethod.length === 0 ? (
-                        <tr><td colSpan="3" className="empty-cell">لا توجد بيانات</td></tr>
+                        <tr><td colSpan="4" className="empty-cell">لا توجد بيانات</td></tr>
                       ) : revenueByMethod.map((row) => (
                         <tr key={`${row.code}-${row.paymentMethodId || 0}`}>
                           <td>{resolveMethodName(row)}</td>
                           <td className="in-text">{formatMoney(row.revenueAmount || row.amount || 0)}</td>
+                          <td>{row.count || 0}</td>
                           <td>{Number(row.percentOfRevenue || 0).toFixed(1)}%</td>
                         </tr>
                       ))}

@@ -901,3 +901,189 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Transaction Form Wrapper (collapsible) ── */
+.transaction-form-wrapper {
+  background: linear-gradient(180deg, #f0f7ff, #f8fbff);
+  border: 1px solid #d5e3f2;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 14px;
+  animation: fadeInPanel 0.2s ease;
+}
+
+/* ── Transaction Type Selector ── */
+.txn-type-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.txn-type-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #fff;
+  color: #334155;
+}
+
+.txn-type-btn:hover { transform: translateY(-1px); }
+
+.txn-type-btn.txn-type-in { border-color: #d1fae5; }
+.txn-type-btn.txn-type-out { border-color: #fee2e2; }
+.txn-type-btn.txn-type-transfer { border-color: #dbeafe; }
+
+.txn-type-btn.txn-type-in.active {
+  background: linear-gradient(135deg, #047857, #059669);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(4, 120, 87, 0.3);
+}
+
+.txn-type-btn.txn-type-out.active {
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.3);
+}
+
+.txn-type-btn.txn-type-transfer.active {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(29, 78, 216, 0.3);
+}
+
+/* ── Direction Badges ── */
+.direction-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.direction-in {
+  background: #dcfce7;
+  color: #047857;
+}
+
+.direction-out {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* ── Entry Type Badge ── */
+.entry-type-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f0f4fa;
+  color: #334155;
+}
+
+/* ── Entries Count Bar ── */
+.entries-count-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #f7fbff;
+  border: 1px solid #e3ecf6;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+
+/* ── Financial Summary Card & Table ── */
+.financial-summary-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.financial-summary-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 14px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.financial-summary-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 3px;
+}
+
+.financial-summary-table td {
+  padding: 10px 14px;
+  font-size: 14px;
+  color: #334155;
+}
+
+.financial-summary-table tr:not(.summary-divider):not(.summary-total-row) {
+  border-radius: 10px;
+}
+
+.financial-summary-table tr:not(.summary-divider):not(.summary-total-row):nth-child(odd) td {
+  background: #f8fafc;
+}
+
+.financial-summary-table tr:not(.summary-divider):not(.summary-total-row):nth-child(even) td {
+  background: #fff;
+}
+
+.financial-summary-table tr:not(.summary-divider):hover td {
+  background: #f0f5ff;
+}
+
+.financial-summary-table td:first-child {
+  border-radius: 0 8px 8px 0;
+  font-weight: 600;
+}
+
+.financial-summary-table td:last-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.financial-summary-table .summary-value {
+  text-align: left;
+  font-weight: 700;
+  font-size: 15px;
+  font-family: 'Tajawal', monospace;
+  letter-spacing: 0.3px;
+}
+
+.financial-summary-table .summary-divider td {
+  padding: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #cbd5e1, transparent);
+}
+
+.financial-summary-table .summary-total-row td {
+  background: linear-gradient(135deg, #f0f7ff, #e8f4fd);
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  padding: 12px 14px;
+}
+
+.financial-summary-table .summary-total-row td:first-child {
+  border-radius: 0 10px 10px 0;
+}
+
+.financial-summary-table .summary-total-row td:last-child {
+  border-radius: 10px 0 0 10px;
+}

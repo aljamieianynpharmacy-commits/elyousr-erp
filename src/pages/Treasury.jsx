@@ -35,7 +35,7 @@ const EXPENSE_CATEGORY_COLORS = [
 const ENTRY_TYPE_LABELS = {
   OPENING_BALANCE: 'رصيد افتتاحي',
   SALE_INCOME: 'إيراد بيع',
-  CUSTOMER_PAYMENT: 'تحصيل عميل',
+  CUSTOMER_PAYMENT: 'دفع قسط',
   MANUAL_IN: 'إضافة يدوية',
   EXPENSE_PAYMENT: 'صرف مصروف',
   PURCHASE_PAYMENT: 'سداد مشتريات',
@@ -50,7 +50,7 @@ const ENTRY_TYPE_LABELS = {
 
 const REFERENCE_TYPE_LABELS = {
   SALE: 'فاتورة بيع',
-  PAYMENT: 'دفعة عميل',
+  PAYMENT: 'دفع قسط',
   RETURN: 'مرتجع',
   PURCHASE: 'فاتورة شراء',
   SUPPLIER_PAYMENT: 'دفعة مورد',
@@ -204,6 +204,7 @@ export default function Treasury() {
     transactionType: 'IN', treasuryId: '', sourceTreasuryId: '', targetTreasuryId: '', amount: '',
     paymentMethodId: '', entryType: '', notes: '', entryDate: todayDate()
   });
+  const [transactionFormOpen, setTransactionFormOpen] = useState(false);
 
   // ── Expense state ──
   const [expenses, setExpenses] = useState([]);
@@ -246,8 +247,19 @@ export default function Treasury() {
   );
   const revenueByTreasury = Array.isArray(dailyReport?.revenue?.byTreasury) ? dailyReport.revenue.byTreasury : [];
   const revenueEntries = Array.isArray(dailyReport?.revenue?.entries) ? dailyReport.revenue.entries : [];
+  const byEntryType = Array.isArray(dailyReport?.byEntryType) ? dailyReport.byEntryType : [];
 
-  const channelTotals = revenueSummary.channelTotals || {};
+  // Computed summary values for the summary table
+  const dailyExpenseTotal = useMemo(() => {
+    const row = byEntryType.find((r) => r.entryType === 'EXPENSE_PAYMENT');
+    return Math.abs(row?.net || 0);
+  }, [byEntryType]);
+  const dailyManualOutTotal = useMemo(() => {
+    const row = byEntryType.find((r) => r.entryType === 'MANUAL_OUT');
+    return Math.abs(row?.net || 0);
+  }, [byEntryType]);
+  const totalPaidFromSales = Number(revenueSummary.saleIncome || 0);
+  const totalRemaining = Math.max(0, Number(salesSummary.totalSales || 0) - totalPaidFromSales);
   const totalTreasuryBalance = useMemo(() => treasuries.reduce((sum, row) => sum + Number(row.currentBalance || 0), 0), [treasuries]);
 
   const loadTreasuryBaseData = useCallback(async () => {
@@ -704,34 +716,124 @@ export default function Treasury() {
 
       {activeTab === 'transactions' && (
         <section className="treasury-panel">
-          <div className="panel-head"><h2>🔄 تسجيل حركة خزنة</h2><span>وارد / منصرف / تحويل</span></div>
-          <form className="treasury-form" onSubmit={handleCreateTransaction}>
-            <div className="treasury-form-grid">
-              <label className="field"><span>نوع الحركة</span><select className="treasury-input" value={transactionForm.transactionType} onChange={(event) => setTransactionForm((prev) => ({ ...prev, transactionType: event.target.value }))}><option value="IN">وارد</option><option value="OUT">منصرف</option><option value="TRANSFER">تحويل</option></select></label>
-              <label className="field"><span>الخزنة</span><select className="treasury-input" value={transactionForm.treasuryId} onChange={(event) => setTransactionForm((prev) => ({ ...prev, treasuryId: event.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name}</option>))}</select></label>
-              {transactionForm.transactionType === 'TRANSFER' ? (
-                <>
-                  <label className="field"><span>خزنة المصدر</span><select className="treasury-input" value={transactionForm.sourceTreasuryId} onChange={(event) => setTransactionForm((prev) => ({ ...prev, sourceTreasuryId: event.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={`src-${row.id}`} value={row.id}>{row.name}</option>))}</select></label>
-                  <label className="field"><span>خزنة الوجهة</span><select className="treasury-input" value={transactionForm.targetTreasuryId} onChange={(event) => setTransactionForm((prev) => ({ ...prev, targetTreasuryId: event.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={`dst-${row.id}`} value={row.id}>{row.name}</option>))}</select></label>
-                </>
-              ) : (
-                <>
-                  <label className="field"><span>تصنيف القيد</span><select className="treasury-input" value={transactionForm.entryType} onChange={(event) => setTransactionForm((prev) => ({ ...prev, entryType: event.target.value }))}><option value="">اختياري</option>{ENTRY_TYPE_OPTIONS.map((row) => (<option key={row} value={row}>{resolveEntryTypeLabel(row)}</option>))}</select></label>
-                  <label className="field"><span>وسيلة الدفع</span><select className="treasury-input" value={transactionForm.paymentMethodId} onChange={(event) => setTransactionForm((prev) => ({ ...prev, paymentMethodId: event.target.value }))}><option value="">اختياري</option>{paymentMethods.map((row) => (<option key={row.id} value={row.id}>{resolveMethodName(row)}</option>))}</select></label>
-                </>
-              )}
-              <label className="field"><span>المبلغ</span><input className="treasury-input" type="number" min="0" step="0.01" value={transactionForm.amount} onChange={(event) => setTransactionForm((prev) => ({ ...prev, amount: event.target.value }))} required /></label>
-              <label className="field"><span>التاريخ</span><input className="treasury-input" type="date" value={transactionForm.entryDate} onChange={(event) => setTransactionForm((prev) => ({ ...prev, entryDate: event.target.value }))} /></label>
-              <label className="field field-full"><span>ملاحظات</span><input className="treasury-input" value={transactionForm.notes} onChange={(event) => setTransactionForm((prev) => ({ ...prev, notes: event.target.value }))} /></label>
+          <div className="panel-head">
+            <h2>🔄 حركات الخزنة</h2>
+            <div className="panel-head-actions">
+              <button className="treasury-btn secondary" type="button" onClick={() => setTransactionFormOpen(prev => !prev)}>
+                {transactionFormOpen ? '✕ إغلاق النموذج' : '+ تسجيل حركة'}
+              </button>
             </div>
-            <button className="treasury-btn primary" type="submit" disabled={submitting}>تسجيل الحركة</button>
-          </form>
+          </div>
 
-          <div className="summary-inline" style={{ marginTop: '12px' }}><span className="in-text">إجمالي الوارد: {formatMoney(entriesSummary.totalIn)}</span><span className="out-text">إجمالي المنصرف: {formatMoney(entriesSummary.totalOut)}</span><span>الصافي: {formatMoney(entriesSummary.net)}</span></div>
-          <div className="table-wrap" style={{ marginTop: '8px' }}>
-            <table className="treasury-table compact">
-              <thead><tr><th>المعرف</th><th>التاريخ</th><th>الخزنة</th><th>النوع</th><th>الاتجاه</th><th>المبلغ</th><th>الوسيلة</th><th>المرجع</th><th>الرصيد بعد القيد</th></tr></thead>
-              <tbody>{entriesLoading ? (<tr><td colSpan="9" className="empty-cell">جاري التحميل...</td></tr>) : entries.length === 0 ? (<tr><td colSpan="9" className="empty-cell">لا توجد حركات</td></tr>) : entries.map((entry) => (<tr key={entry.id}><td>{entry.id}</td><td>{formatDateTime(entry.entryDate || entry.createdAt)}</td><td>{entry?.treasury?.name || '-'}</td><td>{resolveEntryTypeLabel(entry.entryType)}</td><td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{resolveDirectionLabel(entry.direction)}</td><td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(entry.amount)}</td><td>{resolveMethodName(entry)}</td><td>{formatReference(entry)}</td><td>{formatMoney(entry.balanceAfter)}</td></tr>))}</tbody>
+          {/* ── Transaction Form (collapsible) ── */}
+          {transactionFormOpen && (
+            <div className="transaction-form-wrapper">
+              <form className="treasury-form" onSubmit={handleCreateTransaction}>
+                {/* Transaction Type Selector */}
+                <div className="txn-type-selector">
+                  {[{ value: 'IN', label: '↓ وارد', cls: 'txn-type-in' }, { value: 'OUT', label: '↑ منصرف', cls: 'txn-type-out' }, { value: 'TRANSFER', label: '⇄ تحويل', cls: 'txn-type-transfer' }].map((opt) => (
+                    <button key={opt.value} type="button" className={`txn-type-btn ${opt.cls} ${transactionForm.transactionType === opt.value ? 'active' : ''}`} onClick={() => setTransactionForm((prev) => ({ ...prev, transactionType: opt.value }))}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="treasury-form-grid">
+                  {transactionForm.transactionType === 'TRANSFER' ? (
+                    <>
+                      <label className="field"><span>خزنة المصدر</span><select className="treasury-input" value={transactionForm.sourceTreasuryId} onChange={(e) => setTransactionForm((p) => ({ ...p, sourceTreasuryId: e.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={`src-${row.id}`} value={row.id}>{row.name} ({formatMoney(row.currentBalance)})</option>))}</select></label>
+                      <label className="field"><span>خزنة الوجهة</span><select className="treasury-input" value={transactionForm.targetTreasuryId} onChange={(e) => setTransactionForm((p) => ({ ...p, targetTreasuryId: e.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={`dst-${row.id}`} value={row.id}>{row.name} ({formatMoney(row.currentBalance)})</option>))}</select></label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="field"><span>الخزنة</span><select className="treasury-input" value={transactionForm.treasuryId} onChange={(e) => setTransactionForm((p) => ({ ...p, treasuryId: e.target.value }))}><option value="">اختر خزنة</option>{treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name} ({formatMoney(row.currentBalance)})</option>))}</select></label>
+                      <label className="field"><span>تصنيف القيد</span><select className="treasury-input" value={transactionForm.entryType} onChange={(e) => setTransactionForm((p) => ({ ...p, entryType: e.target.value }))}><option value="">اختياري</option>{ENTRY_TYPE_OPTIONS.map((row) => (<option key={row} value={row}>{resolveEntryTypeLabel(row)}</option>))}</select></label>
+                    </>
+                  )}
+                  <label className="field"><span>المبلغ</span><input className="treasury-input" type="number" min="0" step="0.01" placeholder="0.00" value={transactionForm.amount} onChange={(e) => setTransactionForm((p) => ({ ...p, amount: e.target.value }))} required /></label>
+                  <label className="field"><span>وسيلة الدفع</span><select className="treasury-input" value={transactionForm.paymentMethodId} onChange={(e) => setTransactionForm((p) => ({ ...p, paymentMethodId: e.target.value }))}><option value="">اختياري</option>{paymentMethods.map((row) => (<option key={row.id} value={row.id}>{resolveMethodName(row)}</option>))}</select></label>
+                  <label className="field"><span>التاريخ</span><input className="treasury-input" type="date" value={transactionForm.entryDate} onChange={(e) => setTransactionForm((p) => ({ ...p, entryDate: e.target.value }))} /></label>
+                  <label className="field"><span>ملاحظات</span><input className="treasury-input" placeholder="ملاحظات اختيارية..." value={transactionForm.notes} onChange={(e) => setTransactionForm((p) => ({ ...p, notes: e.target.value }))} /></label>
+                </div>
+                <button className="treasury-btn secondary" type="submit" disabled={submitting} style={{ alignSelf: 'flex-start', marginTop: 4 }}>✓ تسجيل الحركة</button>
+              </form>
+            </div>
+          )}
+
+          {/* ── Filters ── */}
+          <div className="daily-filter-shell">
+            <div className="daily-filter-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+              <label className="daily-filter-field"><span>الخزنة</span>
+                <select className="treasury-input" value={filters.treasuryId} onChange={(e) => setFilters(p => ({ ...p, treasuryId: e.target.value }))}>
+                  <option value="">كل الخزن</option>
+                  {treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name}</option>))}
+                </select>
+              </label>
+              <label className="daily-filter-field"><span>من تاريخ</span><input className="treasury-input" type="date" value={filters.fromDate} onChange={(e) => setFilters(p => ({ ...p, fromDate: e.target.value }))} /></label>
+              <label className="daily-filter-field"><span>إلى تاريخ</span><input className="treasury-input" type="date" value={filters.toDate} onChange={(e) => setFilters(p => ({ ...p, toDate: e.target.value }))} /></label>
+              <label className="daily-filter-field"><span>الاتجاه</span>
+                <select className="treasury-input" value={filters.direction} onChange={(e) => setFilters(p => ({ ...p, direction: e.target.value }))}>
+                  <option value="ALL">الكل</option>
+                  <option value="IN">وارد</option>
+                  <option value="OUT">منصرف</option>
+                </select>
+              </label>
+              <label className="daily-filter-field"><span>نوع القيد</span>
+                <select className="treasury-input" value={filters.entryType} onChange={(e) => setFilters(p => ({ ...p, entryType: e.target.value }))}>
+                  <option value="ALL">الكل</option>
+                  {ENTRY_TYPE_OPTIONS.map((row) => (<option key={row} value={row}>{resolveEntryTypeLabel(row)}</option>))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {/* ── KPI Summary ── */}
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 14 }}>
+            <div className="kpi-card tone-net"><span>⬇ إجمالي الوارد</span><strong className="in-text">{formatMoney(entriesSummary.totalIn)}</strong></div>
+            <div className="kpi-card tone-returns"><span>⬆ إجمالي المنصرف</span><strong className="out-text">{formatMoney(entriesSummary.totalOut)}</strong></div>
+            <div className="kpi-card tone-cashflow"><span>📊 الصافي</span><strong>{formatMoney(entriesSummary.net)}</strong></div>
+          </div>
+
+          {/* ── Entries Count ── */}
+          <div className="entries-count-bar">
+            <span>عدد الحركات: <strong>{entries.length}</strong></span>
+          </div>
+
+          {/* ── Table ── */}
+          <div className="table-wrap">
+            <table className="treasury-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>التاريخ</th>
+                  <th>الخزنة</th>
+                  <th>النوع</th>
+                  <th>الاتجاه</th>
+                  <th>المبلغ</th>
+                  <th>الوسيلة</th>
+                  <th>المرجع</th>
+                  <th>الرصيد بعد</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entriesLoading ? (
+                  <tr><td colSpan="9" className="empty-cell">جاري التحميل...</td></tr>
+                ) : entries.length === 0 ? (
+                  <tr><td colSpan="9" className="empty-cell">لا توجد حركات في هذه الفترة</td></tr>
+                ) : entries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{entry.id}</td>
+                    <td>{formatDateTime(entry.entryDate || entry.createdAt)}</td>
+                    <td>{entry?.treasury?.name || '-'}</td>
+                    <td><span className="entry-type-badge">{resolveEntryTypeLabel(entry.entryType)}</span></td>
+                    <td><span className={`direction-badge ${entry.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(entry.direction)}</span></td>
+                    <td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(entry.amount)}</td>
+                    <td>{resolveMethodName(entry)}</td>
+                    <td>{formatReference(entry)}</td>
+                    <td><strong>{formatMoney(entry.balanceAfter)}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </section>
@@ -739,60 +841,152 @@ export default function Treasury() {
 
       {activeTab === 'daily' && (
         <section className="treasury-panel">
-          <div className="panel-head"><h2>📈 لوحة الإيراد اليومي</h2></div>
+          <div className="panel-head">
+            <h2>📈 لوحة الإيراد اليومي</h2>
+            <div className="panel-head-actions">
+              <button className="treasury-btn ghost" type="button" onClick={handlePrintZReport} disabled={!dailyReport}>🖨️ طباعة تقرير Z</button>
+            </div>
+          </div>
+
+          {/* ── Filters ── */}
           <div className="daily-filter-shell">
             <div className="daily-filter-grid">
               <label className="daily-filter-field">
                 <span>الخزنة</span>
-                <select className="treasury-input" value={reportFilters.treasuryId} onChange={(event) => setReportFilters((prev) => ({ ...prev, treasuryId: event.target.value }))}>
+                <select className="treasury-input" value={reportFilters.treasuryId} onChange={(e) => setReportFilters((p) => ({ ...p, treasuryId: e.target.value }))}>
                   <option value="">كل الخزن</option>
                   {treasuries.map((row) => (<option key={row.id} value={row.id}>{row.name}</option>))}
                 </select>
               </label>
               <label className="daily-filter-field">
                 <span>من تاريخ</span>
-                <input className="treasury-input" type="date" value={reportFilters.fromDate} onChange={(event) => setReportFilters((prev) => ({ ...prev, fromDate: event.target.value }))} />
+                <input className="treasury-input" type="date" value={reportFilters.fromDate} onChange={(e) => setReportFilters((p) => ({ ...p, fromDate: e.target.value }))} />
               </label>
               <label className="daily-filter-field">
                 <span>إلى تاريخ</span>
-                <input className="treasury-input" type="date" value={reportFilters.toDate} onChange={(event) => setReportFilters((prev) => ({ ...prev, toDate: event.target.value }))} />
+                <input className="treasury-input" type="date" value={reportFilters.toDate} onChange={(e) => setReportFilters((p) => ({ ...p, toDate: e.target.value }))} />
               </label>
             </div>
             <div className="daily-filter-context">
-              <span className="context-chip">الفترة: {reportFilters.fromDate} - {reportFilters.toDate}</span>
-              <span className="context-chip">الخزنة المختارة: {selectedDailyTreasuryName}</span>
+              <span className="context-chip">📅 {reportFilters.fromDate} → {reportFilters.toDate}</span>
+              <span className="context-chip">🏦 {selectedDailyTreasuryName}</span>
             </div>
           </div>
 
           {reportLoading ? (<div className="section-loading">جاري تحميل التقرير...</div>) : (
             <>
-              <div className="kpi-grid">
-                <div className="kpi-card tone-sales"><span>إجمالي المبيعات</span><strong>{formatMoney(salesSummary.totalSales || 0)}</strong></div>
-                <div className="kpi-card tone-returns"><span>إجمالي المرتجعات</span><strong>{formatMoney(salesSummary.totalReturns || 0)}</strong></div>
-                <div className="kpi-card tone-net"><span>صافي المبيعات</span><strong>{formatMoney(salesSummary.netSales || 0)}</strong></div>
-                <div className="kpi-card tone-revenue"><span>إجمالي الإيراد</span><strong>{formatMoney(revenueSummary.totalRevenue || 0)}</strong></div>
-                <div className="kpi-card tone-payments"><span>تحصيلات العملاء</span><strong>{formatMoney(revenueSummary.customerPayments || 0)}</strong></div>
-                <div className="kpi-card tone-cashflow"><span>صافي التدفق النقدي</span><strong>{formatMoney(movementSummary.netCashIn || 0)}</strong></div>
-              </div>
-
-              <div className="revenue-channel-grid">
-                <div className="revenue-channel-card"><div className="revenue-channel-title">نقدي</div><div className="revenue-channel-value">{formatMoney(channelTotals.cash || 0)}</div></div>
-                <div className="revenue-channel-card"><div className="revenue-channel-title">فودافون كاش</div><div className="revenue-channel-value">{formatMoney(channelTotals.vodafoneCash || 0)}</div></div>
-                <div className="revenue-channel-card"><div className="revenue-channel-title">إنستا باي</div><div className="revenue-channel-value">{formatMoney(channelTotals.instaPay || 0)}</div></div>
-                <div className="revenue-channel-card"><div className="revenue-channel-title">أخرى</div><div className="revenue-channel-value">{formatMoney(channelTotals.other || 0)}</div></div>
-              </div>
-
-              <div className="table-wrap">
-                <table className="treasury-table">
-                  <thead><tr><th>المعرف</th><th>التاريخ</th><th>الخزنة</th><th>النوع</th><th>الاتجاه</th><th>الوسيلة</th><th>المبلغ</th><th>المرجع</th></tr></thead>
-                  <tbody>{revenueEntries.length === 0 ? (<tr><td colSpan="8" className="empty-cell">لا توجد قيود إيراد</td></tr>) : revenueEntries.map((entry) => (<tr key={`rev-${entry.id}`}><td>{entry.id}</td><td>{formatDateTime(entry.entryDate || entry.createdAt)}</td><td>{entry?.treasury?.name || '-'}</td><td>{resolveEntryTypeLabel(entry.entryType)}</td><td>{resolveDirectionLabel(entry.direction)}</td><td>{resolveMethodName(entry)}</td><td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(entry.amount)}</td><td>{formatReference(entry)}</td></tr>))}</tbody>
+              {/* ── Financial Summary Table ── */}
+              <div className="financial-summary-card">
+                <h3>📊 ملخص مالي</h3>
+                <table className="financial-summary-table">
+                  <tbody>
+                    <tr><td>💰 إجمالي المبيعات</td><td className="summary-value">{formatMoney(salesSummary.totalSales || 0)}</td></tr>
+                    <tr><td>💵 إجمالي المدفوع من المبيعات</td><td className="summary-value in-text">{formatMoney(totalPaidFromSales)}</td></tr>
+                    <tr><td>📌 إجمالي المتبقي</td><td className="summary-value out-text">{formatMoney(totalRemaining)}</td></tr>
+                    <tr className="summary-divider"><td colSpan="2"></td></tr>
+                    <tr><td>↩️ إجمالي المرتجعات</td><td className="summary-value out-text">{formatMoney(salesSummary.totalReturns || 0)}</td></tr>
+                    <tr><td>📋 إجمالي دفع قسط</td><td className="summary-value in-text">{formatMoney(revenueSummary.customerPayments || 0)}</td></tr>
+                    <tr><td>📦 إجمالي المصروفات</td><td className="summary-value out-text">{formatMoney(dailyExpenseTotal)}</td></tr>
+                    <tr><td>📤 إجمالي إذن الصرف</td><td className="summary-value out-text">{formatMoney(dailyManualOutTotal)}</td></tr>
+                    <tr className="summary-divider"><td colSpan="2"></td></tr>
+                    <tr className="summary-total-row"><td>📈 صافي الإيراد</td><td className="summary-value">{formatMoney(revenueSummary.totalRevenue || 0)}</td></tr>
+                  </tbody>
                 </table>
               </div>
 
-              <div className="report-grid" style={{ marginTop: '10px' }}>
-                <div className="report-card"><h3>التجميع حسب المصدر</h3><table className="treasury-table compact"><thead><tr><th>المصدر</th><th>الاتجاه</th><th>المبلغ</th><th>العدد</th></tr></thead><tbody>{revenueBySourceVisible.length === 0 ? (<tr><td colSpan="4" className="empty-cell">لا توجد بيانات</td></tr>) : revenueBySourceVisible.map((row) => (<tr key={`${row.entryType}-${row.direction}`}><td>{resolveEntryTypeLabel(row.entryType)}</td><td>{resolveDirectionLabel(row.direction)}</td><td className={row.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(row.amount || row.net || 0)}</td><td>{row.count || row.referenceCount || 0}</td></tr>))}</tbody></table></div>
-                <div className="report-card"><h3>التجميع حسب وسيلة الدفع</h3><table className="treasury-table compact"><thead><tr><th>الوسيلة</th><th>الإيراد</th><th>النسبة</th></tr></thead><tbody>{revenueByMethod.length === 0 ? (<tr><td colSpan="3" className="empty-cell">لا توجد بيانات</td></tr>) : revenueByMethod.map((row) => (<tr key={`${row.code}-${row.paymentMethodId || 0}`}><td>{resolveMethodName(row)}</td><td className="in-text">{formatMoney(row.revenueAmount || row.amount || 0)}</td><td>{Number(row.percentOfRevenue || 0).toFixed(2)}%</td></tr>))}</tbody></table></div>
-                <div className="report-card"><h3>التجميع حسب الخزنة</h3><table className="treasury-table compact"><thead><tr><th>الخزنة</th><th>صافي الإيراد</th><th>العدد</th></tr></thead><tbody>{revenueByTreasury.length === 0 ? (<tr><td colSpan="3" className="empty-cell">لا توجد بيانات</td></tr>) : revenueByTreasury.map((row) => (<tr key={`${row.treasuryId || row.treasuryName}`}><td>{row.treasuryName || '-'}</td><td className={Number(row.net || 0) >= 0 ? 'in-text' : 'out-text'}>{formatMoney(row.net || row.amount || 0)}</td><td>{row.count || 0}</td></tr>))}</tbody></table></div>
+              {/* ── Entries Count ── */}
+              <div className="entries-count-bar">
+                <span>عدد قيود الإيراد: <strong>{revenueEntries.length}</strong></span>
+              </div>
+
+              {/* ── Revenue Entries Table ── */}
+              <div className="table-wrap">
+                <table className="treasury-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>التاريخ</th>
+                      <th>الخزنة</th>
+                      <th>النوع</th>
+                      <th>الاتجاه</th>
+                      <th>الوسيلة</th>
+                      <th>المبلغ</th>
+                      <th>المرجع</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {revenueEntries.length === 0 ? (
+                      <tr><td colSpan="8" className="empty-cell">لا توجد قيود إيراد في هذه الفترة</td></tr>
+                    ) : revenueEntries.map((entry) => (
+                      <tr key={`rev-${entry.id}`}>
+                        <td>{entry.id}</td>
+                        <td>{formatDateTime(entry.entryDate || entry.createdAt)}</td>
+                        <td>{entry?.treasury?.name || '-'}</td>
+                        <td><span className="entry-type-badge">{resolveEntryTypeLabel(entry.entryType)}</span></td>
+                        <td><span className={`direction-badge ${entry.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(entry.direction)}</span></td>
+                        <td>{resolveMethodName(entry)}</td>
+                        <td className={entry.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(entry.amount)}</td>
+                        <td>{formatReference(entry)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Aggregation Reports ── */}
+              <div className="report-grid" style={{ marginTop: '12px' }}>
+                <div className="report-card">
+                  <h3>📋 التجميع حسب المصدر</h3>
+                  <table className="treasury-table compact">
+                    <thead><tr><th>المصدر</th><th>الاتجاه</th><th>المبلغ</th><th>العدد</th></tr></thead>
+                    <tbody>
+                      {revenueBySourceVisible.length === 0 ? (
+                        <tr><td colSpan="4" className="empty-cell">لا توجد بيانات</td></tr>
+                      ) : revenueBySourceVisible.map((row) => (
+                        <tr key={`${row.entryType}-${row.direction}`}>
+                          <td><span className="entry-type-badge">{resolveEntryTypeLabel(row.entryType)}</span></td>
+                          <td><span className={`direction-badge ${row.direction === 'OUT' ? 'direction-out' : 'direction-in'}`}>{resolveDirectionLabel(row.direction)}</span></td>
+                          <td className={row.direction === 'OUT' ? 'out-text' : 'in-text'}>{formatMoney(row.amount || row.net || 0)}</td>
+                          <td>{row.count || row.referenceCount || 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="report-card">
+                  <h3>💳 التجميع حسب وسيلة الدفع</h3>
+                  <table className="treasury-table compact">
+                    <thead><tr><th>الوسيلة</th><th>الإيراد</th><th>النسبة</th></tr></thead>
+                    <tbody>
+                      {revenueByMethod.length === 0 ? (
+                        <tr><td colSpan="3" className="empty-cell">لا توجد بيانات</td></tr>
+                      ) : revenueByMethod.map((row) => (
+                        <tr key={`${row.code}-${row.paymentMethodId || 0}`}>
+                          <td>{resolveMethodName(row)}</td>
+                          <td className="in-text">{formatMoney(row.revenueAmount || row.amount || 0)}</td>
+                          <td>{Number(row.percentOfRevenue || 0).toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="report-card">
+                  <h3>🏦 التجميع حسب الخزنة</h3>
+                  <table className="treasury-table compact">
+                    <thead><tr><th>الخزنة</th><th>صافي الإيراد</th><th>العدد</th></tr></thead>
+                    <tbody>
+                      {revenueByTreasury.length === 0 ? (
+                        <tr><td colSpan="3" className="empty-cell">لا توجد بيانات</td></tr>
+                      ) : revenueByTreasury.map((row) => (
+                        <tr key={`${row.treasuryId || row.treasuryName}`}>
+                          <td>{row.treasuryName || '-'}</td>
+                          <td className={Number(row.net || 0) >= 0 ? 'in-text' : 'out-text'}>{formatMoney(row.net || row.amount || 0)}</td>
+                          <td>{row.count || 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           )}

@@ -1499,16 +1499,15 @@ const dbService = {
 
             if (categoryId) where.categoryId = parseInt(categoryId);
 
-            if (searchTerm) {
+            const normalizedSearch = String(searchTerm || '').trim();
+            if (normalizedSearch.length > 0) {
                 where.OR = [
-                    { name: { contains: searchTerm } }, // Ø­Ø°ÙÙ†Ø§ mode: 'insensitive' Ù„Ø£Ù†Ù‡ ØºÙŠØ± Ù…Ø¯Ø¹ÙˆÙ… ÙÙŠ SQLite Ø¨Ø´ÙƒÙ„ Ø§ÙØªØ±Ø§Ø¶ÙŠØŒ Ø¥Ù„Ø§ Ø¥Ø°Ø§ ÙƒÙ†Øª ØªØ³ØªØ®Ø¯Ù… PostgreSQL
-                    { sku: { contains: searchTerm } },
-                    { description: { contains: searchTerm } }
+                    { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
+                    { sku: { startsWith: normalizedSearch, mode: 'insensitive' } },
+                    { barcode: { startsWith: normalizedSearch } },
+                    { productUnits: { some: { barcode: { startsWith: normalizedSearch } } } },
+                    { variants: { some: { barcode: { startsWith: normalizedSearch } } } }
                 ];
-                // Ø¥Ø°Ø§ ÙƒØ§Ù† Ø§Ù„Ø¨Ø­Ø« Ø±Ù‚Ù…Ø§ØŒ Ø§Ø¨Ø­Ø« ÙÙŠ Ø§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯
-                if (!isNaN(searchTerm)) {
-                    where.OR.push({ barcode: { contains: searchTerm } });
-                }
             }
 
             // Ø§Ù„ØªØ£ÙƒØ¯ Ù…Ù† Ø£Ù† Ø­Ù‚Ù„ Ø§Ù„ØªØ±ØªÙŠØ¨ ØµØ§Ù„Ø­

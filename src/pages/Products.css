@@ -186,6 +186,62 @@
   outline: none;
 }
 
+.products-search-clear {
+  border: none;
+  background: #e2e8f0;
+  color: #475569;
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.products-search-clear:hover {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.products-search-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  min-height: 28px;
+}
+
+.products-search-meta .pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.products-search-meta .pill.count {
+  background: #ecfeff;
+  color: #0f766e;
+  border-color: #99f6e4;
+}
+
+.products-search-meta .pill.searching {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.products-search-meta .pill.limited {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
 .products-table-card {
   background: #fff;
   border: 1px solid var(--line);
@@ -434,6 +490,10 @@
   min-height: 200px;
   color: #6b7280;
   font-weight: 600;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
 }
 
 @media (max-width: 1100px) {

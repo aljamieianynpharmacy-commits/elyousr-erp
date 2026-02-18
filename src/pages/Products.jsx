@@ -25,7 +25,9 @@ import { safePrint } from '../printing/safePrint';
 import ProductModal from '../components/products/ProductModal';
 import './Products.css';
 
-const PRODUCT_FETCH_CHUNK = 1500;
+const PRODUCT_FETCH_CHUNK = 10000;
+const PRODUCT_SEARCH_LIMIT = 120;
+const PRODUCT_SEARCH_DEBOUNCE_MS = 120;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 const DEFAULT_UNIT = 'قطعة';
 
@@ -114,19 +116,15 @@ const wholesale = (product) => {
   return nNum(product?.basePrice, 0);
 };
 
-const buildProductSearchBlob = (product) => {
-  const unitNames = unitsOf(product).map((unit) => nText(unit?.unitName)).join(' ');
-  const unitCodes = unitsOf(product).map((unit) => nText(unit?.barcode)).join(' ');
-  return [
-    product?.name,
-    product?.sku,
-    product?.barcode,
-    product?.brand,
-    product?.description,
-    product?.category?.name,
-    unitNames,
-    unitCodes
-  ].map((value) => nText(value)).join(' ').toLowerCase();
+const useDebouncedValue = (value, delayMs) => {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
 };
 
 const parseLine = (line, delim) => {
@@ -395,6 +393,9 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
 
 export default function Products() {
   const [products, setProducts] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchResultsTotal, setSearchResultsTotal] = useState(0);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -402,7 +403,8 @@ export default function Products() {
   const [importing, setImporting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const debouncedSearchTerm = useDebouncedValue(searchTerm, PRODUCT_SEARCH_DEBOUNCE_MS);
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [sortPreset, setSortPreset] = useState('latest');
@@ -439,6 +441,7 @@ export default function Products() {
   const columnsMenuRef = useRef(null);
   const hasLoadedProductsRef = useRef(false);
   const latestProductsRequestRef = useRef(0);
+  const latestSearchRequestRef = useRef(0);
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
 
@@ -536,13 +539,101 @@ export default function Products() {
     }
   }, [activeSort.sortCol, activeSort.sortDir, categoryFilter]);
 
+  const loadSearchProducts = useCallback(async (rawTerm, options = false) => {
+    const term = nText(rawTerm);
+    const silent = typeof options === 'boolean' ? options : Boolean(options?.silent);
+    const requestId = latestSearchRequestRef.current + 1;
+    latestSearchRequestRef.current = requestId;
+
+    if (!term) {
+      setSearchResults([]);
+      setSearchResultsTotal(0);
+      setSearchLoading(false);
+      return;
+    }
+
+    if (!silent) setSearchLoading(true);
+
+    try {
+      const allRows = [];
+      let page = 1;
+      let totalPages = 1;
+      let total = 0;
+      const pageSize = stockFilter === 'all' ? PRODUCT_SEARCH_LIMIT : PRODUCT_FETCH_CHUNK;
+
+      do {
+        const res = await window.api.getProducts({
+          page,
+          pageSize,
+          searchTerm: term,
+          categoryId: categoryFilter || null,
+          sortCol: activeSort.sortCol,
+          sortDir: activeSort.sortDir
+        });
+
+        if (res?.error) throw new Error(res.error);
+        if (requestId !== latestSearchRequestRef.current) return;
+
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        allRows.push(...rows);
+        total = nInt(res?.total, allRows.length);
+        totalPages = Math.max(1, nInt(res?.totalPages, 1));
+        page += 1;
+
+        if (stockFilter === 'all' && allRows.length >= PRODUCT_SEARCH_LIMIT) break;
+      } while (page <= totalPages);
+
+      setSearchResults(stockFilter === 'all' ? allRows.slice(0, PRODUCT_SEARCH_LIMIT) : allRows);
+      setSearchResultsTotal(total);
+    } catch (err) {
+      if (requestId !== latestSearchRequestRef.current) return;
+      notify(err.message || 'تعذر تنفيذ البحث', 'error');
+      setSearchResults([]);
+      setSearchResultsTotal(0);
+    } finally {
+      if (requestId !== latestSearchRequestRef.current) return;
+      setSearchLoading(false);
+    }
+  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, notify, stockFilter]);
+
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
 
   useEffect(() => {
+    if (nText(deferredSearchTerm)) return;
     loadProducts();
-  }, [loadProducts]);
+  }, [deferredSearchTerm, loadProducts]);
+
+  useEffect(() => {
+    const term = nText(deferredSearchTerm);
+    if (!term) {
+      latestSearchRequestRef.current += 1;
+      setSearchResults([]);
+      setSearchResultsTotal(0);
+      setSearchLoading(false);
+      return;
+    }
+    loadSearchProducts(term);
+  }, [deferredSearchTerm, loadSearchProducts]);
+
+  const refreshVisibleProducts = useCallback(async () => {
+    const term = nText(deferredSearchTerm);
+    if (term) {
+      await Promise.all([loadProducts(true), loadSearchProducts(term, true)]);
+      return;
+    }
+    await loadProducts(true);
+  }, [deferredSearchTerm, loadProducts, loadSearchProducts]);
+
+  const handleRefresh = useCallback(() => {
+    const term = nText(deferredSearchTerm);
+    if (term) {
+      loadSearchProducts(term);
+      return;
+    }
+    loadProducts(true);
+  }, [deferredSearchTerm, loadProducts, loadSearchProducts]);
 
   const categoryMap = useMemo(() => {
     const map = new Map();
@@ -550,13 +641,15 @@ export default function Products() {
     return map;
   }, [categories]);
 
+  const isSearchMode = nText(deferredSearchTerm).length > 0;
+  const activeProducts = isSearchMode ? searchResults : products;
+
   const preparedProducts = useMemo(() => (
-    products.map((product) => ({
+    activeProducts.map((product) => ({
       product,
-      status: stock(product),
-      searchBlob: buildProductSearchBlob(product)
+      status: stock(product)
     }))
-  ), [products]);
+  ), [activeProducts]);
 
   const productMetaMap = useMemo(() => {
     const map = new Map();
@@ -566,20 +659,32 @@ export default function Products() {
     return map;
   }, [preparedProducts]);
 
-  const visibleProducts = useMemo(() => {
-    const normalizedTerm = nText(deferredSearchTerm).toLowerCase();
+  const filteredProductResult = useMemo(() => {
+    const usesServerLimitedSet = isSearchMode && stockFilter === 'all';
     const out = [];
+    let totalMatches = usesServerLimitedSet ? searchResultsTotal : 0;
 
     for (const entry of preparedProducts) {
-      if (normalizedTerm && !entry.searchBlob.includes(normalizedTerm)) continue;
       if (stockFilter === 'available' && entry.status.key !== 'ok') continue;
       if (stockFilter === 'low' && entry.status.key !== 'low') continue;
       if (stockFilter === 'out' && entry.status.key !== 'out') continue;
+      if (!usesServerLimitedSet) totalMatches += 1;
       out.push(entry.product);
     }
 
-    return out;
-  }, [preparedProducts, stockFilter, deferredSearchTerm]);
+    return {
+      rows: out,
+      totalMatches,
+      isLimited: usesServerLimitedSet && searchResultsTotal > out.length
+    };
+  }, [isSearchMode, preparedProducts, searchResultsTotal, stockFilter]);
+
+  const visibleProducts = filteredProductResult.rows;
+  const filteredTotal = filteredProductResult.totalMatches;
+  const isSearchLimited = filteredProductResult.isLimited;
+  const isSearchTyping = nText(searchTerm) !== nText(debouncedSearchTerm);
+  const isSearchBusy = isSearchMode && searchLoading;
+  const tableLoading = loading || isSearchBusy;
 
   const metrics = useMemo(() => {
     let variantsCount = 0;
@@ -840,7 +945,7 @@ export default function Products() {
       }
 
       closeProductModal();
-      await Promise.all([loadProducts(true), loadCategories()]);
+      await Promise.all([refreshVisibleProducts(), loadCategories()]);
       notify(modalMode === 'create' ? 'تم إنشاء المنتج بنجاح' : 'تم تحديث المنتج بنجاح', 'success');
     } catch (err) {
       await safeAlert(err.message || 'فشل حفظ المنتج', null, { type: 'error', title: 'المنتجات' });
@@ -859,7 +964,7 @@ export default function Products() {
       return;
     }
 
-    await loadProducts(true);
+    await refreshVisibleProducts();
     notify('تم حذف المنتج', 'success');
   };
 
@@ -917,7 +1022,7 @@ export default function Products() {
       });
       if (inv?.error) throw new Error(inv.error);
 
-      await loadProducts(true);
+      await refreshVisibleProducts();
       notify('تم إنشاء نسخة من المنتج', 'success');
     } catch (err) {
       await safeAlert(err.message || 'فشل نسخ المنتج', null, { type: 'error', title: 'نسخ منتج' });
@@ -1173,7 +1278,7 @@ export default function Products() {
         }
       }
 
-      await Promise.all([loadCategories(), loadProducts(true)]);
+      await Promise.all([loadCategories(), refreshVisibleProducts()]);
       notify(`تم الاستيراد: ${created} جديد، ${updated} تحديث، ${addV} متغير مضاف، ${updV} متغير محدث${failed ? `، ${failed} فشل` : ''}`, failed ? 'warning' : 'success');
     } catch (err) {
       await safeAlert(err.message || 'فشل الاستيراد', null, { type: 'error', title: 'استيراد Excel' });
@@ -1216,7 +1321,7 @@ export default function Products() {
       return;
     }
 
-    await Promise.all([loadCategories(), loadProducts(true)]);
+    await Promise.all([loadCategories(), refreshVisibleProducts()]);
     notify('تم حذف الفئة', 'success');
   };
 
@@ -1295,6 +1400,16 @@ export default function Products() {
         <label className="products-search">
           <Search size={16} />
           <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث بالاسم أو الكود أو الباركود" />
+          {searchTerm ? (
+            <button
+              type="button"
+              className="products-search-clear"
+              onClick={() => setSearchTerm('')}
+              aria-label="مسح البحث"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
         </label>
 
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
@@ -1313,11 +1428,17 @@ export default function Products() {
           {SORT_PRESETS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
 
-        <button type="button" className="products-btn products-btn-light" onClick={() => loadProducts(true)} disabled={refreshing}>
-          <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
+        <button type="button" className="products-btn products-btn-light" onClick={handleRefresh} disabled={refreshing || searchLoading}>
+          <RefreshCw size={16} className={refreshing || searchLoading ? 'spin' : ''} />
           تحديث
         </button>
       </section>
+
+      <div className="products-search-meta">
+        {isSearchTyping || isSearchBusy ? <span className="pill searching">جاري البحث...</span> : null}
+        <span className="pill count">نتائج البحث: {filteredTotal}</span>
+        {isSearchLimited ? <span className="pill limited">تم عرض أول {PRODUCT_SEARCH_LIMIT} نتيجة لتسريع العرض</span> : null}
+      </div>
 
       <section className="products-table-card">
         <div className="products-table-tools">
@@ -1356,7 +1477,12 @@ export default function Products() {
               ))}
             </div>
 
-            {visibleProducts.length === 0 ? (
+            {tableLoading ? (
+              <div className="products-loading">
+                <RefreshCw size={18} className="spin" />
+                <span>{isSearchBusy ? 'جاري البحث...' : 'جاري تحميل المنتجات...'}</span>
+              </div>
+            ) : visibleProducts.length === 0 ? (
               <div className="products-empty grid-empty">لا توجد منتجات مطابقة</div>
             ) : (
               <List

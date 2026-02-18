@@ -54,6 +54,90 @@ const toNumber = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toInteger = (value, fallback = 0) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeString = (value) => {
+    const text = String(value ?? '').trim();
+    return text || null;
+};
+
+const toMoney = (value, fallback = 0) => (
+    Math.max(0, Number(toNumber(value, fallback).toFixed(2)))
+);
+
+const normalizeProductUnits = (units, baseSalePrice = 0, baseCostPrice = 0) => {
+    if (!Array.isArray(units)) return [];
+
+    return units
+        .map((unit, index) => {
+            const salePrice = toMoney(unit?.salePrice, baseSalePrice);
+            const wholesalePrice = toMoney(Math.min(salePrice, toNumber(unit?.wholesalePrice, salePrice)), salePrice);
+            const minSalePrice = toMoney(Math.min(salePrice, toNumber(unit?.minSalePrice, wholesalePrice)), wholesalePrice);
+            const purchasePrice = toMoney(unit?.purchasePrice, baseCostPrice);
+
+            return {
+                unitName: normalizeString(unit?.unitName) || (index === 0 ? '\u0642\u0637\u0639\u0629' : null),
+                conversionFactor: index === 0 ? 1 : Math.max(0.0001, toNumber(unit?.conversionFactor, 1)),
+                salePrice,
+                wholesalePrice,
+                minSalePrice,
+                purchasePrice,
+                barcode: normalizeString(unit?.barcode)
+            };
+        })
+        .filter((unit, index) => (
+            index === 0
+            || unit.unitName
+            || unit.barcode
+            || unit.salePrice > 0
+            || unit.purchasePrice > 0
+        ))
+        .filter((unit) => unit.unitName);
+};
+
+const isPrismaDecimalLike = (value) => (
+    value
+    && typeof value === 'object'
+    && typeof value.toNumber === 'function'
+    && typeof value.toString === 'function'
+    && Array.isArray(value.d)
+    && typeof value.e === 'number'
+    && typeof value.s === 'number'
+);
+
+const normalizeDecimalValues = (value, seen = new WeakMap()) => {
+    if (value == null) return value;
+
+    if (isPrismaDecimalLike(value)) {
+        const asNumber = Number(value.toString());
+        return Number.isFinite(asNumber) ? asNumber : value.toString();
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((item) => normalizeDecimalValues(item, seen));
+    }
+
+    if (value instanceof Date || Buffer.isBuffer(value)) {
+        return value;
+    }
+
+    if (typeof value === 'object') {
+        if (seen.has(value)) return seen.get(value);
+
+        const output = {};
+        seen.set(value, output);
+        Object.entries(value).forEach(([key, entry]) => {
+            output[key] = normalizeDecimalValues(entry, seen);
+        });
+        return output;
+    }
+
+    return value;
+};
+
 const toValidDate = (value) => {
     if (!value) return null;
     const date = value instanceof Date ? value : new Date(value);
@@ -1441,7 +1525,8 @@ const dbService = {
                     include: {
                         variants: true,
                         category: true,
-                        inventory: true
+                        inventory: true,
+                        productUnits: true
                     },
                 }),
                 prisma.product.count({ where })
@@ -1461,21 +1546,54 @@ const dbService = {
     async addProduct(productData) {
         try {
             // ØªÙ†Ø¸ÙŠÙ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
+            const basePrice = toMoney(productData.basePrice, 0);
+            const cost = toMoney(productData.cost, 0);
+            const units = normalizeProductUnits(productData.units, basePrice, cost);
+            const mainUnit = units[0] || null;
+            const name = String(productData.name ?? '').trim();
+            if (!name) return { error: 'Product name is required' };
+
             const cleanData = {
-                name: productData.name,
-                description: productData.description || null,
-                categoryId: productData.categoryId ? parseInt(productData.categoryId) : null,
-                brand: productData.brand || null,
-                basePrice: parseFloat(productData.basePrice || 0),
-                cost: parseFloat(productData.cost || 0),
-                image: productData.image || null,
-                sku: productData.sku || null,
-                barcode: productData.barcode || null
+                name,
+                description: normalizeString(productData.description),
+                categoryId: productData.categoryId ? parsePositiveInt(productData.categoryId) : null,
+                brand: normalizeString(productData.brand),
+                basePrice: mainUnit ? toMoney(mainUnit.salePrice, basePrice) : basePrice,
+                cost: mainUnit ? toMoney(mainUnit.purchasePrice, cost) : cost,
+                image: normalizeString(productData.image),
+                sku: normalizeString(productData.sku),
+                barcode: normalizeString(productData.barcode) || mainUnit?.barcode || null,
+                isActive: productData.isActive ?? true,
+                type: normalizeString(productData.type) || 'store',
             };
 
+            const warehouseQty = Math.max(0, toInteger(productData.openingQty, 0));
+
             return await prisma.product.create({
-                data: cleanData,
-                include: { variants: true, category: true, inventory: true }
+                data: {
+                    ...cleanData,
+                    ...(units.length > 0 ? {
+                        productUnits: {
+                            create: units.map((unit) => ({
+                                unitName: unit.unitName,
+                                conversionFactor: unit.conversionFactor,
+                                salePrice: unit.salePrice,
+                                wholesalePrice: unit.wholesalePrice,
+                                minSalePrice: unit.minSalePrice,
+                                purchasePrice: unit.purchasePrice,
+                                barcode: unit.barcode
+                            }))
+                        }
+                    } : {}),
+                    inventory: {
+                        create: {
+                            warehouseQty,
+                            totalQuantity: warehouseQty,
+                            lastRestock: warehouseQty > 0 ? new Date() : null
+                        }
+                    }
+                },
+                include: { variants: true, category: true, inventory: true, productUnits: true }
             });
         } catch (error) {
             return { error: error.message };
@@ -1484,22 +1602,53 @@ const dbService = {
 
     async updateProduct(id, productData) {
         try {
-            // ØªÙ†Ø¸ÙŠÙ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
+            const productId = parseInt(id);
             const cleanData = {};
-            if (productData.name !== undefined) cleanData.name = productData.name;
-            if (productData.description !== undefined) cleanData.description = productData.description || null;
-            if (productData.categoryId !== undefined) cleanData.categoryId = productData.categoryId ? parseInt(productData.categoryId) : null;
-            if (productData.brand !== undefined) cleanData.brand = productData.brand || null;
-            if (productData.basePrice !== undefined) cleanData.basePrice = parseFloat(productData.basePrice);
-            if (productData.cost !== undefined) cleanData.cost = parseFloat(productData.cost);
-            if (productData.image !== undefined) cleanData.image = productData.image || null;
-            if (productData.sku !== undefined) cleanData.sku = productData.sku || null;
-            if (productData.barcode !== undefined) cleanData.barcode = productData.barcode || null;
+            const basePrice = toMoney(productData.basePrice, 0);
+            const cost = toMoney(productData.cost, 0);
+            const units = normalizeProductUnits(productData.units, basePrice, cost);
+            const mainUnit = units[0] || null;
 
-            return await prisma.product.update({
-                where: { id: parseInt(id) },
-                data: cleanData,
-                include: { variants: true, category: true, inventory: true }
+            if (productData.name !== undefined) cleanData.name = String(productData.name ?? '').trim();
+            if (productData.description !== undefined) cleanData.description = normalizeString(productData.description);
+            if (productData.categoryId !== undefined) cleanData.categoryId = productData.categoryId ? parsePositiveInt(productData.categoryId) : null;
+            if (productData.brand !== undefined) cleanData.brand = normalizeString(productData.brand);
+            if (productData.basePrice !== undefined) cleanData.basePrice = mainUnit ? toMoney(mainUnit.salePrice, basePrice) : basePrice;
+            if (productData.cost !== undefined) cleanData.cost = mainUnit ? toMoney(mainUnit.purchasePrice, cost) : cost;
+            if (productData.image !== undefined) cleanData.image = normalizeString(productData.image);
+            if (productData.sku !== undefined) cleanData.sku = normalizeString(productData.sku);
+            if (productData.barcode !== undefined) cleanData.barcode = normalizeString(productData.barcode) || mainUnit?.barcode || null;
+            if (productData.isActive !== undefined) cleanData.isActive = productData.isActive;
+            if (productData.type !== undefined) cleanData.type = normalizeString(productData.type) || 'store';
+
+            return await prisma.$transaction(async (tx) => {
+                await tx.product.update({
+                    where: { id: productId },
+                    data: cleanData
+                });
+
+                if (Array.isArray(productData.units)) {
+                    await tx.productUnit.deleteMany({ where: { productId } });
+                    if (units.length > 0) {
+                        await tx.productUnit.createMany({
+                            data: units.map((unit) => ({
+                                productId,
+                                unitName: unit.unitName,
+                                conversionFactor: unit.conversionFactor,
+                                salePrice: unit.salePrice,
+                                wholesalePrice: unit.wholesalePrice,
+                                minSalePrice: unit.minSalePrice,
+                                purchasePrice: unit.purchasePrice,
+                                barcode: unit.barcode
+                            }))
+                        });
+                    }
+                }
+
+                return await tx.product.findUnique({
+                    where: { id: productId },
+                    include: { variants: true, category: true, inventory: true, productUnits: true }
+                });
             });
         } catch (error) {
             return { error: error.message };
@@ -5657,6 +5806,14 @@ const dbService = {
     }
 };
 
+Object.keys(dbService).forEach((methodName) => {
+    const method = dbService[methodName];
+    if (typeof method !== 'function') return;
+
+    dbService[methodName] = async function wrappedDbServiceMethod(...args) {
+        const result = await method.apply(dbService, args);
+        return normalizeDecimalValues(result);
+    };
+});
+
 module.exports = dbService;
-
-

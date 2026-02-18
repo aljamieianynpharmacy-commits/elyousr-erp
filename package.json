@@ -7,15 +7,19 @@
     "dev": "vite",
     "build": "vite build",
     "electron": "electron .",
+    "preelectron": "npm run prisma:generate",
     "start": "npm run dev",
     "app": "electron .",
+    "preapp": "npm run prisma:generate",
     "seed": "node prisma/seed.js",
+    "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status",
     "rebuild:customer-financials": "node scripts/rebuild-customer-financials.js",
     "db:legacy:customer-financial-guard": "node scripts/legacy/legacy-customer-financial-guard.js",
-    "dist": "npm run build && node scripts/prepare-dist.js && electron-builder"
+    "dist": "npm run build && node scripts/prepare-dist.js && electron-builder",
+    "postinstall": "prisma generate"
   },
   "build": {
     "appId": "com.erp.desktop",

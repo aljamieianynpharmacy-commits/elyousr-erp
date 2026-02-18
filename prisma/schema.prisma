@@ -21,9 +21,9 @@ model User {
   role      Role
   createdAt DateTime @default(now())
 
-  treasuryEntries          TreasuryEntry[]          @relation("TreasuryEntryCreatedBy")
-  paymentAllocations       PaymentAllocation[]      @relation("PaymentAllocationCreatedBy")
-  auditLogs                AuditLog[]               @relation("AuditLogPerformedBy")
+  treasuryEntries    TreasuryEntry[]     @relation("TreasuryEntryCreatedBy")
+  paymentAllocations PaymentAllocation[] @relation("PaymentAllocationCreatedBy")
+  auditLogs          AuditLog[]          @relation("AuditLogPerformedBy")
 }
 
 enum Role {
@@ -59,14 +59,38 @@ model Product {
   barcode     String?  @unique
   image       String?
   sku         String?  @unique
-  basePrice   Float    @default(0)
-  cost        Float?
+  basePrice   Decimal  @default(0) @db.Decimal(12, 2)
+  cost        Decimal? @db.Decimal(12, 2)
+  isActive    Boolean  @default(true)
+  type        String   @default("store")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  category  Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  variants  Variant[]
-  inventory Inventory?
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  variants     Variant[]
+  productUnits ProductUnit[]
+  inventory    Inventory?
+
+  @@index([name])
+  @@index([categoryId, updatedAt])
+}
+
+model ProductUnit {
+  id               Int      @id @default(autoincrement())
+  productId        Int
+  unitName         String
+  conversionFactor Float    @default(1)
+  salePrice        Decimal  @default(0) @db.Decimal(12, 2)
+  wholesalePrice   Decimal  @default(0) @db.Decimal(12, 2)
+  minSalePrice     Decimal  @default(0) @db.Decimal(12, 2)
+  purchasePrice    Decimal  @default(0) @db.Decimal(12, 2)
+  barcode          String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
 }
 
 model Variant {
@@ -74,8 +98,8 @@ model Variant {
   productId   Int
   productSize String
   color       String
-  price       Float
-  cost        Float
+  price       Decimal  @db.Decimal(12, 2)
+  cost        Decimal  @db.Decimal(12, 2)
   quantity    Int
   barcode     String?  @unique
   image       String?
@@ -86,6 +110,9 @@ model Variant {
   saleItems     SaleItem[]
   purchaseItems PurchaseItem[]
   returnItems   ReturnItem[]
+
+  @@unique([productId, productSize, color])
+  @@index([productId])
 }
 
 model Inventory {
@@ -418,9 +445,9 @@ model Treasury {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  entries               TreasuryEntry[]          @relation("TreasuryMain")
-  sourceTransferEntries TreasuryEntry[]          @relation("TreasuryTransferSource")
-  targetTransferEntries TreasuryEntry[]          @relation("TreasuryTransferTarget")
+  entries               TreasuryEntry[] @relation("TreasuryMain")
+  sourceTransferEntries TreasuryEntry[] @relation("TreasuryTransferSource")
+  targetTransferEntries TreasuryEntry[] @relation("TreasuryTransferTarget")
   auditLogs             AuditLog[]
 
   @@index([isActive])
@@ -449,13 +476,13 @@ model TreasuryEntry {
   entryDate        DateTime          @default(now())
   createdAt        DateTime          @default(now())
 
-  treasury                  Treasury                 @relation("TreasuryMain", fields: [treasuryId], references: [id], onDelete: Cascade)
-  paymentMethod             PaymentMethod?           @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
-  createdByUser             User?                    @relation("TreasuryEntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  sourceTreasury            Treasury?                @relation("TreasuryTransferSource", fields: [sourceTreasuryId], references: [id], onDelete: SetNull)
-  targetTreasury            Treasury?                @relation("TreasuryTransferTarget", fields: [targetTreasuryId], references: [id], onDelete: SetNull)
-  paymentAllocationsSource  PaymentAllocation[]      @relation("PaymentAllocationSourceEntry")
-  auditLogs                 AuditLog[]
+  treasury                 Treasury            @relation("TreasuryMain", fields: [treasuryId], references: [id], onDelete: Cascade)
+  paymentMethod            PaymentMethod?      @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  createdByUser            User?               @relation("TreasuryEntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  sourceTreasury           Treasury?           @relation("TreasuryTransferSource", fields: [sourceTreasuryId], references: [id], onDelete: SetNull)
+  targetTreasury           Treasury?           @relation("TreasuryTransferTarget", fields: [targetTreasuryId], references: [id], onDelete: SetNull)
+  paymentAllocationsSource PaymentAllocation[] @relation("PaymentAllocationSourceEntry")
+  auditLogs                AuditLog[]
 
   @@index([treasuryId, entryDate])
   @@index([treasuryId, createdAt])

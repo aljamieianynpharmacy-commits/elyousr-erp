@@ -64,7 +64,7 @@ function createWindow() {
         "default-src 'self'",
         "script-src 'self' 'unsafe-eval' 'unsafe-inline' http://localhost:5173",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data:",
+        "img-src 'self' data: https: http: file:",
         "font-src 'self' data:",
         "connect-src 'self' ws://localhost:5173 http://localhost:5173",
     ].join("; ");
@@ -73,7 +73,7 @@ function createWindow() {
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data:",
+        "img-src 'self' data: https: http: file:",
         "font-src 'self' data:",
         "connect-src 'self'",
     ].join("; ");

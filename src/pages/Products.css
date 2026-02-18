@@ -17,6 +17,7 @@
   display: flex;
   flex-direction: column;
   color: var(--sea-900);
+  font-family: "Cairo", "Tajawal", "Segoe UI", sans-serif;
 }
 
 .products-page::before {
@@ -274,15 +275,15 @@
 }
 
 .products-grid-header {
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
+  background: #f3f8ff;
+  border-bottom: 2px solid #eef3f9;
 }
 
 .products-grid-head-cell {
-  padding: 15px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #374151;
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
   text-align: right;
 }
 
@@ -305,8 +306,8 @@
 }
 
 .products-grid-cell {
-  padding: 12px 15px;
-  font-size: 14px;
+  padding: 10px 15px;
+  font-size: 13px;
   color: #1f2937;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -323,9 +324,9 @@
 }
 
 .product-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   background: #f3f4f6;
   display: grid;
   place-items: center;
@@ -334,11 +335,17 @@
   border: 1px solid #e5e7eb;
 }
 
+.product-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .product-meta {
   display: flex;
   gap: 8px;
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 11px;
+  color: #64748b;
   margin-top: 2px;
 }
 
@@ -347,9 +354,9 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 99px;
+  border-radius: 6px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   border: 1px solid transparent;
 }
 
@@ -365,34 +372,54 @@
   align-items: center;
   justify-content: center;
   padding: 2px 8px;
-  border-radius: 99px;
+  border-radius: 6px;
   font-size: 11px;
+  font-weight: 700;
 }
 .row-actions {
   display: flex !important;
   flex-direction: row !important;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
   justify-content: flex-start;
 }
 
-.icon-btn {
-  width: 26px;
-  height: 26px;
+/* Solid Icon Buttons (Treasury Style) */
+.icon-btn-solid {
+  width: 32px;
+  height: 32px;
   border: none;
-  background: transparent;
-  color: #334155;
-  border-radius: 4px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
   cursor: pointer;
+  transition: all 0.2s ease;
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.icon-btn.danger {
-  color: #dc2626;
+.icon-btn-solid:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  filter: brightness(1.1);
+}
+
+.icon-btn-solid.edit {
+  background: #0f766e; /* Teal/Green */
+}
+
+.icon-btn-solid.danger {
+  background: #dc2626; /* Red */
+}
+
+.icon-btn-solid.blue {
+  background: #3b82f6; /* Blue */
+}
+
+.icon-btn-solid.orange {
+  background: #f97316; /* Orange */
 }
 
 .icon-btn:hover {

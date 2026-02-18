@@ -368,10 +368,10 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
       case 'actions':
         return (
           <div className="row-actions">
-            <button type="button" className="icon-btn" title="تعديل" onClick={() => openEdit(product)}><Pencil size={16} color="#f78c00" /></button>
-            <button type="button" className="icon-btn" title="نسخ" onClick={() => duplicateProduct(product)}><Copy size={16} color="#0d9488" /></button>
-            <button type="button" className="icon-btn" title="طباعة باركود" onClick={() => printBarcodes([product])}><Barcode size={16} color="#3b82f6" /></button>
-            <button type="button" className="icon-btn danger" title="حذف" onClick={() => deleteProduct(product)}><Trash2 size={16} color="#dc2626" /></button>
+            <button type="button" className="icon-btn-solid edit" title="تعديل" onClick={() => openEdit(product)}><Pencil size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid orange" title="نسخ" onClick={() => duplicateProduct(product)}><Copy size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid blue" title="طباعة باركود" onClick={() => printBarcodes([product])}><Barcode size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid danger" title="حذف" onClick={() => deleteProduct(product)}><Trash2 size={16} color="#fff" /></button>
           </div>
         );
       default:

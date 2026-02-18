@@ -1591,6 +1591,16 @@ const dbService = {
                             totalQuantity: warehouseQty,
                             lastRestock: warehouseQty > 0 ? new Date() : null
                         }
+                    },
+                    variants: {
+                        create: [{
+                            productSize: 'Standard',
+                            color: 'Standard',
+                            price: cleanData.basePrice,
+                            cost: cleanData.cost,
+                            quantity: warehouseQty,
+                            barcode: cleanData.barcode
+                        }]
                     }
                 },
                 include: { variants: true, category: true, inventory: true, productUnits: true }
@@ -1763,6 +1773,31 @@ const dbService = {
     // ==================== VARIANTS ====================
     async getVariants() {
         try {
+            // Self-healing: Ensure all products have at least one variant
+            const productsWithoutVariants = await prisma.product.findMany({
+                where: { variants: { none: {} } },
+                include: { inventory: true }
+            });
+
+            if (productsWithoutVariants.length > 0) {
+                await prisma.$transaction(
+                    productsWithoutVariants.map(product => {
+                        const qty = product.inventory?.totalQuantity || 0;
+                        return prisma.variant.create({
+                            data: {
+                                productId: product.id,
+                                productSize: 'Standard',
+                                color: 'Standard',
+                                price: product.basePrice,
+                                cost: product.cost,
+                                quantity: qty,
+                                barcode: product.barcode
+                            }
+                        });
+                    })
+                );
+            }
+
             return await prisma.variant.findMany({
                 include: { product: true },
                 orderBy: { id: 'desc' }

@@ -1428,8 +1428,9 @@ const dbService = {
             }
 
             // Ø§Ù„ØªØ£ÙƒØ¯ Ù…Ù† Ø£Ù† Ø­Ù‚Ù„ Ø§Ù„ØªØ±ØªÙŠØ¨ ØµØ§Ù„Ø­
-            const validSortCols = ['id', 'name', 'price', 'cost', 'createdAt'];
-            const orderBy = validSortCols.includes(sortCol) ? { [sortCol]: sortDir } : { id: 'desc' };
+            const validSortCols = ['id', 'name', 'basePrice', 'cost', 'createdAt', 'updatedAt'];
+            const safeSortDir = sortDir === 'asc' ? 'asc' : 'desc';
+            const orderBy = validSortCols.includes(sortCol) ? { [sortCol]: safeSortDir } : { id: 'desc' };
 
             const [products, total] = await Promise.all([
                 prisma.product.findMany({
@@ -1469,9 +1470,7 @@ const dbService = {
                 cost: parseFloat(productData.cost || 0),
                 image: productData.image || null,
                 sku: productData.sku || null,
-                barcode: productData.barcode || null,
-                weight: productData.weight || null,
-                dimensions: productData.dimensions || null
+                barcode: productData.barcode || null
             };
 
             return await prisma.product.create({
@@ -1496,8 +1495,6 @@ const dbService = {
             if (productData.image !== undefined) cleanData.image = productData.image || null;
             if (productData.sku !== undefined) cleanData.sku = productData.sku || null;
             if (productData.barcode !== undefined) cleanData.barcode = productData.barcode || null;
-            if (productData.weight !== undefined) cleanData.weight = productData.weight || null;
-            if (productData.dimensions !== undefined) cleanData.dimensions = productData.dimensions || null;
 
             return await prisma.product.update({
                 where: { id: parseInt(id) },
@@ -1666,10 +1663,10 @@ const dbService = {
     async updateVariant(id, variantData) {
         try {
             const updateData = {};
-            if (variantData.size) updateData.productSize = variantData.size;
-            if (variantData.color) updateData.color = variantData.color;
-            if (variantData.price) updateData.price = parseFloat(variantData.price);
-            if (variantData.cost) updateData.cost = parseFloat(variantData.cost);
+            if (variantData.size !== undefined) updateData.productSize = variantData.size;
+            if (variantData.color !== undefined) updateData.color = variantData.color;
+            if (variantData.price !== undefined) updateData.price = parseFloat(variantData.price);
+            if (variantData.cost !== undefined) updateData.cost = parseFloat(variantData.cost);
             if (variantData.quantity !== undefined) updateData.quantity = parseInt(variantData.quantity);
             if (variantData.barcode !== undefined) updateData.barcode = variantData.barcode || null;
 
@@ -1677,6 +1674,16 @@ const dbService = {
                 where: { id: parseInt(id) },
                 data: updateData,
                 include: { product: true }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async deleteVariant(id) {
+        try {
+            return await prisma.variant.delete({
+                where: { id: parseInt(id) }
             });
         } catch (error) {
             return { error: error.message };
@@ -5651,9 +5658,5 @@ const dbService = {
 };
 
 module.exports = dbService;
-
-
-
-
 
 

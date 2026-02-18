@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
     searchVariants: (query) => ipcRenderer.invoke('db:searchVariants', query),
     addVariant: (variantData) => ipcRenderer.invoke('db:addVariant', variantData),
     updateVariant: (id, variantData) => ipcRenderer.invoke('db:updateVariant', id, variantData),
+    deleteVariant: (id) => ipcRenderer.invoke('db:deleteVariant', id),
 
     // Sales
     getSales: () => ipcRenderer.invoke('db:getSales'),

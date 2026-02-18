@@ -523,6 +523,11 @@ ipcMain.handle('db:updateVariant', async (event, id, variantData) => {
     return await dbService.updateVariant(id, variantData);
 });
 
+// Variant Delete
+ipcMain.handle('db:deleteVariant', async (event, id) => {
+    return await dbService.deleteVariant(id);
+});
+
 app.whenReady().then(() => {
     createWindow()
 

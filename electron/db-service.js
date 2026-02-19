@@ -98,6 +98,77 @@ const normalizeProductUnits = (units, baseSalePrice = 0, baseCostPrice = 0) => {
         .filter((unit) => unit.unitName);
 };
 
+const PRODUCT_CATEGORY_SELECT = {
+    id: true,
+    name: true,
+    icon: true,
+    color: true,
+    description: true
+};
+
+const PRODUCT_INVENTORY_SELECT = {
+    id: true,
+    totalQuantity: true,
+    minStock: true,
+    maxStock: true,
+    warehouseQty: true,
+    displayQty: true,
+    lastRestock: true,
+    notes: true,
+    updatedAt: true
+};
+
+const PRODUCT_UNIT_SELECT = {
+    id: true,
+    unitName: true,
+    conversionFactor: true,
+    salePrice: true,
+    wholesalePrice: true,
+    minSalePrice: true,
+    purchasePrice: true,
+    barcode: true,
+    updatedAt: true
+};
+
+const PRODUCT_VARIANT_SELECT = {
+    id: true,
+    productSize: true,
+    color: true,
+    price: true,
+    cost: true,
+    quantity: true,
+    barcode: true,
+    updatedAt: true
+};
+
+const buildProductSelect = ({
+    includeDescription = true,
+    includeImage = true,
+    includeCategory = true,
+    includeInventory = true,
+    includeProductUnits = true,
+    includeVariants = true
+} = {}) => ({
+    id: true,
+    name: true,
+    ...(includeDescription ? { description: true } : {}),
+    categoryId: true,
+    brand: true,
+    barcode: true,
+    ...(includeImage ? { image: true } : {}),
+    sku: true,
+    basePrice: true,
+    cost: true,
+    isActive: true,
+    type: true,
+    createdAt: true,
+    updatedAt: true,
+    ...(includeCategory ? { category: { select: PRODUCT_CATEGORY_SELECT } } : {}),
+    ...(includeInventory ? { inventory: { select: PRODUCT_INVENTORY_SELECT } } : {}),
+    ...(includeProductUnits ? { productUnits: { select: PRODUCT_UNIT_SELECT } } : {}),
+    ...(includeVariants ? { variants: { select: PRODUCT_VARIANT_SELECT } } : {})
+});
+
 const isPrismaDecimalLike = (value) => (
     value
     && typeof value === 'object'
@@ -1499,7 +1570,13 @@ const dbService = {
         categoryId = null,
         sortCol = 'id',
         sortDir = 'desc',
-        includeTotal = true
+        includeTotal = true,
+        includeDescription = true,
+        includeImage = true,
+        includeCategory = true,
+        includeInventory = true,
+        includeProductUnits = true,
+        includeVariants = true
     } = {}) {
         try {
             const safePage = Math.max(1, parseInt(page, 10) || 1);
@@ -1549,69 +1626,14 @@ const dbService = {
                 take: safePageSize,
                 where,
                 orderBy,
-                select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                    categoryId: true,
-                    brand: true,
-                    barcode: true,
-                    image: true,
-                    sku: true,
-                    basePrice: true,
-                    cost: true,
-                    isActive: true,
-                    type: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    category: {
-                        select: {
-                            id: true,
-                            name: true,
-                            icon: true,
-                            color: true,
-                            description: true
-                        }
-                    },
-                    inventory: {
-                        select: {
-                            id: true,
-                            totalQuantity: true,
-                            minStock: true,
-                            maxStock: true,
-                            warehouseQty: true,
-                            displayQty: true,
-                            lastRestock: true,
-                            notes: true,
-                            updatedAt: true
-                        }
-                    },
-                    productUnits: {
-                        select: {
-                            id: true,
-                            unitName: true,
-                            conversionFactor: true,
-                            salePrice: true,
-                            wholesalePrice: true,
-                            minSalePrice: true,
-                            purchasePrice: true,
-                            barcode: true,
-                            updatedAt: true
-                        }
-                    },
-                    variants: {
-                        select: {
-                            id: true,
-                            productSize: true,
-                            color: true,
-                            price: true,
-                            cost: true,
-                            quantity: true,
-                            barcode: true,
-                            updatedAt: true
-                        }
-                    }
-                }
+                select: buildProductSelect({
+                    includeDescription: includeDescription !== false,
+                    includeImage: includeImage !== false,
+                    includeCategory: includeCategory !== false,
+                    includeInventory: includeInventory !== false,
+                    includeProductUnits: includeProductUnits !== false,
+                    includeVariants: includeVariants !== false
+                })
             };
 
             const needTotal = includeTotal !== false;
@@ -1636,6 +1658,28 @@ const dbService = {
                 totalPages,
                 hasMore: needTotal ? safePage < totalPages : products.length === safePageSize
             };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getProduct(id) {
+        try {
+            const productId = parsePositiveInt(id);
+            if (!productId) {
+                return { error: 'Invalid productId' };
+            }
+
+            const product = await prisma.product.findUnique({
+                where: { id: productId },
+                select: buildProductSelect()
+            });
+
+            if (!product) {
+                return { error: 'Product not found' };
+            }
+
+            return product;
         } catch (error) {
             return { error: error.message };
         }

@@ -507,7 +507,8 @@ export default function Products() {
           searchTerm: '',
           categoryId: categoryFilter || null,
           sortCol: activeSort.sortCol,
-          sortDir: activeSort.sortDir
+          sortDir: activeSort.sortDir,
+          includeImage: false
         });
 
         if (res?.error) throw new Error(res.error);
@@ -570,7 +571,8 @@ export default function Products() {
           searchTerm: term,
           categoryId: categoryFilter || null,
           sortCol: activeSort.sortCol,
-          sortDir: activeSort.sortDir
+          sortDir: activeSort.sortDir,
+          includeImage: false
         });
 
         if (res?.error) throw new Error(res.error);
@@ -726,24 +728,36 @@ export default function Products() {
     []
   );
 
-  const openCreate = () => {
+  const fetchProductDetails = useCallback(async (productId) => {
+    const res = await window.api.getProduct(productId);
+    if (res?.error) throw new Error(res.error);
+    if (!res?.id) throw new Error('تعذر تحميل بيانات المنتج');
+    return res;
+  }, []);
+
+  const openCreate = useCallback(() => {
     void loadProductModal();
     setModalMode('create');
     setEditingProduct(null);
     setShowProductModal(true);
-  };
+  }, []);
 
-  const openEdit = (product) => {
+  const openEdit = useCallback(async (product) => {
     void loadProductModal();
-    setModalMode('edit');
-    setEditingProduct(product);
-    setShowProductModal(true);
-  };
+    try {
+      const detailedProduct = await fetchProductDetails(product.id);
+      setModalMode('edit');
+      setEditingProduct(detailedProduct);
+      setShowProductModal(true);
+    } catch (err) {
+      await safeAlert(err.message || 'تعذر تحميل بيانات المنتج', null, { type: 'error', title: 'تعديل منتج' });
+    }
+  }, [fetchProductDetails]);
 
-  const closeProductModal = () => {
+  const closeProductModal = useCallback(() => {
     setShowProductModal(false);
     setEditingProduct(null);
-  };
+  }, []);
 
   const handleSaveProduct = async (productData) => {
     setSaving(true);
@@ -958,7 +972,7 @@ export default function Products() {
     }
   };
 
-  const deleteProduct = async (product) => {
+  const deleteProduct = useCallback(async (product) => {
     const ok = await safeConfirm(`سيتم حذف المنتج "${product.name}". هل تريد المتابعة؟`, { title: 'حذف منتج' });
     if (!ok) return;
 
@@ -970,45 +984,47 @@ export default function Products() {
 
     await refreshVisibleProducts();
     notify('تم حذف المنتج', 'success');
-  };
+  }, [notify, refreshVisibleProducts]);
 
-  const duplicateProduct = async (product) => {
+  const duplicateProduct = useCallback(async (product) => {
     try {
-      const copiedUnits = unitsOf(product).map((unit, index) => ({
+      const sourceProduct = await fetchProductDetails(product.id);
+
+      const copiedUnits = unitsOf(sourceProduct).map((unit, index) => ({
         unitName: nText(unit?.unitName) || (index === 0 ? DEFAULT_UNIT : ''),
         conversionFactor: index === 0 ? 1 : Math.max(0.0001, nNum(unit?.conversionFactor, 1)),
-        salePrice: Math.max(0, nNum(unit?.salePrice, salePriceOf(product))),
-        wholesalePrice: Math.max(0, nNum(unit?.wholesalePrice, salePriceOf(product))),
-        minSalePrice: Math.max(0, nNum(unit?.minSalePrice, salePriceOf(product))),
-        purchasePrice: Math.max(0, nNum(unit?.purchasePrice, costPriceOf(product))),
+        salePrice: Math.max(0, nNum(unit?.salePrice, salePriceOf(sourceProduct))),
+        wholesalePrice: Math.max(0, nNum(unit?.wholesalePrice, salePriceOf(sourceProduct))),
+        minSalePrice: Math.max(0, nNum(unit?.minSalePrice, salePriceOf(sourceProduct))),
+        purchasePrice: Math.max(0, nNum(unit?.purchasePrice, costPriceOf(sourceProduct))),
         barcode: null
       }));
 
       const res = await window.api.addProduct({
-        name: `${product.name} - نسخة`,
-        description: product.description || null,
-        categoryId: product.categoryId || null,
-        brand: product.brand || null,
+        name: `${sourceProduct.name} - نسخة`,
+        description: sourceProduct.description || null,
+        categoryId: sourceProduct.categoryId || null,
+        brand: sourceProduct.brand || null,
         sku: null,
         barcode: null,
-        image: product.image || null,
-        basePrice: salePriceOf(product),
-        cost: costPriceOf(product),
-        isActive: product.isActive ?? true,
-        type: product.type || 'store',
-        openingQty: nInt(product?.inventory?.warehouseQty, 0),
+        image: sourceProduct.image || null,
+        basePrice: salePriceOf(sourceProduct),
+        cost: costPriceOf(sourceProduct),
+        isActive: sourceProduct.isActive ?? true,
+        type: sourceProduct.type || 'store',
+        openingQty: nInt(sourceProduct?.inventory?.warehouseQty, 0),
         units: copiedUnits.length ? copiedUnits : undefined
       });
       if (res?.error) throw new Error(res.error);
 
       const newId = res.id;
-      for (const variant of (product.variants || [])) {
+      for (const variant of (sourceProduct.variants || [])) {
         const add = await window.api.addVariant({
           productId: newId,
           size: variant.productSize || 'M',
           color: variant.color || 'افتراضي',
-          price: Number(variant.price || salePriceOf(product) || 0),
-          cost: Number(variant.cost || costPriceOf(product) || 0),
+          price: Number(variant.price || salePriceOf(sourceProduct) || 0),
+          cost: Number(variant.cost || costPriceOf(sourceProduct) || 0),
           quantity: nInt(variant.quantity, 0),
           barcode: null
         });
@@ -1016,12 +1032,12 @@ export default function Products() {
       }
 
       const inv = await window.api.updateInventory(newId, {
-        minStock: nInt(product?.inventory?.minStock, 5),
-        maxStock: nInt(product?.inventory?.maxStock, 100),
-        warehouseQty: nInt(product?.inventory?.warehouseQty, 0),
-        displayQty: nInt(product?.inventory?.displayQty, 0),
-        totalQuantity: nInt(product?.inventory?.totalQuantity, 0),
-        notes: nText(product?.inventory?.notes) || null,
+        minStock: nInt(sourceProduct?.inventory?.minStock, 5),
+        maxStock: nInt(sourceProduct?.inventory?.maxStock, 100),
+        warehouseQty: nInt(sourceProduct?.inventory?.warehouseQty, 0),
+        displayQty: nInt(sourceProduct?.inventory?.displayQty, 0),
+        totalQuantity: nInt(sourceProduct?.inventory?.totalQuantity, 0),
+        notes: nText(sourceProduct?.inventory?.notes) || null,
         lastRestock: new Date().toISOString()
       });
       if (inv?.error) throw new Error(inv.error);
@@ -1031,16 +1047,16 @@ export default function Products() {
     } catch (err) {
       await safeAlert(err.message || 'فشل نسخ المنتج', null, { type: 'error', title: 'نسخ منتج' });
     }
-  };
+  }, [fetchProductDetails, notify, refreshVisibleProducts]);
 
-  const toggleId = (id) => {
+  const toggleId = useCallback((id) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
   const toggleVisible = () => {
     setSelectedIds((prev) => {
@@ -1063,7 +1079,7 @@ export default function Products() {
     });
   };
 
-  const showVariantsSummary = async (product) => {
+  const showVariantsSummary = useCallback(async (product) => {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     if (!variants.length) {
       await safeAlert('لا توجد متغيرات مسجلة لهذا الصنف', null, { title: 'المتغيرات', type: 'info' });
@@ -1075,9 +1091,9 @@ export default function Products() {
     ));
     const overflowText = variants.length > 40 ? `\n... +${variants.length - 40} متغير إضافي` : '';
     await safeAlert(`${lines.join('\n')}${overflowText}`, null, { title: `متغيرات: ${product.name}` });
-  };
+  }, []);
 
-  const printBarcodes = async (targetProducts) => {
+  const printBarcodes = useCallback(async (targetProducts) => {
     const rows = barcodeRows(targetProducts);
     if (!rows.length) {
       await safeAlert('لا توجد عناصر صالحة للطباعة', null, { type: 'warning', title: 'طباعة باركود' });
@@ -1089,7 +1105,7 @@ export default function Products() {
       return;
     }
     notify(`تم فتح معاينة طباعة ${rows.length} باركود`, 'success');
-  };
+  }, [notify]);
 
   const printSelected = async () => {
     const selected = visibleProducts.filter((p) => selectedIds.has(p.id));
@@ -1184,7 +1200,17 @@ export default function Products() {
       const groups = importGroups(rows);
       if (!groups.length) throw new Error('لم يتم العثور على صفوف صالحة (تأكد من عمود اسم المنتج)');
 
-      const allRes = await window.api.getProducts({ page: 1, pageSize: 5000 });
+      const allRes = await window.api.getProducts({
+        page: 1,
+        pageSize: 5000,
+        includeTotal: false,
+        includeDescription: false,
+        includeImage: false,
+        includeCategory: false,
+        includeInventory: false,
+        includeProductUnits: false,
+        includeVariants: true
+      });
       if (allRes?.error) throw new Error(allRes.error);
       const all = Array.isArray(allRes?.data) ? allRes.data : [];
       const bySku = new Map();

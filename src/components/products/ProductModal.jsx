@@ -178,7 +178,7 @@ export default function ProductModal({
   isSaving = false
 }) {
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
-  const [formData, setFormData] = useState(buildInitialState(initialData));
+  const [formData, setFormData] = useState(() => buildInitialState(initialData));
   const [validationMessage, setValidationMessage] = useState('');
   const fileInputRef = useRef(null);
 

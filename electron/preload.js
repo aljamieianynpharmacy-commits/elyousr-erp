@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Products
     getProducts: (params) => ipcRenderer.invoke('db:getProducts', params),
+    getProduct: (id) => ipcRenderer.invoke('db:getProduct', id),
     searchProducts: (query) => ipcRenderer.invoke('db:searchProducts', query),
     addProduct: (productData) => ipcRenderer.invoke('db:addProduct', productData),
     updateProduct: (id, productData) => ipcRenderer.invoke('db:updateProduct', id, productData),

@@ -130,6 +130,9 @@ ipcMain.handle('db:getDashboardStats', async (event, token) => {
 ipcMain.handle('db:getProducts', async (event, params) => {
     return await dbService.getProducts(params);
 });
+ipcMain.handle('db:getProduct', async (event, id) => {
+    return await dbService.getProduct(id);
+});
 ipcMain.handle('db:addProduct', async (event, productData) => {
     return await dbService.addProduct(productData);
 });

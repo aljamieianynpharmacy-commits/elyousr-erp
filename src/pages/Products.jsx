@@ -34,22 +34,22 @@ const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 const DEFAULT_UNIT = 'قطعة';
 
 const GRID_COLUMNS = [
-  { key: 'select', label: '', width: '52px', required: true },
-  { key: 'code', label: 'الكود', width: '130px' },
-  { key: 'name', label: 'اسم الصنف', width: 'minmax(280px, 2fr)' },
-  { key: 'warehouse', label: 'المخزن', width: '100px' },
-  { key: 'unit', label: 'الوحدة', width: '90px' },
-  { key: 'quantity', label: 'الكمية', width: '100px' },
-  { key: 'salePrice', label: 'سعر البيع', width: '130px' },
-  { key: 'costPrice', label: 'سعر التكلفة', width: '130px' },
-  { key: 'wholesalePrice', label: 'سعر الجملة', width: '130px' },
-  { key: 'saleLimit', label: 'حد البيع', width: '100px' },
-  { key: 'notes', label: 'الملاحظات', width: 'minmax(220px, 1.5fr)' },
-  { key: 'category', label: 'الفئة', width: '140px' },
-  { key: 'variants', label: 'المتغيرات', width: '100px' },
-  { key: 'stockState', label: 'حالة المخزون', width: '160px' },
-  { key: 'updatedAt', label: 'آخر تحديث', width: '120px' },
-  { key: 'actions', label: 'إجراءات', width: '180px', required: true }
+  { key: 'select', label: '', width: '52px', required: true, minWidth: '52px' },
+  { key: 'code', label: 'الكود', width: 'minmax(100px, 1fr)', minWidth: '100px' },
+  { key: 'name', label: 'اسم الصنف', width: 'minmax(200px, 2fr)', minWidth: '200px' },
+  { key: 'warehouse', label: 'المخزن', width: 'minmax(80px, 1fr)', minWidth: '80px' },
+  { key: 'unit', label: 'الوحدة', width: 'minmax(70px, 1fr)', minWidth: '70px' },
+  { key: 'quantity', label: 'الكمية', width: 'minmax(80px, 1fr)', minWidth: '80px' },
+  { key: 'salePrice', label: 'سعر البيع', width: 'minmax(100px, 1fr)', minWidth: '100px' },
+  { key: 'costPrice', label: 'سعر التكلفة', width: 'minmax(100px, 1fr)', minWidth: '100px' },
+  { key: 'wholesalePrice', label: 'سعر الجملة', width: 'minmax(100px, 1fr)', minWidth: '100px' },
+  { key: 'saleLimit', label: 'حد البيع', width: 'minmax(80px, 1fr)', minWidth: '80px' },
+  { key: 'notes', label: 'الملاحظات', width: 'minmax(150px, 1.5fr)', minWidth: '150px' },
+  { key: 'category', label: 'الفئة', width: 'minmax(110px, 1fr)', minWidth: '110px' },
+  { key: 'variants', label: 'المتغيرات', width: 'minmax(80px, 1fr)', minWidth: '80px' },
+  { key: 'stockState', label: 'حالة المخزون', width: 'minmax(130px, 1fr)', minWidth: '130px' },
+  { key: 'updatedAt', label: 'آخر تحديث', width: 'minmax(100px, 1fr)', minWidth: '100px' },
+  { key: 'actions', label: 'إجراءات', width: '180px', required: true, minWidth: '180px' }
 ];
 
 const DEFAULT_VISIBLE_COLUMN_KEYS = GRID_COLUMNS.filter((col) => !col.required).map((col) => col.key);
@@ -285,6 +285,8 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
   } = data;
 
   const product = visibleProducts[index];
+  const [imageError, setImageError] = React.useState(false);
+  
   if (!product) return null;
 
   const renderGridCell = (product, columnKey) => {
@@ -305,9 +307,23 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
       case 'code':
         return <span className="grid-code">{productCode}</span>;
       case 'name':
+        const imageUrl = product.image ? (product.image.startsWith('http') || product.image.startsWith('data:') ? product.image : `file://${product.image}`) : null;
         return (
           <div className="grid-name-cell">
-            <div className="product-avatar">{product.image ? <img src={product.image} alt={product.name} /> : <Package size={16} />}</div>
+            <div className="product-avatar">
+              {imageUrl && !imageError ? (
+                <img 
+                  src={imageUrl} 
+                  alt={product.name} 
+                  onError={() => setImageError(true)}
+                  title={product.name}
+                />
+              ) : (
+                <div className="avatar-fallback">
+                  <Package size={16} />
+                </div>
+              )}
+            </div>
             <div>
               <strong>{product.name}</strong>
               <div className="product-meta">
@@ -415,6 +431,8 @@ export default function Products() {
 
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [showSearchRow, setShowSearchRow] = useState(false);
+  const [columnSearches, setColumnSearches] = useState({});
   const [gridHeight, setGridHeight] = useState(getGridHeight);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMN_KEYS;
@@ -717,6 +735,73 @@ export default function Products() {
   const isSearchBusy = isSearchMode && searchLoading;
   const tableLoading = loading || isSearchBusy;
 
+  // بحث في الأعمدة
+  const columnFilteredProducts = useMemo(() => {
+    if (Object.keys(columnSearches).length === 0) return visibleProducts;
+    
+    return visibleProducts.filter((product) => {
+      for (const [columnKey, searchValue] of Object.entries(columnSearches)) {
+        const trimmed = nText(searchValue);
+        if (!trimmed) continue;
+
+        let cellValue = '';
+        switch (columnKey) {
+          case 'name':
+            cellValue = nText(product.name);
+            break;
+          case 'code':
+            cellValue = nText(product.sku) || nText(product.barcode) || `#${product.id}`;
+            break;
+          case 'category':
+            cellValue = nText(categoryMap.get(product.categoryId)?.name);
+            break;
+          case 'warehouse':
+            cellValue = String(nInt(product?.inventory?.warehouseQty, 0));
+            break;
+          case 'unit':
+            cellValue = nText(mainUnitOf(product)?.unitName) || DEFAULT_UNIT;
+            break;
+          case 'quantity':
+            cellValue = String(productMetaMap.get(product.id)?.status?.total || 0);
+            break;
+          case 'salePrice':
+            cellValue = String(salePriceOf(product));
+            break;
+          case 'costPrice':
+            cellValue = String(costPriceOf(product));
+            break;
+          case 'wholesalePrice':
+            cellValue = String(wholesale(product));
+            break;
+          case 'brand':
+            cellValue = nText(product.brand);
+            break;
+          case 'barcode':
+            cellValue = nText(product.barcode);
+            break;
+          default:
+            cellValue = '';
+        }
+
+        if (!cellValue.toLowerCase().includes(trimmed.toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [visibleProducts, columnSearches, categoryMap, productMetaMap]);
+
+  const handleColumnSearchChange = (columnKey, value) => {
+    setColumnSearches((prev) => ({
+      ...prev,
+      [columnKey]: value
+    }));
+  };
+
+  const displayedProducts = useMemo(() => {
+    return columnFilteredProducts;
+  }, [columnFilteredProducts]);
+
   const metrics = useMemo(() => {
     let variantsCount = 0;
     let stockTotal = 0;
@@ -737,8 +822,8 @@ export default function Products() {
   }, [preparedProducts, totalItems]);
 
   const allVisibleSelected = useMemo(() => (
-    visibleProducts.length > 0 && visibleProducts.every((p) => selectedIds.has(p.id))
-  ), [selectedIds, visibleProducts]);
+    displayedProducts.length > 0 && displayedProducts.every((p) => selectedIds.has(p.id))
+  ), [selectedIds, displayedProducts]);
 
   const activeColumns = useMemo(() => {
     const optionalSet = new Set(visibleColumnKeys);
@@ -746,7 +831,10 @@ export default function Products() {
   }, [visibleColumnKeys]);
 
   const gridTemplateColumns = useMemo(
-    () => activeColumns.map((column) => column.width).join(' '),
+    () => {
+      // تجميع widths بحيث تتقلص الأعمدة تلقائياً عند إضافة أعمدة جديدة
+      return activeColumns.map((column) => column.width).join(' ');
+    },
     [activeColumns]
   );
 
@@ -1088,8 +1176,8 @@ export default function Products() {
   const toggleVisible = () => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (allVisibleSelected) visibleProducts.forEach((p) => next.delete(p.id));
-      else visibleProducts.forEach((p) => next.add(p.id));
+      if (allVisibleSelected) displayedProducts.forEach((p) => next.delete(p.id));
+      else displayedProducts.forEach((p) => next.add(p.id));
       return next;
     });
   };
@@ -1384,7 +1472,7 @@ export default function Products() {
 
 
   const itemData = useMemo(() => ({
-    visibleProducts,
+    visibleProducts: displayedProducts,
     activeColumns,
     selectedIds,
     categoryMap,
@@ -1398,7 +1486,7 @@ export default function Products() {
     gridContentWidth,
     gridTemplateColumns
   }), [
-    visibleProducts,
+    displayedProducts,
     activeColumns,
     selectedIds,
     categoryMap,
@@ -1491,17 +1579,21 @@ export default function Products() {
         </button>
       </section>
 
-      {/* <div className="products-search-meta">
+      <div className="products-search-meta">
         {isSearchTyping || isSearchBusy ? <span className="pill searching">جاري البحث...</span> : null}
         <span className="pill count">نتائج البحث: {filteredTotal}</span>
         {isSearchLimited ? <span className="pill limited">تم عرض أول {PRODUCT_SEARCH_LIMIT} نتيجة لتسريع العرض</span> : null}
-      </div> */}
+      </div>
 
       <section className="products-table-card">
         <div className="products-table-tools">
           <label className="check-control"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /> تحديد الكل</label>
-          <span>الظاهر: {visibleProducts.length}</span>
+          <span>الظاهر: {displayedProducts.length}</span>
           <span>المحدد: {selectedIds.size}</span>
+          <button type="button" className="products-btn products-btn-light" onClick={() => setShowSearchRow((prev) => !prev)} title="إظهار/إخفاء مربعات البحث">
+            <Search size={16} />
+            بحث متقدم
+          </button>
           <div className="columns-control" ref={columnsMenuRef}>
             <button type="button" className="products-btn products-btn-light columns-trigger" onClick={() => setShowColumnMenu((prev) => !prev)}>
               <span>الأعمدة</span>
@@ -1538,24 +1630,45 @@ export default function Products() {
               ))}
             </div>
 
+            {showSearchRow && (
+              <div
+                className="products-grid-search-row"
+                style={{ display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}
+              >
+                {activeColumns.map((column) => (
+                  <div key={`search-${column.key}`} className="products-grid-search-cell">
+                    {column.key !== 'select' && column.key !== 'actions' ? (
+                      <input
+                        type="text"
+                        placeholder={`بحث في ${column.label}...`}
+                        className="column-search-input"
+                        value={columnSearches[column.key] || ''}
+                        onChange={(e) => handleColumnSearchChange(column.key, e.target.value)}
+                      />
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {tableLoading ? (
               <div className="products-loading">
                 <RefreshCw size={18} className="spin" />
                 <span>{isSearchBusy ? 'جاري البحث...' : 'جاري تحميل المنتجات...'}</span>
               </div>
-            ) : visibleProducts.length === 0 ? (
+            ) : displayedProducts.length === 0 ? (
               <div className="products-empty grid-empty">لا توجد منتجات مطابقة</div>
             ) : (
               <List
                 className="products-grid-list"
                 width="100%"
                 height={gridHeight}
-                itemCount={visibleProducts.length}
+                itemCount={displayedProducts.length}
                 itemSize={60}
                 itemData={itemData}
                 overscanCount={5}
                 direction="rtl"
-                itemKey={(index) => visibleProducts[index]?.id || index}
+                itemKey={(index) => displayedProducts[index]?.id || index}
               >
                 {ProductGridRow}
               </List>

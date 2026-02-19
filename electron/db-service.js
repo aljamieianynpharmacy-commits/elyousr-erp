@@ -2629,65 +2629,119 @@ const dbService = {
     async createPurchase(purchaseData) {
         try {
             return await prisma.$transaction(async (tx) => {
+                const parsedSupplierId = parsePositiveInt(purchaseData?.supplierId);
+                const safeTotal = Math.max(0, toNumber(purchaseData?.total, 0));
+                const safePaid = Math.max(0, Math.min(
+                    toNumber(purchaseData?.paid, 0),
+                    safeTotal
+                ));
+                const invoiceDate = parseDateOrDefault(
+                    purchaseData?.invoiceDate ?? purchaseData?.createdAt,
+                    new Date()
+                );
+                const resolvedPaymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    purchaseData?.paymentMethodId ?? purchaseData?.paymentMethod ?? purchaseData?.payment,
+                    1
+                );
+
+                if (!Array.isArray(purchaseData?.items) || purchaseData.items.length === 0) {
+                    return { error: 'Purchase items are required' };
+                }
+
                 const newPurchase = await tx.purchase.create({
                     data: {
-                        supplierId: purchaseData.supplierId ? parseInt(purchaseData.supplierId) : null,
-                        total: parseFloat(purchaseData.total),
-                        paid: parseFloat(purchaseData.paid || 0),
-                        notes: purchaseData.notes || null
+                        supplierId: parsedSupplierId,
+                        total: safeTotal,
+                        paid: safePaid,
+                        notes: purchaseData.notes || null,
+                        createdAt: invoiceDate
                     }
                 });
 
                 for (let i = 0; i < purchaseData.items.length; i++) {
                     const item = purchaseData.items[i];
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(1, toInteger(item?.quantity, 1));
+                    const cost = Math.max(0, toNumber(item?.cost ?? item?.price, 0));
+
+                    if (!variantId) {
+                        return { error: 'Invalid variantId in purchase items' };
+                    }
 
                     await tx.purchaseItem.create({
                         data: {
                             id: i + 1,
                             purchaseId: newPurchase.id,
-                            variantId: parseInt(item.variantId),
-                            quantity: parseInt(item.quantity),
-                            cost: parseFloat(item.cost)
+                            variantId,
+                            quantity,
+                            cost
                         }
                     });
 
                     // Ø²ÙŠØ§Ø¯Ø© Ø§Ù„Ù…Ø®Ø²ÙˆÙ†
                     await tx.variant.update({
-                        where: { id: parseInt(item.variantId) },
+                        where: { id: variantId },
                         data: {
-                            quantity: { increment: parseInt(item.quantity) },
-                            cost: parseFloat(item.cost) // ØªØ­Ø¯ÙŠØ« Ø³Ø¹Ø± Ø§Ù„ØªÙƒÙ„ÙØ©
+                            quantity: { increment: quantity },
+                            cost // ØªØ­Ø¯ÙŠØ« Ø³Ø¹Ø± Ø§Ù„ØªÙƒÙ„ÙØ©
                         }
                     });
                 }
 
                 // ØªØ­Ø¯ÙŠØ« Ø±ØµÙŠØ¯ Ø§Ù„Ù…ÙˆØ±Ø¯
-                if (purchaseData.supplierId) {
-                    const remaining = parseFloat(purchaseData.total) - parseFloat(purchaseData.paid || 0);
+                if (parsedSupplierId) {
+                    const remaining = Math.max(0, safeTotal - safePaid);
                     await tx.supplier.update({
-                        where: { id: parseInt(purchaseData.supplierId) },
+                        where: { id: parsedSupplierId },
                         data: { balance: { decrement: remaining } }
                     });
                 }
 
-                const paidAmount = Math.max(0, Math.min(
-                    toNumber(purchaseData.paid, 0),
-                    toNumber(purchaseData.total, 0)
-                ));
+                const paidAmount = safePaid;
                 if (paidAmount > 0) {
                     const purchaseTreasuryId = await resolveTreasuryId(tx, purchaseData?.treasuryId);
-                    const treasuryEntryResult = await createTreasuryEntry(tx, {
-                        treasuryId: purchaseTreasuryId,
-                        entryType: TREASURY_ENTRY_TYPE.PURCHASE_PAYMENT,
-                        direction: TREASURY_DIRECTION.OUT,
-                        amount: paidAmount,
-                        notes: `Purchase #${newPurchase.id}${purchaseData.notes ? ` - ${purchaseData.notes}` : ''}`,
-                        referenceType: 'PURCHASE',
-                        referenceId: newPurchase.id,
-                        entryDate: purchaseData?.createdAt || new Date()
+                    const splitRows = await resolvePaymentSplits(tx, {
+                        splitPayments: purchaseData?.splitPayments ?? purchaseData?.payments,
+                        fallbackPaymentMethodId: resolvedPaymentMethodId || 1,
+                        totalAmount: paidAmount
                     });
+                    if (splitRows?.error) {
+                        return { error: splitRows.error };
+                    }
 
-                    throwIfResultError(treasuryEntryResult);
+                    for (const splitRow of splitRows) {
+                        const splitAmount = Math.max(0, toNumber(splitRow.amount));
+                        if (splitAmount <= 0) continue;
+
+                        const treasuryEntryResult = await createTreasuryEntry(tx, {
+                            treasuryId: purchaseTreasuryId,
+                            entryType: TREASURY_ENTRY_TYPE.PURCHASE_PAYMENT,
+                            direction: TREASURY_DIRECTION.OUT,
+                            amount: splitAmount,
+                            notes: `Purchase #${newPurchase.id}${purchaseData.notes ? ` - ${purchaseData.notes}` : ''}`,
+                            note: splitRow?.note || null,
+                            referenceType: 'PURCHASE',
+                            referenceId: newPurchase.id,
+                            paymentMethodId: splitRow.paymentMethodId,
+                            entryDate: invoiceDate,
+                            idempotencyKey: generateIdempotencyKey('PURCHASE_PAYMENT', [
+                                newPurchase.id,
+                                splitRow.paymentMethodId,
+                                normalizeAmountForKey(splitAmount),
+                                splitRow.index,
+                                'CREATE'
+                            ]),
+                            createdByUserId: parsePositiveInt(purchaseData?.createdByUserId ?? purchaseData?.userId),
+                            meta: {
+                                source: 'createPurchase',
+                                splitIndex: splitRow.index,
+                                splitCount: splitRows.length
+                            }
+                        });
+
+                        throwIfResultError(treasuryEntryResult);
+                    }
                 }
 
                 return newPurchase;
@@ -5994,4 +6048,3 @@ Object.keys(dbService).forEach((methodName) => {
 });
 
 module.exports = dbService;
-

@@ -1,6 +1,12 @@
 import React from 'react';
 
-export default function InvoicePreview({ sale, onClose, onPrint }) {
+export default function InvoicePreview({
+  sale,
+  onClose,
+  onPrint,
+  entityLabel = 'العميل',
+  invoiceTitle = 'الفاتورة'
+}) {
   if (!sale) return null;
 
   const calculateTotal = () => {
@@ -45,7 +51,7 @@ export default function InvoicePreview({ sale, onClose, onPrint }) {
 
         {/* === Header === */}
         <div style={{ textAlign: 'center', marginBottom: '25px', borderBottom: '2px solid #2563eb', paddingBottom: '15px' }}>
-          <h1 style={{ margin: 0, color: '#1e40af', fontSize: '28px' }}>الفاتورة</h1>
+          <h1 style={{ margin: 0, color: '#1e40af', fontSize: '28px' }}>{invoiceTitle}</h1>
           <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '14px' }}>
             رقم: <span style={{ fontWeight: 'bold', color: '#111827' }}>{sale.id}</span>
           </p>
@@ -71,7 +77,9 @@ export default function InvoicePreview({ sale, onClose, onPrint }) {
             marginBottom: '20px',
             border: '1px solid #bfdbfe'
           }}>
-            <h3 style={{ margin: '0 0 8px 0', color: '#1e40af', fontSize: '14px' }}>بيانات العميل</h3>
+            <h3 style={{ margin: '0 0 8px 0', color: '#1e40af', fontSize: '14px' }}>
+              {`بيانات ${entityLabel}`}
+            </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' }}>
               <div>
                 <span style={{ color: '#6b7280' }}>الاسم:</span>

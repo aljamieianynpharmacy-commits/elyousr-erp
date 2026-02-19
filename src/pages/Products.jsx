@@ -1491,11 +1491,11 @@ export default function Products() {
         </button>
       </section>
 
-      <div className="products-search-meta">
+      {/* <div className="products-search-meta">
         {isSearchTyping || isSearchBusy ? <span className="pill searching">جاري البحث...</span> : null}
         <span className="pill count">نتائج البحث: {filteredTotal}</span>
         {isSearchLimited ? <span className="pill limited">تم عرض أول {PRODUCT_SEARCH_LIMIT} نتيجة لتسريع العرض</span> : null}
-      </div>
+      </div> */}
 
       <section className="products-table-card">
         <div className="products-table-tools">

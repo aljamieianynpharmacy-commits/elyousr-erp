@@ -26,16 +26,6 @@ import './Products.css';
 
 const loadProductModal = () => import('../components/products/ProductModal');
 const ProductModal = lazy(loadProductModal);
-let productModalPreloadPromise = null;
-const preloadProductModal = () => {
-  if (!productModalPreloadPromise) {
-    productModalPreloadPromise = loadProductModal().catch((error) => {
-      productModalPreloadPromise = null;
-      throw error;
-    });
-  }
-  return productModalPreloadPromise;
-};
 
 const PRODUCT_FETCH_CHUNK = 10000;
 const PRODUCT_SEARCH_LIMIT = 120;
@@ -613,27 +603,6 @@ export default function Products() {
   }, [loadCategories]);
 
   useEffect(() => {
-    let idleCallbackId;
-    let timeoutId;
-    const startPreload = () => {
-      void preloadProductModal();
-    };
-
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      idleCallbackId = window.requestIdleCallback(startPreload, { timeout: 1500 });
-    } else {
-      timeoutId = window.setTimeout(startPreload, 450);
-    }
-
-    return () => {
-      if (typeof window !== 'undefined' && idleCallbackId !== undefined && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleCallbackId);
-      }
-      if (timeoutId) window.clearTimeout(timeoutId);
-    };
-  }, []);
-
-  useEffect(() => {
     if (nText(deferredSearchTerm)) return;
     loadProducts();
   }, [deferredSearchTerm, loadProducts]);
@@ -758,14 +727,14 @@ export default function Products() {
   );
 
   const openCreate = () => {
-    void preloadProductModal();
+    void loadProductModal();
     setModalMode('create');
     setEditingProduct(null);
     setShowProductModal(true);
   };
 
   const openEdit = (product) => {
-    void preloadProductModal();
+    void loadProductModal();
     setModalMode('edit');
     setEditingProduct(product);
     setShowProductModal(true);
@@ -1415,14 +1384,7 @@ export default function Products() {
             <Printer size={16} />
             طباعة باركود المحدد
           </button>
-          <button
-            type="button"
-            className="products-btn products-btn-primary"
-            onMouseEnter={() => void preloadProductModal()}
-            onFocus={() => void preloadProductModal()}
-            onTouchStart={() => void preloadProductModal()}
-            onClick={openCreate}
-          >
+          <button type="button" className="products-btn products-btn-primary" onClick={openCreate}>
             <Plus size={16} />
             منتج جديد
           </button>

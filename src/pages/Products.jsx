@@ -31,6 +31,7 @@ const PRODUCT_SEARCH_LIMIT = 120;
 const PRODUCT_SEARCH_DEBOUNCE_MS = 120;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 const BARCODE_STUDIO_STORAGE_KEY = 'products.barcodeStudio.v1';
+const BARCODE_TEMPLATE_STORAGE_KEY = 'products.barcodeTemplates.v1';
 const DEFAULT_UNIT = 'قطعة';
 
 const GRID_COLUMNS = [
@@ -74,11 +75,33 @@ const MM_TO_PX = 3.7795275591;
 
 const BARCODE_FORMAT_OPTIONS = [
   { value: 'CODE128', label: 'CODE128 (يدعم نص/أرقام)' },
+  { value: 'CODE128A', label: 'CODE128A (رموز وتحكم)' },
+  { value: 'CODE128B', label: 'CODE128B (نص/حروف كبيرة وصغيرة)' },
+  { value: 'CODE128C', label: 'CODE128C (أرقام زوجية فقط)' },
+  { value: 'QRCODE', label: 'QR Code (ثنائي الأبعاد)' },
+  { value: 'DATAMATRIX', label: 'DataMatrix (ثنائي الأبعاد)' },
+  { value: 'CODE39', label: 'CODE39 (حروف كبيرة وأرقام)' },
+  { value: 'CODE93', label: 'CODE93 (قياسي)' },
+  { value: 'CODE93FullASCII', label: 'CODE93 Full ASCII' },
   { value: 'EAN13', label: 'EAN-13 (12/13 رقم)' },
   { value: 'EAN8', label: 'EAN-8 (7/8 رقم)' },
+  { value: 'EAN5', label: 'EAN-5 (5 أرقام)' },
+  { value: 'EAN2', label: 'EAN-2 (رقمان)' },
   { value: 'UPC', label: 'UPC-A (11/12 رقم)' },
-  { value: 'ITF14', label: 'ITF-14 (14 رقم)' }
+  { value: 'UPCE', label: 'UPC-E (6/7/8 أرقام)' },
+  { value: 'ITF14', label: 'ITF-14 (14 رقم)' },
+  { value: 'ITF', label: 'ITF (أرقام زوجية الطول)' },
+  { value: 'MSI', label: 'MSI (أرقام)' },
+  { value: 'MSI10', label: 'MSI10 (Checksum Mod10)' },
+  { value: 'MSI11', label: 'MSI11 (Checksum Mod11)' },
+  { value: 'MSI1010', label: 'MSI1010 (Double Mod10)' },
+  { value: 'MSI1110', label: 'MSI1110 (Mod11 + Mod10)' },
+  { value: 'pharmacode', label: 'Pharmacode' },
+  { value: 'codabar', label: 'Codabar' }
 ];
+
+const MATRIX_BARCODE_FORMATS = new Set(['QRCODE', 'DATAMATRIX']);
+const isMatrixBarcodeFormat = (format) => MATRIX_BARCODE_FORMATS.has(format);
 
 const BARCODE_CODE_SOURCE_OPTIONS = [
   { value: 'auto', label: 'تلقائي (متغير ثم منتج ثم SKU)' },
@@ -92,6 +115,13 @@ const BARCODE_LABEL_PRESETS = [
   { id: 'medium', label: 'متوسط 50×30 مم', widthMm: 50, heightMm: 30 },
   { id: 'large', label: 'كبير 58×40 مم', widthMm: 58, heightMm: 40 },
   { id: 'custom', label: 'مخصص', widthMm: null, heightMm: null }
+];
+
+const BARCODE_STUDIO_TABS = [
+  { id: 'templates', label: 'القوالب', hint: 'حفظ واسترجاع إعدادات الطباعة حسب الطابعة والمقاس.' },
+  { id: 'source', label: 'النوع والمصدر', hint: 'اختيار نوع الباركود ومن أين يُقرأ الكود.' },
+  { id: 'layout', label: 'المقاس والتخطيط', hint: 'التحكم في أبعاد الملصق، الأعمدة، والهوامش.' },
+  { id: 'design', label: 'التصميم', hint: 'ألوان الملصق، أحجام الخطوط، وعناصر العرض.' }
 ];
 
 const DEFAULT_BARCODE_STUDIO = {
@@ -148,7 +178,7 @@ const sanitizeBarcodeStudioSettings = (raw = {}) => {
     gapYMm: inRange(raw.gapYMm, DEFAULT_BARCODE_STUDIO.gapYMm, 0, 20),
     paddingMm: inRange(raw.paddingMm, DEFAULT_BARCODE_STUDIO.paddingMm, 0, 10),
     barcodeHeightMm: inRange(raw.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 40),
-    barcodeWidthPx: inRange(raw.barcodeWidthPx, DEFAULT_BARCODE_STUDIO.barcodeWidthPx, 1, 4),
+    barcodeWidthPx: inRange(raw.barcodeWidthPx, DEFAULT_BARCODE_STUDIO.barcodeWidthPx, 1, 6),
     nameFontPx: Math.round(inRange(raw.nameFontPx, DEFAULT_BARCODE_STUDIO.nameFontPx, 8, 22)),
     metaFontPx: Math.round(inRange(raw.metaFontPx, DEFAULT_BARCODE_STUDIO.metaFontPx, 7, 18)),
     priceFontPx: Math.round(inRange(raw.priceFontPx, DEFAULT_BARCODE_STUDIO.priceFontPx, 8, 22)),
@@ -195,53 +225,134 @@ const barcodeValueFromSource = (row, source) => {
 const normalizeBarcodeByFormat = (value, format) => {
   const text = nText(value);
   if (!text) return null;
-  if (format === 'CODE128') return text;
+  if (
+    format === 'CODE128'
+    || format === 'CODE128A'
+    || format === 'CODE128B'
+    || format === 'CODE93FullASCII'
+    || format === 'QRCODE'
+    || format === 'DATAMATRIX'
+  ) return text;
 
   const digits = text.replace(/\D/g, '');
-  if (!digits) return null;
+  const upperText = text.toUpperCase();
 
   switch (format) {
+    case 'CODE128C':
+      if (!digits || digits.length % 2 !== 0) return null;
+      return digits;
+    case 'CODE39': {
+      const cleaned = upperText.replace(/\s+/g, ' ');
+      return /^[0-9A-Z\-\. $\/\+%]+$/.test(cleaned) ? cleaned : null;
+    }
+    case 'CODE93': {
+      const cleaned = upperText.replace(/\s+/g, ' ');
+      return /^[0-9A-Z\-\. $\/\+%]+$/.test(cleaned) ? cleaned : null;
+    }
     case 'EAN13':
+      if (!digits) return null;
       if (digits.length >= 13) return digits.slice(0, 13);
       if (digits.length === 12) return digits;
       return null;
     case 'EAN8':
+      if (!digits) return null;
       if (digits.length >= 8) return digits.slice(0, 8);
       if (digits.length === 7) return digits;
       return null;
+    case 'EAN5':
+      if (!digits) return null;
+      if (digits.length >= 5) return digits.slice(0, 5);
+      return null;
+    case 'EAN2':
+      if (!digits) return null;
+      if (digits.length >= 2) return digits.slice(0, 2);
+      return null;
     case 'UPC':
+      if (!digits) return null;
       if (digits.length >= 12) return digits.slice(0, 12);
       if (digits.length === 11) return digits;
       return null;
+    case 'UPCE':
+      if (!digits) return null;
+      if (digits.length >= 8) return digits.slice(0, 8);
+      if (digits.length === 6 || digits.length === 7) return digits;
+      return null;
     case 'ITF14':
+      if (!digits) return null;
       if (digits.length >= 14) return digits.slice(0, 14);
       return null;
+    case 'ITF':
+      if (!digits || digits.length % 2 !== 0) return null;
+      return digits;
+    case 'MSI':
+    case 'MSI10':
+    case 'MSI11':
+    case 'MSI1010':
+    case 'MSI1110':
+    case 'pharmacode':
+      return digits || null;
+    case 'codabar': {
+      const cleaned = upperText.replace(/\s+/g, '');
+      if (!/^[0-9A-D\-\$:\/\.\+]+$/.test(cleaned)) return null;
+      const startsWithGuard = /^[A-D]/.test(cleaned);
+      const endsWithGuard = /[A-D]$/.test(cleaned);
+      if (startsWithGuard && endsWithGuard) return cleaned;
+      return `A${cleaned}A`;
+    }
     default:
       return text;
   }
 };
 
-const buildBarcodeSvg = (value, settings) => {
+const buildBarcodeSvg = (value, settings, bwipLibrary = null) => {
   if (typeof document === 'undefined') return '';
 
-  const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  let isValid = true;
+  if (isMatrixBarcodeFormat(settings.format)) {
+    if (!bwipLibrary || typeof bwipLibrary.toSVG !== 'function') {
+      return '';
+    }
 
-  JsBarcode(svgNode, value, {
-    format: settings.format,
-    width: settings.barcodeWidthPx,
-    height: mmToPx(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm),
-    margin: 0,
-    lineColor: settings.lineColor,
-    displayValue: false,
-    background: 'transparent',
-    valid: (valid) => { isValid = valid; }
-  });
+    const bcid = settings.format === 'QRCODE' ? 'qrcode' : 'datamatrix';
 
-  return isValid ? svgNode.outerHTML : '';
+    try {
+      const svg = bwipLibrary.toSVG({
+        bcid,
+        text: value,
+        scale: Math.max(1, Math.round(inRange(settings.barcodeWidthPx, 2, 1, 6))),
+        width: inRange(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 80),
+        height: inRange(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 80),
+        padding: 0,
+        includetext: false,
+        barcolor: settings.lineColor
+      });
+      return typeof svg === 'string' ? svg : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  try {
+    const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    let isValid = true;
+
+    JsBarcode(svgNode, value, {
+      format: settings.format,
+      width: settings.barcodeWidthPx,
+      height: mmToPx(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm),
+      margin: 0,
+      lineColor: settings.lineColor,
+      displayValue: false,
+      background: 'transparent',
+      valid: (valid) => { isValid = valid; }
+    });
+
+    return isValid ? svgNode.outerHTML : '';
+  } catch (err) {
+    return '';
+  }
 };
 
-const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY) => {
+const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY, bwipLibrary = null) => {
   const labels = [];
   const invalidRows = [];
   const copies = Math.max(1, Math.round(inRange(settings.copiesPerItem, 1, 1, 50)));
@@ -254,7 +365,7 @@ const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY) =>
       continue;
     }
 
-    const svg = buildBarcodeSvg(normalizedCode, settings);
+    const svg = buildBarcodeSvg(normalizedCode, settings, bwipLibrary);
     if (!svg) {
       invalidRows.push({ row, reason: 'render-failed' });
       continue;
@@ -280,6 +391,7 @@ const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY) =>
 const barcodeStudioHtml = (labels, settings) => {
   const safe = sanitizeBarcodeStudioSettings(settings);
   const textAlign = safe.textAlign === 'left' ? 'left' : safe.textAlign === 'right' ? 'right' : 'center';
+  const isMatrixFormat = isMatrixBarcodeFormat(safe.format);
   const cards = labels.map((label) => {
     const size = nText(label.size);
     const color = nText(label.color);
@@ -291,7 +403,7 @@ const barcodeStudioHtml = (labels, settings) => {
         ${safe.showName ? `<div class="name">${escapeHtml(label.name || 'منتج')}</div>` : ''}
         ${safe.showSku ? `<div class="meta">SKU: ${escapeHtml(label.sku || '-')}</div>` : ''}
         ${safe.showVariant && hasVariant ? `<div class="meta">${escapeHtml(variantText)}</div>` : ''}
-        <div class="barcode">${label.barcodeSvg}</div>
+        <div class="barcode ${isMatrixFormat ? 'matrix' : 'linear'}">${label.barcodeSvg}</div>
         ${safe.showCode ? `<div class="code">${escapeHtml(label.code || '')}</div>` : ''}
         ${safe.showPrice ? `<div class="price">${Number(label.price || 0).toFixed(2)} ج.م</div>` : ''}
       </article>
@@ -351,8 +463,14 @@ const barcodeStudioHtml = (labels, settings) => {
           display: grid;
           place-items: center;
         }
-        .barcode svg {
+        .barcode.linear svg {
           width: 100%;
+          height: ${safe.barcodeHeightMm}mm;
+          display: block;
+        }
+        .barcode.matrix svg {
+          width: auto;
+          max-width: 100%;
           height: ${safe.barcodeHeightMm}mm;
           display: block;
         }
@@ -398,6 +516,46 @@ const money = (v) => {
 const csv = (v) => {
   const s = String(v ?? '');
   return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const normalizeTemplateValue = (value, maxLength = 64) => nText(value).slice(0, maxLength);
+
+const sanitizeBarcodeTemplate = (template, fallbackIndex = 1) => {
+  const now = Date.now();
+  const createdAt = Number.isFinite(Number(template?.createdAt)) ? Number(template.createdAt) : now;
+  const updatedAt = Number.isFinite(Number(template?.updatedAt)) ? Number(template.updatedAt) : createdAt;
+
+  return {
+    id: nText(template?.id) || `barcode-template-${createdAt}-${fallbackIndex}`,
+    name: normalizeTemplateValue(template?.name, 80) || `قالب ${fallbackIndex}`,
+    printer: normalizeTemplateValue(template?.printer, 80),
+    settings: sanitizeBarcodeStudioSettings(template?.settings),
+    createdAt,
+    updatedAt
+  };
+};
+
+const parseBarcodeTemplates = (rawValue) => {
+  if (!rawValue) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+
+    const uniqueIds = new Set();
+    const sanitized = [];
+
+    parsed.forEach((item, index) => {
+      const template = sanitizeBarcodeTemplate(item, index + 1);
+      if (uniqueIds.has(template.id)) return;
+      uniqueIds.add(template.id);
+      sanitized.push(template);
+    });
+
+    return sanitized.sort((a, b) => b.updatedAt - a.updatedAt);
+  } catch (err) {
+    return [];
+  }
 };
 
 const stock = (p) => {
@@ -784,13 +942,18 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     </div>
   );
 }, (prevProps, nextProps) => {
-  // مقارنة مخصصة للأداء الأفضل
-  return (
-    prevProps.index === nextProps.index &&
-    prevProps.style === nextProps.style &&
-    prevProps.data.visibleProducts[prevProps.index]?.id === nextProps.data.visibleProducts[nextProps.index]?.id &&
-    prevProps.data.gridTemplateColumns === nextProps.data.gridTemplateColumns
-  );
+  if (prevProps.index !== nextProps.index) return false;
+  if (prevProps.style !== nextProps.style) return false;
+  if (prevProps.data.gridTemplateColumns !== nextProps.data.gridTemplateColumns) return false;
+
+  const prevProductId = prevProps.data.visibleProducts[prevProps.index]?.id;
+  const nextProductId = nextProps.data.visibleProducts[nextProps.index]?.id;
+  if (prevProductId !== nextProductId) return false;
+
+  const prevSelected = prevProductId != null && prevProps.data.selectedIds?.has(prevProductId);
+  const nextSelected = nextProductId != null && nextProps.data.selectedIds?.has(nextProductId);
+
+  return prevSelected === nextSelected;
 });
 
 export default function Products() {
@@ -853,6 +1016,21 @@ export default function Products() {
       return DEFAULT_BARCODE_STUDIO;
     }
   });
+  const [barcodeTemplates, setBarcodeTemplates] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      return parseBarcodeTemplates(window.localStorage.getItem(BARCODE_TEMPLATE_STORAGE_KEY));
+    } catch (err) {
+      return [];
+    }
+  });
+  const [activeBarcodeTemplateId, setActiveBarcodeTemplateId] = useState('');
+  const [barcodeTemplateName, setBarcodeTemplateName] = useState('');
+  const [barcodeTemplatePrinter, setBarcodeTemplatePrinter] = useState('');
+  const [barcodeStudioTab, setBarcodeStudioTab] = useState('templates');
+  const [matrixBarcodeLibrary, setMatrixBarcodeLibrary] = useState(null);
+  const [matrixBarcodeEngineLoading, setMatrixBarcodeEngineLoading] = useState(false);
+  const [matrixBarcodeEngineError, setMatrixBarcodeEngineError] = useState('');
 
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
@@ -863,6 +1041,7 @@ export default function Products() {
   const hasLoadedProductsRef = useRef(false);
   const latestProductsRequestRef = useRef(0);
   const latestSearchRequestRef = useRef(0);
+  const matrixBarcodeLoaderRef = useRef(null);
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
   const importColumnSamples = useMemo(() => {
@@ -887,16 +1066,64 @@ export default function Products() {
     () => sanitizeBarcodeStudioSettings(barcodeStudioSettings),
     [barcodeStudioSettings]
   );
-  const barcodePreview = useMemo(
-    () => buildBarcodeLabels(barcodeStudioRows, barcodeStudioSafeSettings, 10),
-    [barcodeStudioRows, barcodeStudioSafeSettings]
+  const activeBarcodeTemplate = useMemo(
+    () => barcodeTemplates.find((template) => template.id === activeBarcodeTemplateId) || null,
+    [barcodeTemplates, activeBarcodeTemplateId]
   );
+  const activeBarcodeStudioTab = useMemo(
+    () => BARCODE_STUDIO_TABS.find((tab) => tab.id === barcodeStudioTab) || BARCODE_STUDIO_TABS[0],
+    [barcodeStudioTab]
+  );
+  const barcodePreviewIsMatrix = isMatrixBarcodeFormat(barcodeStudioSafeSettings.format);
+  const barcodePreview = useMemo(() => {
+    if (barcodePreviewIsMatrix && !matrixBarcodeLibrary) {
+      return { labels: [], invalidRows: [] };
+    }
+    return buildBarcodeLabels(barcodeStudioRows, barcodeStudioSafeSettings, 10, matrixBarcodeLibrary);
+  }, [barcodeStudioRows, barcodeStudioSafeSettings, barcodePreviewIsMatrix, matrixBarcodeLibrary]);
 
   const notify = useCallback((message, type = 'success') => {
     setToast({ message, type });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
+
+  const ensureMatrixBarcodeLibrary = useCallback(async () => {
+    if (matrixBarcodeLibrary && typeof matrixBarcodeLibrary.toSVG === 'function') {
+      return matrixBarcodeLibrary;
+    }
+    if (matrixBarcodeLoaderRef.current) {
+      return matrixBarcodeLoaderRef.current;
+    }
+
+    setMatrixBarcodeEngineLoading(true);
+    setMatrixBarcodeEngineError('');
+
+    matrixBarcodeLoaderRef.current = import('bwip-js')
+      .then((module) => {
+        const loaded = module?.default && typeof module.default.toSVG === 'function'
+          ? module.default
+          : module;
+
+        if (!loaded || typeof loaded.toSVG !== 'function') {
+          throw new Error('تعذر تحميل محرك QR/DataMatrix');
+        }
+
+        setMatrixBarcodeLibrary(loaded);
+        return loaded;
+      })
+      .catch((err) => {
+        const message = err?.message || 'تعذر تحميل محرك QR/DataMatrix';
+        setMatrixBarcodeEngineError(message);
+        throw err;
+      })
+      .finally(() => {
+        setMatrixBarcodeEngineLoading(false);
+        matrixBarcodeLoaderRef.current = null;
+      });
+
+    return matrixBarcodeLoaderRef.current;
+  }, [matrixBarcodeLibrary]);
 
   const recalculateGridHeight = useCallback(() => {
     const viewportHeight = gridViewportRef.current?.clientHeight || 0;
@@ -921,6 +1148,16 @@ export default function Products() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(BARCODE_STUDIO_STORAGE_KEY, JSON.stringify(sanitizeBarcodeStudioSettings(barcodeStudioSettings)));
   }, [barcodeStudioSettings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(BARCODE_TEMPLATE_STORAGE_KEY, JSON.stringify(barcodeTemplates));
+  }, [barcodeTemplates]);
+
+  useEffect(() => {
+    if (!showBarcodeStudio || !barcodePreviewIsMatrix) return;
+    ensureMatrixBarcodeLibrary().catch(() => {});
+  }, [showBarcodeStudio, barcodePreviewIsMatrix, ensureMatrixBarcodeLibrary]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -1639,7 +1876,16 @@ export default function Products() {
   }, []);
 
   const setBarcodeSetting = useCallback((key, value) => {
-    setBarcodeStudioSettings((prev) => ({ ...prev, [key]: value }));
+    setBarcodeStudioSettings((prev) => {
+      const next = { ...prev, [key]: value };
+
+      if (key === 'format' && isMatrixBarcodeFormat(value)) {
+        next.barcodeHeightMm = Math.max(inRange(prev.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 80), 16);
+        next.barcodeWidthPx = Math.max(inRange(prev.barcodeWidthPx, DEFAULT_BARCODE_STUDIO.barcodeWidthPx, 1, 6), 2);
+      }
+
+      return next;
+    });
   }, []);
 
   const setBarcodeNumberSetting = useCallback((key, rawValue, min, max) => {
@@ -1663,6 +1909,99 @@ export default function Products() {
     });
   }, []);
 
+  const applyBarcodeTemplate = useCallback((templateId) => {
+    setActiveBarcodeTemplateId(templateId);
+    if (!templateId) return;
+
+    const template = barcodeTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+
+    setBarcodeStudioSettings(sanitizeBarcodeStudioSettings(template.settings));
+    setBarcodeTemplateName(template.name);
+    setBarcodeTemplatePrinter(template.printer || '');
+  }, [barcodeTemplates]);
+
+  const saveNewBarcodeTemplate = useCallback(async () => {
+    const name = normalizeTemplateValue(barcodeTemplateName, 80);
+    if (!name) {
+      await safeAlert('اكتب اسم القالب قبل الحفظ', null, { type: 'warning', title: 'قوالب الطباعة' });
+      return;
+    }
+
+    const now = Date.now();
+    const template = {
+      id: `barcode-template-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      printer: normalizeTemplateValue(barcodeTemplatePrinter, 80),
+      settings: sanitizeBarcodeStudioSettings(barcodeStudioSettings),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    setBarcodeTemplates((prev) => [template, ...prev].sort((a, b) => b.updatedAt - a.updatedAt));
+    setActiveBarcodeTemplateId(template.id);
+    notify(`تم حفظ القالب "${name}"`, 'success');
+  }, [barcodeTemplateName, barcodeTemplatePrinter, barcodeStudioSettings, notify]);
+
+  const updateBarcodeTemplate = useCallback(async () => {
+    if (!activeBarcodeTemplate) {
+      await safeAlert('اختر قالبًا محفوظًا أولاً', null, { type: 'warning', title: 'قوالب الطباعة' });
+      return;
+    }
+
+    const nextName = normalizeTemplateValue(barcodeTemplateName || activeBarcodeTemplate.name, 80);
+    if (!nextName) {
+      await safeAlert('اسم القالب لا يمكن أن يكون فارغًا', null, { type: 'warning', title: 'قوالب الطباعة' });
+      return;
+    }
+
+    const nextPrinter = normalizeTemplateValue(barcodeTemplatePrinter, 80);
+    const now = Date.now();
+
+    setBarcodeTemplates((prev) => (
+      prev
+        .map((item) => {
+          if (item.id !== activeBarcodeTemplate.id) return item;
+          return {
+            ...item,
+            name: nextName,
+            printer: nextPrinter,
+            settings: sanitizeBarcodeStudioSettings(barcodeStudioSettings),
+            updatedAt: now
+          };
+        })
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+    ));
+
+    setBarcodeTemplateName(nextName);
+    setBarcodeTemplatePrinter(nextPrinter);
+    notify(`تم تحديث القالب "${nextName}"`, 'success');
+  }, [activeBarcodeTemplate, barcodeTemplateName, barcodeTemplatePrinter, barcodeStudioSettings, notify]);
+
+  const deleteBarcodeTemplate = useCallback(async () => {
+    if (!activeBarcodeTemplate) {
+      await safeAlert('اختر قالبًا لحذفه', null, { type: 'warning', title: 'قوالب الطباعة' });
+      return;
+    }
+
+    const confirmed = await safeConfirm(`حذف القالب "${activeBarcodeTemplate.name}"؟`, { title: 'قوالب الطباعة' });
+    if (!confirmed) return;
+
+    setBarcodeTemplates((prev) => prev.filter((item) => item.id !== activeBarcodeTemplate.id));
+    setActiveBarcodeTemplateId('');
+    setBarcodeTemplateName('');
+    setBarcodeTemplatePrinter('');
+    notify('تم حذف القالب', 'warning');
+  }, [activeBarcodeTemplate, notify]);
+
+  const buildStudioLabels = useCallback(async (safeSettings) => {
+    let matrixLibrary = matrixBarcodeLibrary;
+    if (isMatrixBarcodeFormat(safeSettings.format)) {
+      matrixLibrary = await ensureMatrixBarcodeLibrary();
+    }
+    return buildBarcodeLabels(barcodeStudioRows, safeSettings, Number.POSITIVE_INFINITY, matrixLibrary);
+  }, [barcodeStudioRows, matrixBarcodeLibrary, ensureMatrixBarcodeLibrary]);
+
   const resetBarcodeStudioSettings = useCallback(() => {
     setBarcodeStudioSettings(DEFAULT_BARCODE_STUDIO);
   }, []);
@@ -1681,6 +2020,7 @@ export default function Products() {
     }
 
     setBarcodeStudioProducts(targetProducts);
+    setBarcodeStudioTab('templates');
     setShowBarcodeStudio(true);
   }, []);
 
@@ -1688,7 +2028,16 @@ export default function Products() {
     if (barcodePrinting || !barcodeStudioRows.length) return;
 
     const safeSettings = sanitizeBarcodeStudioSettings(barcodeStudioSettings);
-    const { labels, invalidRows } = buildBarcodeLabels(barcodeStudioRows, safeSettings);
+    let labelsResult = { labels: [], invalidRows: [] };
+
+    try {
+      labelsResult = await buildStudioLabels(safeSettings);
+    } catch (err) {
+      await safeAlert(err.message || 'تعذر تحميل محرك الباركود الثنائي الأبعاد', null, { type: 'error', title: 'طباعة باركود' });
+      return;
+    }
+
+    const { labels, invalidRows } = labelsResult;
 
     if (!labels.length) {
       const details = invalidRows.slice(0, 6).map((item, idx) => `${idx + 1}) ${nText(item?.row?.name) || 'بدون اسم'} | ${nText(item?.row?.code) || '-'}`);
@@ -1709,6 +2058,60 @@ export default function Products() {
       );
     } catch (err) {
       await safeAlert(err.message || 'فشل طباعة الباركود', null, { type: 'error', title: 'طباعة باركود' });
+    } finally {
+      setBarcodePrinting(false);
+    }
+  };
+
+  const executeBarcodeStudioPdfExport = async () => {
+    if (barcodePrinting || !barcodeStudioRows.length) return;
+
+    if (typeof window === 'undefined' || !window.api?.exportPDF) {
+      await safeAlert('تصدير PDF متاح داخل تطبيق سطح المكتب فقط', null, { type: 'warning', title: 'تصدير PDF' });
+      return;
+    }
+
+    const safeSettings = sanitizeBarcodeStudioSettings(barcodeStudioSettings);
+    let labelsResult = { labels: [], invalidRows: [] };
+
+    try {
+      labelsResult = await buildStudioLabels(safeSettings);
+    } catch (err) {
+      await safeAlert(err.message || 'تعذر تحميل محرك الباركود الثنائي الأبعاد', null, { type: 'error', title: 'تصدير PDF' });
+      return;
+    }
+
+    const { labels, invalidRows } = labelsResult;
+    if (!labels.length) {
+      const details = invalidRows.slice(0, 6).map((item, idx) => `${idx + 1}) ${nText(item?.row?.name) || 'بدون اسم'} | ${nText(item?.row?.code) || '-'}`);
+      const helpText = details.length ? `\n\nأمثلة:\n${details.join('\n')}` : '';
+      await safeAlert(`لا توجد أكواد صالحة للتصدير بصيغة ${safeSettings.format}.${helpText}`, null, { type: 'error', title: 'تصدير PDF' });
+      return;
+    }
+
+    setBarcodePrinting(true);
+    try {
+      const html = barcodeStudioHtml(labels, safeSettings);
+      const now = new Date();
+      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const result = await window.api.exportPDF({
+        html,
+        title: `ملصقات باركود المنتجات (${labels.length})`,
+        suggestedName: `barcode-labels-${stamp}.pdf`
+      });
+
+      if (result?.error) throw new Error(result.error);
+      if (result?.canceled) {
+        notify('تم إلغاء تصدير PDF', 'warning');
+        return;
+      }
+
+      notify(
+        `تم حفظ ملف PDF${invalidRows.length ? `، وتم تجاهل ${invalidRows.length} كود غير صالح` : ''}`,
+        invalidRows.length ? 'warning' : 'success'
+      );
+    } catch (err) {
+      await safeAlert(err.message || 'فشل تصدير ملف PDF', null, { type: 'error', title: 'تصدير PDF' });
     } finally {
       setBarcodePrinting(false);
     }
@@ -2269,150 +2672,246 @@ export default function Products() {
 
             <section className="products-modal-body barcode-studio-body">
               <div className="barcode-studio-config">
-                <div className="barcode-studio-section">
-                  <h3>نوع الكود ومصدره</h3>
-                  <div className="barcode-studio-grid two">
-                    <label>
-                      نوع الباركود
-                      <select value={barcodeStudioSafeSettings.format} onChange={(e) => setBarcodeSetting('format', e.target.value)} disabled={barcodePrinting}>
-                        {BARCODE_FORMAT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      مصدر الكود
-                      <select value={barcodeStudioSafeSettings.codeSource} onChange={(e) => setBarcodeSetting('codeSource', e.target.value)} disabled={barcodePrinting}>
-                        {BARCODE_CODE_SOURCE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="barcode-studio-section">
-                  <h3>مقاس الملصق والتخطيط</h3>
-                  <div className="barcode-studio-grid three">
-                    <label>
-                      قالب المقاس
-                      <select value={barcodeStudioSafeSettings.presetId} onChange={(e) => applyBarcodePreset(e.target.value)} disabled={barcodePrinting}>
-                        {BARCODE_LABEL_PRESETS.map((preset) => (
-                          <option key={preset.id} value={preset.id}>{preset.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      عرض الملصق (مم)
-                      <input
-                        type="number"
-                        min="20"
-                        max="120"
-                        step="1"
-                        value={barcodeStudioSafeSettings.labelWidthMm}
-                        onChange={(e) => {
-                          setBarcodeSetting('presetId', 'custom');
-                          setBarcodeNumberSetting('labelWidthMm', e.target.value, 20, 120);
-                        }}
+                <div className="barcode-studio-tabs-shell">
+                  <div className="barcode-studio-tabs" role="tablist" aria-label="أقسام إعدادات الباركود">
+                    {BARCODE_STUDIO_TABS.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={barcodeStudioTab === tab.id}
+                        className={`barcode-studio-tab-btn ${barcodeStudioTab === tab.id ? 'active' : ''}`}
+                        onClick={() => setBarcodeStudioTab(tab.id)}
                         disabled={barcodePrinting}
-                      />
-                    </label>
-                    <label>
-                      ارتفاع الملصق (مم)
-                      <input
-                        type="number"
-                        min="15"
-                        max="90"
-                        step="1"
-                        value={barcodeStudioSafeSettings.labelHeightMm}
-                        onChange={(e) => {
-                          setBarcodeSetting('presetId', 'custom');
-                          setBarcodeNumberSetting('labelHeightMm', e.target.value, 15, 90);
-                        }}
-                        disabled={barcodePrinting}
-                      />
-                    </label>
-                    <label>
-                      عدد الأعمدة
-                      <input type="number" min="1" max="8" step="1" value={barcodeStudioSafeSettings.columns} onChange={(e) => setBarcodeNumberSetting('columns', e.target.value, 1, 8)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      نسخ لكل ملصق
-                      <input type="number" min="1" max="50" step="1" value={barcodeStudioSafeSettings.copiesPerItem} onChange={(e) => setBarcodeNumberSetting('copiesPerItem', e.target.value, 1, 50)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      هامش الصفحة (مم)
-                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.pageMarginMm} onChange={(e) => setBarcodeNumberSetting('pageMarginMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                    </label>
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="barcode-studio-tab-hint">{activeBarcodeStudioTab.hint}</p>
+                  <div className="barcode-studio-quick-stats">
+                    <span>الصيغة: <strong>{barcodeStudioSafeSettings.format}</strong></span>
+                    <span>المقاس: <strong>{barcodeStudioSafeSettings.labelWidthMm}×{barcodeStudioSafeSettings.labelHeightMm} مم</strong></span>
+                    <span>الشبكة: <strong>{barcodeStudioSafeSettings.columns} عمود / {barcodeStudioSafeSettings.copiesPerItem} نسخة</strong></span>
+                    <span>القالب: <strong>{activeBarcodeTemplate?.name || 'مخصص'}</strong></span>
                   </div>
                 </div>
 
-                <div className="barcode-studio-section">
-                  <h3>تصميم الباركود</h3>
-                  <div className="barcode-studio-grid three">
-                    <label>
-                      ارتفاع الباركود (مم)
-                      <input type="number" min="6" max="40" step="0.5" value={barcodeStudioSafeSettings.barcodeHeightMm} onChange={(e) => setBarcodeNumberSetting('barcodeHeightMm', e.target.value, 6, 40)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      عرض الخط (px)
-                      <input type="number" min="1" max="4" step="0.1" value={barcodeStudioSafeSettings.barcodeWidthPx} onChange={(e) => setBarcodeNumberSetting('barcodeWidthPx', e.target.value, 1, 4)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      Padding داخلي (مم)
-                      <input type="number" min="0" max="10" step="0.5" value={barcodeStudioSafeSettings.paddingMm} onChange={(e) => setBarcodeNumberSetting('paddingMm', e.target.value, 0, 10)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      مسافة أفقية (مم)
-                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapXMm} onChange={(e) => setBarcodeNumberSetting('gapXMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      مسافة رأسية (مم)
-                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapYMm} onChange={(e) => setBarcodeNumberSetting('gapYMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      محاذاة النص
-                      <select value={barcodeStudioSafeSettings.textAlign} onChange={(e) => setBarcodeSetting('textAlign', e.target.value)} disabled={barcodePrinting}>
-                        <option value="center">وسط</option>
-                        <option value="right">يمين</option>
-                        <option value="left">يسار</option>
-                      </select>
-                    </label>
-                    <label>
-                      حجم اسم المنتج
-                      <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.nameFontPx} onChange={(e) => setBarcodeNumberSetting('nameFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      حجم البيانات الصغيرة
-                      <input type="number" min="7" max="18" step="1" value={barcodeStudioSafeSettings.metaFontPx} onChange={(e) => setBarcodeNumberSetting('metaFontPx', e.target.value, 7, 18)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      حجم السعر
-                      <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.priceFontPx} onChange={(e) => setBarcodeNumberSetting('priceFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      لون الباركود
-                      <input type="color" value={barcodeStudioSafeSettings.lineColor} onChange={(e) => setBarcodeSetting('lineColor', e.target.value)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      خلفية الملصق
-                      <input type="color" value={barcodeStudioSafeSettings.cardBackground} onChange={(e) => setBarcodeSetting('cardBackground', e.target.value)} disabled={barcodePrinting} />
-                    </label>
-                    <label>
-                      لون الإطار
-                      <input type="color" value={barcodeStudioSafeSettings.borderColor} onChange={(e) => setBarcodeSetting('borderColor', e.target.value)} disabled={barcodePrinting} />
-                    </label>
+                {barcodeStudioTab === 'templates' ? (
+                  <div className="barcode-studio-section">
+                    <h3>قوالب الطباعة المحفوظة</h3>
+                    <div className="barcode-studio-grid two">
+                      <label>
+                        القالب المحفوظ
+                        <select
+                          value={activeBarcodeTemplateId}
+                          onChange={(e) => applyBarcodeTemplate(e.target.value)}
+                          disabled={barcodePrinting}
+                        >
+                          <option value="">بدون قالب محفوظ</option>
+                          {barcodeTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}{template.printer ? ` | ${template.printer}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        اسم الطابعة
+                        <input
+                          type="text"
+                          maxLength={80}
+                          placeholder="مثال: Zebra ZD220"
+                          value={barcodeTemplatePrinter}
+                          onChange={(e) => setBarcodeTemplatePrinter(e.target.value)}
+                          disabled={barcodePrinting}
+                        />
+                      </label>
+                      <label className="barcode-template-name-field">
+                        اسم القالب
+                        <input
+                          type="text"
+                          maxLength={80}
+                          placeholder="مثال: 50x30 مخزن"
+                          value={barcodeTemplateName}
+                          onChange={(e) => setBarcodeTemplateName(e.target.value)}
+                          disabled={barcodePrinting}
+                        />
+                      </label>
+                    </div>
+                    <div className="barcode-template-actions">
+                      <button type="button" className="products-btn products-btn-light" onClick={saveNewBarcodeTemplate} disabled={barcodePrinting}>
+                        حفظ كقالب جديد
+                      </button>
+                      <button type="button" className="products-btn products-btn-light" onClick={updateBarcodeTemplate} disabled={barcodePrinting || !activeBarcodeTemplateId}>
+                        تحديث القالب الحالي
+                      </button>
+                      <button type="button" className="products-btn products-btn-light" onClick={deleteBarcodeTemplate} disabled={barcodePrinting || !activeBarcodeTemplateId}>
+                        حذف القالب
+                      </button>
+                    </div>
+                    {activeBarcodeTemplate ? (
+                      <p className="barcode-template-note">
+                        آخر تحديث: {new Date(activeBarcodeTemplate.updatedAt).toLocaleString('ar-EG')}
+                      </p>
+                    ) : (
+                      <p className="barcode-template-note">
+                        احفظ الإعدادات الحالية كقالب لاستخدامها لاحقًا حسب المقاس والطابعة.
+                      </p>
+                    )}
                   </div>
+                ) : null}
 
-                  <div className="barcode-studio-toggles">
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showBorder} onChange={(e) => setBarcodeSetting('showBorder', e.target.checked)} disabled={barcodePrinting} /> إطار الملصق</label>
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showName} onChange={(e) => setBarcodeSetting('showName', e.target.checked)} disabled={barcodePrinting} /> اسم المنتج</label>
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showSku} onChange={(e) => setBarcodeSetting('showSku', e.target.checked)} disabled={barcodePrinting} /> SKU</label>
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showVariant} onChange={(e) => setBarcodeSetting('showVariant', e.target.checked)} disabled={barcodePrinting} /> بيانات المتغير</label>
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showPrice} onChange={(e) => setBarcodeSetting('showPrice', e.target.checked)} disabled={barcodePrinting} /> السعر</label>
-                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showCode} onChange={(e) => setBarcodeSetting('showCode', e.target.checked)} disabled={barcodePrinting} /> نص الكود</label>
+                {barcodeStudioTab === 'source' ? (
+                  <div className="barcode-studio-section">
+                    <h3>نوع الكود ومصدره</h3>
+                    <div className="barcode-studio-grid two">
+                      <label>
+                        نوع الباركود
+                        <select value={barcodeStudioSafeSettings.format} onChange={(e) => setBarcodeSetting('format', e.target.value)} disabled={barcodePrinting}>
+                          {BARCODE_FORMAT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        مصدر الكود
+                        <select value={barcodeStudioSafeSettings.codeSource} onChange={(e) => setBarcodeSetting('codeSource', e.target.value)} disabled={barcodePrinting}>
+                          {BARCODE_CODE_SOURCE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   </div>
-                </div>
+                ) : null}
+
+                {barcodeStudioTab === 'layout' ? (
+                  <div className="barcode-studio-section">
+                    <h3>مقاس الملصق والتخطيط</h3>
+                    <div className="barcode-studio-grid three">
+                      <label>
+                        قالب المقاس
+                        <select value={barcodeStudioSafeSettings.presetId} onChange={(e) => applyBarcodePreset(e.target.value)} disabled={barcodePrinting}>
+                          {BARCODE_LABEL_PRESETS.map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        عرض الملصق (مم)
+                        <input
+                          type="number"
+                          min="20"
+                          max="120"
+                          step="1"
+                          value={barcodeStudioSafeSettings.labelWidthMm}
+                          onChange={(e) => {
+                            setBarcodeSetting('presetId', 'custom');
+                            setBarcodeNumberSetting('labelWidthMm', e.target.value, 20, 120);
+                          }}
+                          disabled={barcodePrinting}
+                        />
+                      </label>
+                      <label>
+                        ارتفاع الملصق (مم)
+                        <input
+                          type="number"
+                          min="15"
+                          max="90"
+                          step="1"
+                          value={barcodeStudioSafeSettings.labelHeightMm}
+                          onChange={(e) => {
+                            setBarcodeSetting('presetId', 'custom');
+                            setBarcodeNumberSetting('labelHeightMm', e.target.value, 15, 90);
+                          }}
+                          disabled={barcodePrinting}
+                        />
+                      </label>
+                      <label>
+                        عدد الأعمدة
+                        <input type="number" min="1" max="8" step="1" value={barcodeStudioSafeSettings.columns} onChange={(e) => setBarcodeNumberSetting('columns', e.target.value, 1, 8)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        نسخ لكل ملصق
+                        <input type="number" min="1" max="50" step="1" value={barcodeStudioSafeSettings.copiesPerItem} onChange={(e) => setBarcodeNumberSetting('copiesPerItem', e.target.value, 1, 50)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        هامش الصفحة (مم)
+                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.pageMarginMm} onChange={(e) => setBarcodeNumberSetting('pageMarginMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {barcodeStudioTab === 'design' ? (
+                  <div className="barcode-studio-section">
+                    <h3>تصميم الباركود</h3>
+                    <div className="barcode-studio-grid three">
+                      <label>
+                        ارتفاع الباركود (مم)
+                        <input type="number" min="6" max="40" step="0.5" value={barcodeStudioSafeSettings.barcodeHeightMm} onChange={(e) => setBarcodeNumberSetting('barcodeHeightMm', e.target.value, 6, 40)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        عرض الخط (px)
+                        <input type="number" min="1" max="6" step="0.1" value={barcodeStudioSafeSettings.barcodeWidthPx} onChange={(e) => setBarcodeNumberSetting('barcodeWidthPx', e.target.value, 1, 6)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        Padding داخلي (مم)
+                        <input type="number" min="0" max="10" step="0.5" value={barcodeStudioSafeSettings.paddingMm} onChange={(e) => setBarcodeNumberSetting('paddingMm', e.target.value, 0, 10)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        مسافة أفقية (مم)
+                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapXMm} onChange={(e) => setBarcodeNumberSetting('gapXMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        مسافة رأسية (مم)
+                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapYMm} onChange={(e) => setBarcodeNumberSetting('gapYMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        محاذاة النص
+                        <select value={barcodeStudioSafeSettings.textAlign} onChange={(e) => setBarcodeSetting('textAlign', e.target.value)} disabled={barcodePrinting}>
+                          <option value="center">وسط</option>
+                          <option value="right">يمين</option>
+                          <option value="left">يسار</option>
+                        </select>
+                      </label>
+                      <label>
+                        حجم اسم المنتج
+                        <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.nameFontPx} onChange={(e) => setBarcodeNumberSetting('nameFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        حجم البيانات الصغيرة
+                        <input type="number" min="7" max="18" step="1" value={barcodeStudioSafeSettings.metaFontPx} onChange={(e) => setBarcodeNumberSetting('metaFontPx', e.target.value, 7, 18)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        حجم السعر
+                        <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.priceFontPx} onChange={(e) => setBarcodeNumberSetting('priceFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        لون الباركود
+                        <input type="color" value={barcodeStudioSafeSettings.lineColor} onChange={(e) => setBarcodeSetting('lineColor', e.target.value)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        خلفية الملصق
+                        <input type="color" value={barcodeStudioSafeSettings.cardBackground} onChange={(e) => setBarcodeSetting('cardBackground', e.target.value)} disabled={barcodePrinting} />
+                      </label>
+                      <label>
+                        لون الإطار
+                        <input type="color" value={barcodeStudioSafeSettings.borderColor} onChange={(e) => setBarcodeSetting('borderColor', e.target.value)} disabled={barcodePrinting} />
+                      </label>
+                    </div>
+
+                    <div className="barcode-studio-toggles">
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showBorder} onChange={(e) => setBarcodeSetting('showBorder', e.target.checked)} disabled={barcodePrinting} /> إطار الملصق</label>
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showName} onChange={(e) => setBarcodeSetting('showName', e.target.checked)} disabled={barcodePrinting} /> اسم المنتج</label>
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showSku} onChange={(e) => setBarcodeSetting('showSku', e.target.checked)} disabled={barcodePrinting} /> SKU</label>
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showVariant} onChange={(e) => setBarcodeSetting('showVariant', e.target.checked)} disabled={barcodePrinting} /> بيانات المتغير</label>
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showPrice} onChange={(e) => setBarcodeSetting('showPrice', e.target.checked)} disabled={barcodePrinting} /> السعر</label>
+                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showCode} onChange={(e) => setBarcodeSetting('showCode', e.target.checked)} disabled={barcodePrinting} /> نص الكود</label>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <aside className="barcode-studio-preview">
@@ -2421,9 +2920,18 @@ export default function Products() {
                   <span>أول {barcodePreview.labels.length} ملصق</span>
                 </div>
 
+                {barcodePreviewIsMatrix && matrixBarcodeEngineLoading ? (
+                  <p className="barcode-preview-note">جاري تحميل محرك QR/DataMatrix...</p>
+                ) : null}
+                {barcodePreviewIsMatrix && matrixBarcodeEngineError ? (
+                  <p className="barcode-preview-engine-error">تعذر تحميل محرك QR/DataMatrix: {matrixBarcodeEngineError}</p>
+                ) : null}
+
                 {barcodePreview.labels.length === 0 ? (
                   <div className="barcode-preview-empty">
-                    لا توجد أكواد صالحة للمعاينة بالإعدادات الحالية.
+                    {barcodePreviewIsMatrix && matrixBarcodeEngineLoading
+                      ? 'انتظر اكتمال تحميل محرك الأكواد الثنائية لعرض المعاينة.'
+                      : 'لا توجد أكواد صالحة للمعاينة بالإعدادات الحالية.'}
                   </div>
                 ) : (
                   <div className="barcode-preview-grid">
@@ -2446,7 +2954,7 @@ export default function Products() {
                           {barcodeStudioSafeSettings.showName ? <h4 style={{ fontSize: `${barcodeStudioSafeSettings.nameFontPx}px` }}>{label.name || 'منتج'}</h4> : null}
                           {barcodeStudioSafeSettings.showSku ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>SKU: {label.sku || '-'}</small> : null}
                           {barcodeStudioSafeSettings.showVariant && hasVariant ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{variantText}</small> : null}
-                          <div className="barcode-preview-svg" dangerouslySetInnerHTML={{ __html: label.barcodeSvg }} />
+                          <div className={`barcode-preview-svg ${barcodePreviewIsMatrix ? 'matrix' : 'linear'}`} dangerouslySetInnerHTML={{ __html: label.barcodeSvg }} />
                           {barcodeStudioSafeSettings.showCode ? <div className="code" style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{label.code}</div> : null}
                           {barcodeStudioSafeSettings.showPrice ? <div className="price" style={{ fontSize: `${barcodeStudioSafeSettings.priceFontPx}px` }}>{Number(label.price || 0).toFixed(2)} ج.م</div> : null}
                         </article>
@@ -2455,7 +2963,7 @@ export default function Products() {
                   </div>
                 )}
 
-                {barcodePreview.invalidRows.length ? (
+                {barcodePreview.invalidRows.length && !(barcodePreviewIsMatrix && !matrixBarcodeLibrary) ? (
                   <p className="barcode-preview-warning">
                     {barcodePreview.invalidRows.length} عنصر غير صالح بالصيغة الحالية ولن يتم طباعته.
                   </p>
@@ -2471,8 +2979,11 @@ export default function Products() {
                 <button type="button" className="products-btn products-btn-light" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
                   إغلاق
                 </button>
+                <button type="button" className="products-btn products-btn-light" onClick={executeBarcodeStudioPdfExport} disabled={barcodePrinting}>
+                  {barcodePrinting ? 'جاري تجهيز الملف...' : 'تصدير PDF مباشر'}
+                </button>
                 <button type="button" className="products-btn products-btn-primary" onClick={executeBarcodeStudioPrint} disabled={barcodePrinting}>
-                  {barcodePrinting ? 'جاري تجهيز الطباعة...' : 'طباعة حسب الإعدادات'}
+                  {barcodePrinting ? 'جاري المعالجة...' : 'طباعة حسب الإعدادات'}
                 </button>
               </div>
             </footer>

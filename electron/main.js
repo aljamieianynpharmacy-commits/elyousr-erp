@@ -117,6 +117,17 @@ function createWindow() {
     }
 }
 
+const sanitizePdfFileName = (value) => {
+    const raw = String(value || '').trim();
+    const cleaned = raw
+        .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!cleaned) return 'labels.pdf';
+    return cleaned.toLowerCase().endsWith('.pdf') ? cleaned : `${cleaned}.pdf`;
+};
+
 // IPC Handlers
 ipcMain.handle('auth:login', async (event, credentials) => {
     return await dbService.login(credentials);
@@ -270,6 +281,60 @@ ipcMain.handle('print:html', async (event, options) => {
     } catch (err) {
         console.error('Print Error:', err);
         return { error: err.message };
+    }
+});
+
+ipcMain.handle('print:exportPDF', async (event, options = {}) => {
+    let pdfWindow = null;
+
+    try {
+        const html = typeof options?.html === 'string' ? options.html : '';
+        if (!html.trim()) {
+            return { error: 'HTML content is required for PDF export' };
+        }
+
+        pdfWindow = new BrowserWindow({
+            width: 900,
+            height: 700,
+            show: false,
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true
+            }
+        });
+
+        await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+        const pdfBuffer = await pdfWindow.webContents.printToPDF({
+            printBackground: true,
+            preferCSSPageSize: true,
+            landscape: Boolean(options?.landscape),
+            marginsType: 0
+        });
+
+        const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+        const saveResult = await dialog.showSaveDialog(ownerWindow || undefined, {
+            title: options?.title || 'حفظ PDF',
+            defaultPath: path.join(
+                app.getPath('documents'),
+                sanitizePdfFileName(options?.suggestedName || 'labels.pdf')
+            ),
+            filters: [{ name: 'PDF', extensions: ['pdf'] }]
+        });
+
+        if (saveResult.canceled || !saveResult.filePath) {
+            return { success: false, canceled: true };
+        }
+
+        await fs.promises.writeFile(saveResult.filePath, pdfBuffer);
+        return { success: true, filePath: saveResult.filePath };
+    } catch (err) {
+        console.error('Export PDF Error:', err);
+        return { success: false, error: err.message };
+    } finally {
+        if (pdfWindow && !pdfWindow.isDestroyed()) {
+            pdfWindow.close();
+        }
     }
 });
 

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Barcode, Camera, Copy, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
 import './ProductModal.css';
 
@@ -107,7 +107,7 @@ const buildInitialState = (initialData) => {
       brand: '',
       description: '',
       sku: '',
-      barcode: '',
+      barcode: makeEan13(),
       image: '',
       type: 'store',
       isActive: true,
@@ -497,6 +497,18 @@ export default function ProductModal({
     reader.readAsDataURL(file);
   };
 
+  const selectAllInputValue = useCallback((event) => {
+    const input = event.target;
+    if (!input || input.tagName !== 'INPUT') return;
+
+    const inputType = String(input.type || '').toLowerCase();
+    if (inputType === 'checkbox' || inputType === 'radio' || input.readOnly || input.disabled) return;
+
+    if (typeof input.select === 'function') {
+      input.select();
+    }
+  }, []);
+
   const handleSave = () => {
     setValidationMessage('');
     const name = nText(formData.name);
@@ -741,7 +753,11 @@ export default function ProductModal({
           ) : null}
 
           {activeTab === TABS.UNITS ? (
-            <div className="form-section">
+            <div
+              className="form-section"
+              onFocusCapture={selectAllInputValue}
+              onClickCapture={selectAllInputValue}
+            >
               <div className="units-toolbar">
                 <button type="button" className="btn-inline" onClick={addUnit}>
                   <Plus size={14} />
@@ -980,7 +996,11 @@ export default function ProductModal({
           ) : null}
 
           {activeTab === TABS.STOCK ? (
-            <div className="form-section">
+            <div
+              className="form-section"
+              onFocusCapture={selectAllInputValue}
+              onClickCapture={selectAllInputValue}
+            >
               <div className="stock-layout">
                 {isEditMode ? <div className="stock-note">سيتم تحديث كميات المخزون الحالية لهذا الصنف.</div> : null}
 

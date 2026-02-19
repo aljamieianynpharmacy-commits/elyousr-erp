@@ -594,6 +594,10 @@
   animation: slideUp 0.3s ease;
 }
 
+.products-import-modal {
+  max-width: 920px;
+}
+
 .products-modal header {
   display: flex;
   justify-content: space-between;
@@ -617,6 +621,97 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.products-import-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.products-import-headline p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.import-mapping-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.import-mapping-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.import-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.import-mapping-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.import-mapping-row.required {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.import-mapping-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.import-mapping-row select {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  background: #fff;
+  font-family: inherit;
+}
+
+.import-mapping-row select:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.14);
+}
+
+.import-mapping-sample {
+  color: #64748b;
+  font-size: 11px;
+  min-height: 14px;
+}
+
+.products-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding: 14px 24px;
+  flex-shrink: 0;
+}
+
+.products-modal-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .form-grid {
@@ -773,6 +868,11 @@
   .products-grid-head-cell,
   .products-grid-cell { padding: 10px; }
   .columns-menu { width: min(280px, 90vw); }
+  .products-import-modal { width: 96%; }
+  .import-mapping-grid { grid-template-columns: 1fr; }
+  .products-modal-footer { flex-direction: column; align-items: stretch; }
+  .products-modal-footer-actions { width: 100%; }
+  .products-modal-footer-actions .products-btn { flex: 1; justify-content: center; }
   .form-grid.two-cols,
   .form-grid.five-cols { grid-template-columns: 1fr; }
 }

@@ -169,13 +169,90 @@ const delimiter = (header) => {
   return ',';
 };
 
-const rowVal = (row, keys) => {
-  for (const key of keys) {
-    const val = row[nKey(key)];
-    if (val !== undefined && nText(val) !== '') return nText(val);
-  }
-  return '';
+const IMPORT_FIELD_OPTIONS = [
+  { key: 'name', label: 'اسم المنتج', required: true, aliases: ['name', 'productname', 'اسم المنتج', 'اسم الصنف', 'الصنف'] },
+  { key: 'category', label: 'الفئة', aliases: ['category', 'categoryname', 'الفئة', 'التصنيف'] },
+  { key: 'brand', label: 'الماركة', aliases: ['brand', 'الماركة', 'العلامة التجارية'] },
+  { key: 'sku', label: 'SKU / كود', aliases: ['sku', 'code', 'productcode', 'كود', 'كود الصنف'] },
+  { key: 'barcode', label: 'باركود المنتج', aliases: ['barcode', 'productbarcode', 'باركود', 'باركود المنتج'] },
+  { key: 'description', label: 'الوصف', aliases: ['description', 'الوصف', 'desc'] },
+  { key: 'salePrice', label: 'سعر البيع', aliases: ['saleprice', 'price', 'sellingprice', 'سعر البيع', 'سعر'] },
+  { key: 'costPrice', label: 'سعر التكلفة', aliases: ['costprice', 'purchaseprice', 'cost', 'التكلفة', 'سعر التكلفة'] },
+  { key: 'image', label: 'صورة', aliases: ['image', 'photo', 'صورة', 'رابط الصورة'] },
+  { key: 'warehouseQty', label: 'كمية المخزن', aliases: ['warehouseqty', 'warehouse', 'مخزن', 'كمية المخزن'] },
+  { key: 'displayQty', label: 'كمية العرض', aliases: ['displayqty', 'display', 'عرض', 'كمية العرض'] },
+  { key: 'minStock', label: 'الحد الأدنى', aliases: ['minstock', 'minimumstock', 'الحد الأدنى', 'حد البيع'] },
+  { key: 'notes', label: 'ملاحظات', aliases: ['notes', 'note', 'ملاحظات'] },
+  { key: 'size', label: 'المقاس', aliases: ['size', 'productsize', 'المقاس'] },
+  { key: 'color', label: 'اللون', aliases: ['color', 'colour', 'اللون'] },
+  { key: 'variantBarcode', label: 'باركود المتغير', aliases: ['variantbarcode', 'barcodesizecolor', 'باركود المتغير'] },
+  { key: 'variantPrice', label: 'سعر المتغير', aliases: ['variantprice', 'pricevariant', 'سعر المتغير'] },
+  { key: 'variantCost', label: 'تكلفة المتغير', aliases: ['variantcost', 'costvariant', 'تكلفة المتغير'] },
+  { key: 'variantQty', label: 'كمية المتغير', aliases: ['variantqty', 'variantquantity', 'quantity', 'qty', 'كمية المتغير', 'الكمية'] }
+];
+
+const toImportHeaders = (headers) => (
+  headers.map((label, index) => {
+    const cleanLabel = nText(label) || `عمود ${index + 1}`;
+    return {
+      id: String(index),
+      index,
+      label: cleanLabel,
+      key: nKey(cleanLabel) || `column${index + 1}`
+    };
+  })
+);
+
+const buildImportFieldAutoMapping = (headers = []) => {
+  const mapping = Object.fromEntries(IMPORT_FIELD_OPTIONS.map((field) => [field.key, '']));
+  const usedHeaders = new Set();
+
+  IMPORT_FIELD_OPTIONS.forEach((field) => {
+    const aliasKeys = (field.aliases || []).map((alias) => nKey(alias)).filter(Boolean);
+    if (!aliasKeys.length) return;
+
+    let match = headers.find((header) => (
+      !usedHeaders.has(header.id)
+      && aliasKeys.some((alias) => header.key === alias)
+    ));
+
+    if (!match) {
+      match = headers.find((header) => (
+        !usedHeaders.has(header.id)
+        && aliasKeys.some((alias) => (
+          header.key.includes(alias)
+          || alias.includes(header.key)
+        ))
+      ));
+    }
+
+    if (match) {
+      mapping[field.key] = match.id;
+      usedHeaders.add(match.id);
+    }
+  });
+
+  return mapping;
 };
+
+const mapRowsWithImportMapping = (rows, mapping) => (
+  rows.map((values) => {
+    const mappedRow = {};
+
+    IMPORT_FIELD_OPTIONS.forEach((field) => {
+      const columnId = mapping?.[field.key];
+      if (columnId === undefined || columnId === null || columnId === '') {
+        mappedRow[field.key] = '';
+        return;
+      }
+
+      const columnIndex = Number(columnId);
+      mappedRow[field.key] = nText(values[columnIndex] ?? '');
+    });
+
+    return mappedRow;
+  })
+);
 
 const barcodeRows = (products) => {
   const rows = [];
@@ -230,7 +307,7 @@ const importGroups = (rows) => {
   let currentGroup = null;
 
   for (const row of rows) {
-    const name = nText(row.name || row['اسم المنتج']);
+    const name = nText(row.name);
     const isMain = Boolean(name);
 
     if (isMain) {
@@ -238,33 +315,33 @@ const importGroups = (rows) => {
       currentGroup = {
         product: {
           name,
-          category: nText(row.category || row['الفئة']),
-          brand: nText(row.brand || row['الماركة']),
-          sku: nText(row.sku || row['SKU'] || row['كود']),
-          barcode: nText(row.barcode || row['باركود المنتج']),
-          description: nText(row.description || row['الوصف']),
-          basePrice: nNum(row.salePrice || row['سعر البيع'], 0),
-          cost: nNum(row.costPrice || row['التكلفة'], 0),
-          image: nText(row.image || row['صورة'])
+          category: nText(row.category),
+          brand: nText(row.brand),
+          sku: nText(row.sku),
+          barcode: nText(row.barcode),
+          description: nText(row.description),
+          basePrice: nNum(row.salePrice || row.variantPrice, 0),
+          cost: nNum(row.costPrice || row.variantCost, 0),
+          image: nText(row.image)
         },
         inventory: {
-          warehouseQty: nInt(row.warehouseQty || row['مخزن'], 0),
-          displayQty: nInt(row.displayQty || row['عرض'], 0),
-          minStock: nInt(row.minStock || row['الحد الأدنى'], 5),
+          warehouseQty: nInt(row.warehouseQty, 0),
+          displayQty: nInt(row.displayQty, 0),
+          minStock: nInt(row.minStock, 5),
           maxStock: 100,
-          notes: nText(row.notes || row['ملاحظات'])
+          notes: nText(row.notes)
         },
         variants: []
       };
     }
 
     if (currentGroup) {
-      const size = nText(row.size || row['المقاس']);
-      const color = nText(row.color || row['اللون']);
-      const vBarcode = nText(row.variantBarcode || row['باركود المتغير']);
-      const price = nNum(row.variantPrice || row['سعر المتغير'], 0);
-      const cost = nNum(row.variantCost || row['تكلفة المتغير'], 0);
-      const qty = nInt(row.variantQty || row['كمية المتغير'], 0);
+      const size = nText(row.size);
+      const color = nText(row.color);
+      const vBarcode = nText(row.variantBarcode);
+      const price = nNum(row.variantPrice, nNum(row.salePrice, 0));
+      const cost = nNum(row.variantCost, nNum(row.costPrice, 0));
+      const qty = nInt(row.variantQty, 0);
 
       if (size || color || qty > 0 || vBarcode) {
         currentGroup.variants.push({ size, color, barcode: vBarcode, price, cost, quantity: qty });
@@ -467,6 +544,7 @@ export default function Products() {
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [categoryForm, setCategoryForm] = useState(DEFAULT_CATEGORY);
+  const [importSession, setImportSession] = useState(null);
 
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
@@ -479,6 +557,23 @@ export default function Products() {
   const latestSearchRequestRef = useRef(0);
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
+  const importColumnSamples = useMemo(() => {
+    if (!importSession) return new Map();
+
+    const samples = new Map();
+    const previewRows = importSession.rows.slice(0, 120);
+    for (const header of importSession.headers) {
+      for (const row of previewRows) {
+        const value = nText(row[header.index]);
+        if (value) {
+          samples.set(header.id, value);
+          break;
+        }
+      }
+    }
+
+    return samples;
+  }, [importSession]);
 
   const notify = useCallback((message, type = 'success') => {
     setToast({ message, type });
@@ -1305,143 +1400,202 @@ export default function Products() {
     return add.id;
   }, []);
 
+  const closeImportSession = useCallback(() => {
+    if (importing) return;
+    setImportSession(null);
+  }, [importing]);
+
+  const updateImportFieldMapping = useCallback((fieldKey, columnId) => {
+    setImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: {
+          ...prev.mapping,
+          [fieldKey]: columnId
+        }
+      };
+    });
+  }, []);
+
+  const applyAutoImportMapping = useCallback(() => {
+    setImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: buildImportFieldAutoMapping(prev.headers)
+      };
+    });
+  }, []);
+
+  const importGroupsIntoDatabase = useCallback(async (groups) => {
+    const allRes = await window.api.getProducts({
+      page: 1,
+      pageSize: 5000,
+      includeTotal: false,
+      includeDescription: false,
+      includeImage: false,
+      includeCategory: false,
+      includeInventory: false,
+      includeProductUnits: false,
+      includeVariants: true
+    });
+    if (allRes?.error) throw new Error(allRes.error);
+    const all = Array.isArray(allRes?.data) ? allRes.data : [];
+    const bySku = new Map();
+    all.forEach((p) => {
+      const key = nText(p.sku).toLowerCase();
+      if (key) bySku.set(key, p);
+    });
+
+    const catMap = new Map();
+    categories.forEach((c) => catMap.set(nText(c.name).toLowerCase(), c));
+
+    let created = 0;
+    let updated = 0;
+    let addV = 0;
+    let updV = 0;
+    let failed = 0;
+
+    for (const g of groups) {
+      try {
+        const categoryId = await ensureCategory(g.product.category, catMap);
+        const payload = {
+          name: g.product.name,
+          description: g.product.description || null,
+          categoryId,
+          brand: g.product.brand || null,
+          sku: g.product.sku || null,
+          barcode: g.product.barcode || null,
+          image: g.product.image || null,
+          basePrice: nNum(g.product.basePrice, 0),
+          cost: nNum(g.product.cost, 0)
+        };
+
+        const skuKey = nText(payload.sku).toLowerCase();
+        const current = skuKey ? bySku.get(skuKey) : null;
+        let productId = current?.id || 0;
+        const known = current?.variants || [];
+
+        if (current) {
+          const up = await window.api.updateProduct(current.id, payload);
+          if (up?.error) throw new Error(up.error);
+          updated += 1;
+        } else {
+          const add = await window.api.addProduct(payload);
+          if (add?.error) throw new Error(add.error);
+          productId = add.id;
+          created += 1;
+          if (skuKey) bySku.set(skuKey, { ...add, variants: [] });
+        }
+
+        for (const v of g.variants) {
+          const b = nText(v.barcode).toLowerCase();
+          const found = known.find((item) => {
+            if (b && nText(item.barcode).toLowerCase() === b) return true;
+            return nText(item.productSize).toLowerCase() === nText(v.size).toLowerCase()
+              && nText(item.color).toLowerCase() === nText(v.color).toLowerCase();
+          });
+
+          const data = {
+            productId,
+            size: v.size,
+            color: v.color,
+            price: nNum(v.price, payload.basePrice),
+            cost: nNum(v.cost, payload.cost),
+            quantity: nInt(v.quantity, 0),
+            barcode: nText(v.barcode) || null
+          };
+
+          if (found) {
+            const up = await window.api.updateVariant(found.id, data);
+            if (up?.error) throw new Error(up.error);
+            updV += 1;
+          } else {
+            const add = await window.api.addVariant(data);
+            if (add?.error) throw new Error(add.error);
+            addV += 1;
+          }
+        }
+
+        const vTotal = g.variants.reduce((s, v) => s + nInt(v.quantity, 0), 0);
+        const w = nInt(g.inventory.warehouseQty, 0);
+        const dis = nInt(g.inventory.displayQty, 0);
+        const inv = await window.api.updateInventory(productId, {
+          minStock: nInt(g.inventory.minStock, 5),
+          maxStock: nInt(g.inventory.maxStock, 100),
+          warehouseQty: w,
+          displayQty: dis,
+          totalQuantity: Math.max(w + dis, vTotal),
+          notes: g.inventory.notes || null,
+          lastRestock: new Date().toISOString()
+        });
+        if (inv?.error) throw new Error(inv.error);
+      } catch (err) {
+        failed += 1;
+        console.error('import failed', err);
+      }
+    }
+
+    await Promise.all([loadCategories(), refreshVisibleProducts()]);
+    notify(`تم الاستيراد: ${created} جديد، ${updated} تحديث، ${addV} متغير مضاف، ${updV} متغير محدث${failed ? `، ${failed} فشل` : ''}`, failed ? 'warning' : 'success');
+  }, [categories, ensureCategory, loadCategories, notify, refreshVisibleProducts]);
+
+  const startMappedImport = async () => {
+    if (!importSession || importing) return;
+
+    if (!nText(importSession.mapping?.name)) {
+      await safeAlert('اختَر عمود "اسم المنتج" قبل بدء الاستيراد', null, { type: 'warning', title: 'مطابقة الأعمدة' });
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const mappedRows = mapRowsWithImportMapping(importSession.rows, importSession.mapping)
+        .filter((row) => Object.values(row).some((value) => nText(value) !== ''));
+
+      const groups = importGroups(mappedRows);
+      if (!groups.length) throw new Error('لم يتم العثور على صفوف صالحة بعد تطبيق المطابقة');
+
+      await importGroupsIntoDatabase(groups);
+      setImportSession(null);
+    } catch (err) {
+      await safeAlert(err.message || 'فشل الاستيراد', null, { type: 'error', title: 'استيراد Excel' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const importFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
-    setImporting(true);
     try {
+      const fileName = nText(file.name).toLowerCase();
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        throw new Error('الملف بصيغة XLSX/XLS غير مدعوم حاليًا. احفظه من Excel كـ CSV ثم أعد الاستيراد.');
+      }
+
       const content = await file.text();
-      const lines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       if (lines.length < 2) throw new Error('الملف لا يحتوي على بيانات كافية');
 
       const d = delimiter(lines[0]);
-      const headers = parseLine(lines[0], d).map((h) => nKey(h));
-      const rows = lines.slice(1).map((line) => {
-        const vals = parseLine(line, d);
-        const row = {};
-        headers.forEach((h, idx) => { row[h] = vals[idx] ?? ''; });
-        return row;
+      const headers = toImportHeaders(parseLine(lines[0], d));
+      const rows = lines.slice(1).map((line) => parseLine(line, d));
+
+      if (!headers.length) throw new Error('تعذر قراءة الأعمدة من الملف');
+      if (!rows.length) throw new Error('الملف لا يحتوي على صفوف بيانات');
+
+      setImportSession({
+        fileName: file.name,
+        headers,
+        rows,
+        mapping: buildImportFieldAutoMapping(headers)
       });
-
-      const groups = importGroups(rows);
-      if (!groups.length) throw new Error('لم يتم العثور على صفوف صالحة (تأكد من عمود اسم المنتج)');
-
-      const allRes = await window.api.getProducts({
-        page: 1,
-        pageSize: 5000,
-        includeTotal: false,
-        includeDescription: false,
-        includeImage: false,
-        includeCategory: false,
-        includeInventory: false,
-        includeProductUnits: false,
-        includeVariants: true
-      });
-      if (allRes?.error) throw new Error(allRes.error);
-      const all = Array.isArray(allRes?.data) ? allRes.data : [];
-      const bySku = new Map();
-      all.forEach((p) => {
-        const key = nText(p.sku).toLowerCase();
-        if (key) bySku.set(key, p);
-      });
-
-      const catMap = new Map();
-      categories.forEach((c) => catMap.set(nText(c.name).toLowerCase(), c));
-
-      let created = 0;
-      let updated = 0;
-      let addV = 0;
-      let updV = 0;
-      let failed = 0;
-
-      for (const g of groups) {
-        try {
-          const categoryId = await ensureCategory(g.product.category, catMap);
-          const payload = {
-            name: g.product.name,
-            description: g.product.description || null,
-            categoryId,
-            brand: g.product.brand || null,
-            sku: g.product.sku || null,
-            barcode: g.product.barcode || null,
-            image: g.product.image || null,
-            basePrice: nNum(g.product.basePrice, 0),
-            cost: nNum(g.product.cost, 0)
-          };
-
-          const skuKey = nText(payload.sku).toLowerCase();
-          const current = skuKey ? bySku.get(skuKey) : null;
-          let productId = current?.id || 0;
-          const known = current?.variants || [];
-
-          if (current) {
-            const up = await window.api.updateProduct(current.id, payload);
-            if (up?.error) throw new Error(up.error);
-            updated += 1;
-          } else {
-            const add = await window.api.addProduct(payload);
-            if (add?.error) throw new Error(add.error);
-            productId = add.id;
-            created += 1;
-            if (skuKey) bySku.set(skuKey, { ...add, variants: [] });
-          }
-
-          for (const v of g.variants) {
-            const b = nText(v.barcode).toLowerCase();
-            const found = known.find((item) => {
-              if (b && nText(item.barcode).toLowerCase() === b) return true;
-              return nText(item.productSize).toLowerCase() === nText(v.size).toLowerCase()
-                && nText(item.color).toLowerCase() === nText(v.color).toLowerCase();
-            });
-
-            const data = {
-              productId,
-              size: v.size,
-              color: v.color,
-              price: nNum(v.price, payload.basePrice),
-              cost: nNum(v.cost, payload.cost),
-              quantity: nInt(v.quantity, 0),
-              barcode: nText(v.barcode) || null
-            };
-
-            if (found) {
-              const up = await window.api.updateVariant(found.id, data);
-              if (up?.error) throw new Error(up.error);
-              updV += 1;
-            } else {
-              const add = await window.api.addVariant(data);
-              if (add?.error) throw new Error(add.error);
-              addV += 1;
-            }
-          }
-
-          const vTotal = g.variants.reduce((s, v) => s + nInt(v.quantity, 0), 0);
-          const w = nInt(g.inventory.warehouseQty, 0);
-          const dis = nInt(g.inventory.displayQty, 0);
-          const inv = await window.api.updateInventory(productId, {
-            minStock: nInt(g.inventory.minStock, 5),
-            maxStock: nInt(g.inventory.maxStock, 100),
-            warehouseQty: w,
-            displayQty: dis,
-            totalQuantity: Math.max(w + dis, vTotal),
-            notes: g.inventory.notes || null,
-            lastRestock: new Date().toISOString()
-          });
-          if (inv?.error) throw new Error(inv.error);
-        } catch (err) {
-          failed += 1;
-          console.error('import failed', err);
-        }
-      }
-
-      await Promise.all([loadCategories(), refreshVisibleProducts()]);
-      notify(`تم الاستيراد: ${created} جديد، ${updated} تحديث، ${addV} متغير مضاف، ${updV} متغير محدث${failed ? `، ${failed} فشل` : ''}`, failed ? 'warning' : 'success');
     } catch (err) {
-      await safeAlert(err.message || 'فشل الاستيراد', null, { type: 'error', title: 'استيراد Excel' });
-    } finally {
-      setImporting(false);
+      await safeAlert(err.message || 'فشل قراءة الملف', null, { type: 'error', title: 'استيراد Excel' });
     }
   };
 
@@ -1710,6 +1864,77 @@ export default function Products() {
             isSaving={saving}
           />
         </Suspense>
+      ) : null}
+
+      {importSession ? (
+        <div className="products-modal-backdrop" onClick={closeImportSession}>
+          <div className="products-modal products-import-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <div className="products-import-headline">
+                <h2>مطابقة أعمدة الاستيراد</h2>
+                <p>{importSession.fileName} | {importSession.rows.length} صف</p>
+              </div>
+              <button type="button" className="icon-btn" onClick={closeImportSession} disabled={importing}>
+                <X size={16} />
+              </button>
+            </header>
+
+            <section className="products-modal-body">
+              <div className="import-mapping-meta">
+                <span>عدد الأعمدة: <strong>{importSession.headers.length}</strong></span>
+                <span>عدد الصفوف: <strong>{importSession.rows.length}</strong></span>
+              </div>
+              <p className="import-mapping-note">
+                اختَر لكل حقل العمود المناسب من ملف Excel. الحقول غير المطلوبة يمكنك تركها على "تجاهل هذا الحقل".
+              </p>
+
+              <div className="import-mapping-grid">
+                {IMPORT_FIELD_OPTIONS.map((field) => {
+                  const selectedColumn = importSession.mapping?.[field.key] ?? '';
+                  const sampleValue = selectedColumn ? importColumnSamples.get(selectedColumn) : '';
+
+                  return (
+                    <label key={field.key} className={`import-mapping-row ${field.required ? 'required' : ''}`}>
+                      <span className="import-mapping-label">
+                        {field.label}
+                        {field.required ? ' *' : ''}
+                      </span>
+                      <select
+                        value={selectedColumn}
+                        onChange={(e) => updateImportFieldMapping(field.key, e.target.value)}
+                        disabled={importing}
+                      >
+                        <option value="">{field.required ? 'اختر عمودًا...' : 'تجاهل هذا الحقل'}</option>
+                        {importSession.headers.map((header) => (
+                          <option key={`${field.key}-${header.id}`} value={header.id}>
+                            {header.label}
+                          </option>
+                        ))}
+                      </select>
+                      <small className="import-mapping-sample">
+                        {sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}
+                      </small>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <footer className="products-modal-footer">
+              <button type="button" className="products-btn products-btn-light" onClick={applyAutoImportMapping} disabled={importing}>
+                مطابقة تلقائية
+              </button>
+              <div className="products-modal-footer-actions">
+                <button type="button" className="products-btn products-btn-light" onClick={closeImportSession} disabled={importing}>
+                  إلغاء
+                </button>
+                <button type="button" className="products-btn products-btn-primary" onClick={startMappedImport} disabled={importing}>
+                  {importing ? 'جاري الاستيراد...' : 'بدء الاستيراد'}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
       ) : null}
 
       {showCategoryModal ? (

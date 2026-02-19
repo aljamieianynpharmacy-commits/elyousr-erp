@@ -56,7 +56,7 @@ const DEFAULT_VISIBLE_COLUMN_KEYS = GRID_COLUMNS.filter((col) => !col.required).
 
 const getGridHeight = () => {
   if (typeof window === 'undefined') return 460;
-  const reserved = window.innerWidth < 900 ? 470 : 350;
+  const reserved = window.innerWidth < 900 ? 380 : 280;
   return Math.max(260, window.innerHeight - reserved);
 };
 

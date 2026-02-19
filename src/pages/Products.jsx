@@ -55,9 +55,9 @@ const GRID_COLUMNS = [
 const DEFAULT_VISIBLE_COLUMN_KEYS = GRID_COLUMNS.filter((col) => !col.required).map((col) => col.key);
 
 const getGridHeight = () => {
-  if (typeof window === 'undefined') return 420;
-  const reserved = window.innerWidth < 900 ? 500 : 420;
-  return Math.max(260, Math.min(620, window.innerHeight - reserved));
+  if (typeof window === 'undefined') return 460;
+  const reserved = window.innerWidth < 900 ? 470 : 350;
+  return Math.max(260, window.innerHeight - reserved);
 };
 
 const SORT_PRESETS = [
@@ -441,6 +441,8 @@ export default function Products() {
   const toastTimer = useRef(null);
   const importRef = useRef(null);
   const columnsMenuRef = useRef(null);
+  const gridViewportRef = useRef(null);
+  const gridHeaderRef = useRef(null);
   const hasLoadedProductsRef = useRef(false);
   const latestProductsRequestRef = useRef(0);
   const latestSearchRequestRef = useRef(0);
@@ -451,6 +453,16 @@ export default function Products() {
     setToast({ message, type });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  const recalculateGridHeight = useCallback(() => {
+    const viewportHeight = gridViewportRef.current?.clientHeight || 0;
+    const headerHeight = gridHeaderRef.current?.offsetHeight || 0;
+    const nextHeight = viewportHeight > 0
+      ? Math.max(220, viewportHeight - headerHeight)
+      : getGridHeight();
+
+    setGridHeight((prev) => (Math.abs(prev - nextHeight) > 1 ? nextHeight : prev));
   }, []);
 
   useEffect(() => () => {
@@ -464,10 +476,25 @@ export default function Products() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const onResize = () => setGridHeight(getGridHeight());
+    const onResize = () => window.requestAnimationFrame(recalculateGridHeight);
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [recalculateGridHeight]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') {
+      recalculateGridHeight();
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => recalculateGridHeight());
+    if (gridViewportRef.current) observer.observe(gridViewportRef.current);
+    if (gridHeaderRef.current) observer.observe(gridHeaderRef.current);
+    recalculateGridHeight();
+
+    return () => observer.disconnect();
+  }, [recalculateGridHeight]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -1497,9 +1524,13 @@ export default function Products() {
           </div>
         </div>
 
-        <div className="products-grid-viewport">
+        <div className="products-grid-viewport" ref={gridViewportRef}>
           <div className="products-grid-scroll">
-            <div className="products-grid-header" style={{ display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}>
+            <div
+              ref={gridHeaderRef}
+              className="products-grid-header"
+              style={{ display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}
+            >
               {activeColumns.map((column) => (
                 <div key={column.key} className={`products-grid-head-cell head-${column.key}`}>
                   {column.label}

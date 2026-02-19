@@ -106,7 +106,7 @@ const buildInitialState = (initialData) => {
       categoryId: '',
       brand: '',
       description: '',
-      sku: '',
+      sku: makeSku(),
       barcode: makeEan13(),
       image: '',
       type: 'store',

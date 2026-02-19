@@ -4,20 +4,19 @@ import {
   Barcode,
   Boxes,
   ChevronDown,
-  Copy,
   Download,
   Layers,
   Package,
-  Pencil,
   Plus,
-  Printer,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Trash2,
   Upload,
   Warehouse,
   X
 } from 'lucide-react';
+import JsBarcode from 'jsbarcode';
 import { FixedSizeList as List } from 'react-window';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
@@ -31,6 +30,7 @@ const PRODUCT_FETCH_CHUNK = 10000;
 const PRODUCT_SEARCH_LIMIT = 120;
 const PRODUCT_SEARCH_DEBOUNCE_MS = 120;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
+const BARCODE_STUDIO_STORAGE_KEY = 'products.barcodeStudio.v1';
 const DEFAULT_UNIT = 'قطعة';
 
 const GRID_COLUMNS = [
@@ -70,6 +70,311 @@ const SORT_PRESETS = [
 ];
 
 const DEFAULT_CATEGORY = { name: '', description: '', color: '#0f766e', icon: '🧵' };
+const MM_TO_PX = 3.7795275591;
+
+const BARCODE_FORMAT_OPTIONS = [
+  { value: 'CODE128', label: 'CODE128 (يدعم نص/أرقام)' },
+  { value: 'EAN13', label: 'EAN-13 (12/13 رقم)' },
+  { value: 'EAN8', label: 'EAN-8 (7/8 رقم)' },
+  { value: 'UPC', label: 'UPC-A (11/12 رقم)' },
+  { value: 'ITF14', label: 'ITF-14 (14 رقم)' }
+];
+
+const BARCODE_CODE_SOURCE_OPTIONS = [
+  { value: 'auto', label: 'تلقائي (متغير ثم منتج ثم SKU)' },
+  { value: 'variant', label: 'باركود المتغير فقط' },
+  { value: 'product', label: 'باركود المنتج فقط' },
+  { value: 'sku', label: 'SKU فقط' }
+];
+
+const BARCODE_LABEL_PRESETS = [
+  { id: 'small', label: 'صغير 38×25 مم', widthMm: 38, heightMm: 25 },
+  { id: 'medium', label: 'متوسط 50×30 مم', widthMm: 50, heightMm: 30 },
+  { id: 'large', label: 'كبير 58×40 مم', widthMm: 58, heightMm: 40 },
+  { id: 'custom', label: 'مخصص', widthMm: null, heightMm: null }
+];
+
+const DEFAULT_BARCODE_STUDIO = {
+  format: 'CODE128',
+  codeSource: 'auto',
+  presetId: 'medium',
+  labelWidthMm: 50,
+  labelHeightMm: 30,
+  columns: 4,
+  copiesPerItem: 1,
+  pageMarginMm: 6,
+  gapXMm: 4,
+  gapYMm: 4,
+  paddingMm: 2,
+  barcodeHeightMm: 12,
+  barcodeWidthPx: 1.8,
+  nameFontPx: 12,
+  metaFontPx: 10,
+  priceFontPx: 12,
+  textAlign: 'center',
+  lineColor: '#0f172a',
+  cardBackground: '#ffffff',
+  borderColor: '#cbd5e1',
+  showBorder: true,
+  showName: true,
+  showSku: true,
+  showVariant: true,
+  showPrice: true,
+  showCode: true
+};
+
+const inRange = (value, fallback, min, max) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(min, num));
+};
+
+const sanitizeBarcodeStudioSettings = (raw = {}) => {
+  const presetIds = new Set(BARCODE_LABEL_PRESETS.map((preset) => preset.id));
+  const allowedFormats = new Set(BARCODE_FORMAT_OPTIONS.map((option) => option.value));
+  const allowedSources = new Set(BARCODE_CODE_SOURCE_OPTIONS.map((option) => option.value));
+  const allowedAlign = new Set(['center', 'right', 'left']);
+
+  return {
+    format: allowedFormats.has(raw.format) ? raw.format : DEFAULT_BARCODE_STUDIO.format,
+    codeSource: allowedSources.has(raw.codeSource) ? raw.codeSource : DEFAULT_BARCODE_STUDIO.codeSource,
+    presetId: presetIds.has(raw.presetId) ? raw.presetId : DEFAULT_BARCODE_STUDIO.presetId,
+    labelWidthMm: inRange(raw.labelWidthMm, DEFAULT_BARCODE_STUDIO.labelWidthMm, 20, 120),
+    labelHeightMm: inRange(raw.labelHeightMm, DEFAULT_BARCODE_STUDIO.labelHeightMm, 15, 90),
+    columns: Math.round(inRange(raw.columns, DEFAULT_BARCODE_STUDIO.columns, 1, 8)),
+    copiesPerItem: Math.round(inRange(raw.copiesPerItem, DEFAULT_BARCODE_STUDIO.copiesPerItem, 1, 50)),
+    pageMarginMm: inRange(raw.pageMarginMm, DEFAULT_BARCODE_STUDIO.pageMarginMm, 0, 20),
+    gapXMm: inRange(raw.gapXMm, DEFAULT_BARCODE_STUDIO.gapXMm, 0, 20),
+    gapYMm: inRange(raw.gapYMm, DEFAULT_BARCODE_STUDIO.gapYMm, 0, 20),
+    paddingMm: inRange(raw.paddingMm, DEFAULT_BARCODE_STUDIO.paddingMm, 0, 10),
+    barcodeHeightMm: inRange(raw.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 40),
+    barcodeWidthPx: inRange(raw.barcodeWidthPx, DEFAULT_BARCODE_STUDIO.barcodeWidthPx, 1, 4),
+    nameFontPx: Math.round(inRange(raw.nameFontPx, DEFAULT_BARCODE_STUDIO.nameFontPx, 8, 22)),
+    metaFontPx: Math.round(inRange(raw.metaFontPx, DEFAULT_BARCODE_STUDIO.metaFontPx, 7, 18)),
+    priceFontPx: Math.round(inRange(raw.priceFontPx, DEFAULT_BARCODE_STUDIO.priceFontPx, 8, 22)),
+    textAlign: allowedAlign.has(raw.textAlign) ? raw.textAlign : DEFAULT_BARCODE_STUDIO.textAlign,
+    lineColor: nText(raw.lineColor) || DEFAULT_BARCODE_STUDIO.lineColor,
+    cardBackground: nText(raw.cardBackground) || DEFAULT_BARCODE_STUDIO.cardBackground,
+    borderColor: nText(raw.borderColor) || DEFAULT_BARCODE_STUDIO.borderColor,
+    showBorder: raw.showBorder !== false,
+    showName: raw.showName !== false,
+    showSku: raw.showSku !== false,
+    showVariant: raw.showVariant !== false,
+    showPrice: raw.showPrice !== false,
+    showCode: raw.showCode !== false
+  };
+};
+
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const mmToPx = (value, fallback = 10) => Math.max(1, Math.round(inRange(value, fallback, 0.1, 200) * MM_TO_PX));
+
+const barcodeValueFromSource = (row, source) => {
+  const variantBarcode = nText(row.variantBarcode);
+  const productBarcode = nText(row.productBarcode);
+  const skuValue = nText(row.sku);
+
+  switch (source) {
+    case 'variant':
+      return variantBarcode;
+    case 'product':
+      return productBarcode;
+    case 'sku':
+      return skuValue;
+    case 'auto':
+    default:
+      return variantBarcode || productBarcode || skuValue || nText(row.code);
+  }
+};
+
+const normalizeBarcodeByFormat = (value, format) => {
+  const text = nText(value);
+  if (!text) return null;
+  if (format === 'CODE128') return text;
+
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return null;
+
+  switch (format) {
+    case 'EAN13':
+      if (digits.length >= 13) return digits.slice(0, 13);
+      if (digits.length === 12) return digits;
+      return null;
+    case 'EAN8':
+      if (digits.length >= 8) return digits.slice(0, 8);
+      if (digits.length === 7) return digits;
+      return null;
+    case 'UPC':
+      if (digits.length >= 12) return digits.slice(0, 12);
+      if (digits.length === 11) return digits;
+      return null;
+    case 'ITF14':
+      if (digits.length >= 14) return digits.slice(0, 14);
+      return null;
+    default:
+      return text;
+  }
+};
+
+const buildBarcodeSvg = (value, settings) => {
+  if (typeof document === 'undefined') return '';
+
+  const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  let isValid = true;
+
+  JsBarcode(svgNode, value, {
+    format: settings.format,
+    width: settings.barcodeWidthPx,
+    height: mmToPx(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm),
+    margin: 0,
+    lineColor: settings.lineColor,
+    displayValue: false,
+    background: 'transparent',
+    valid: (valid) => { isValid = valid; }
+  });
+
+  return isValid ? svgNode.outerHTML : '';
+};
+
+const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY) => {
+  const labels = [];
+  const invalidRows = [];
+  const copies = Math.max(1, Math.round(inRange(settings.copiesPerItem, 1, 1, 50)));
+
+  for (const row of rows) {
+    const rawCode = barcodeValueFromSource(row, settings.codeSource);
+    const normalizedCode = normalizeBarcodeByFormat(rawCode, settings.format);
+    if (!normalizedCode) {
+      invalidRows.push({ row, reason: 'invalid-format' });
+      continue;
+    }
+
+    const svg = buildBarcodeSvg(normalizedCode, settings);
+    if (!svg) {
+      invalidRows.push({ row, reason: 'render-failed' });
+      continue;
+    }
+
+    const base = {
+      ...row,
+      code: normalizedCode,
+      barcodeSvg: svg
+    };
+
+    for (let idx = 0; idx < copies; idx += 1) {
+      labels.push(base);
+      if (labels.length >= limit) {
+        return { labels, invalidRows };
+      }
+    }
+  }
+
+  return { labels, invalidRows };
+};
+
+const barcodeStudioHtml = (labels, settings) => {
+  const safe = sanitizeBarcodeStudioSettings(settings);
+  const textAlign = safe.textAlign === 'left' ? 'left' : safe.textAlign === 'right' ? 'right' : 'center';
+  const cards = labels.map((label) => {
+    const size = nText(label.size);
+    const color = nText(label.color);
+    const hasVariant = (size && size !== 'موحد') || (color && color !== '-');
+    const variantText = [size && size !== 'موحد' ? size : '', color && color !== '-' ? color : ''].filter(Boolean).join(' / ');
+
+    return `
+      <article class="label">
+        ${safe.showName ? `<div class="name">${escapeHtml(label.name || 'منتج')}</div>` : ''}
+        ${safe.showSku ? `<div class="meta">SKU: ${escapeHtml(label.sku || '-')}</div>` : ''}
+        ${safe.showVariant && hasVariant ? `<div class="meta">${escapeHtml(variantText)}</div>` : ''}
+        <div class="barcode">${label.barcodeSvg}</div>
+        ${safe.showCode ? `<div class="code">${escapeHtml(label.code || '')}</div>` : ''}
+        ${safe.showPrice ? `<div class="price">${Number(label.price || 0).toFixed(2)} ج.م</div>` : ''}
+      </article>
+    `;
+  }).join('');
+
+  return `<!doctype html>
+  <html lang="ar" dir="rtl">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>ملصقات باركود المنتجات</title>
+      <style>
+        @page { margin: ${safe.pageMarginMm}mm; }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: ${safe.pageMarginMm}mm;
+          font-family: Tahoma, "Segoe UI", sans-serif;
+          background: #f8fafc;
+        }
+        .sheet {
+          display: grid;
+          grid-template-columns: repeat(${safe.columns}, ${safe.labelWidthMm}mm);
+          justify-content: center;
+          column-gap: ${safe.gapXMm}mm;
+          row-gap: ${safe.gapYMm}mm;
+        }
+        .label {
+          width: ${safe.labelWidthMm}mm;
+          min-height: ${safe.labelHeightMm}mm;
+          background: ${safe.cardBackground};
+          border: ${safe.showBorder ? `1px solid ${safe.borderColor}` : 'none'};
+          border-radius: 3mm;
+          padding: ${safe.paddingMm}mm;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          text-align: ${textAlign};
+          break-inside: avoid;
+          gap: 1.1mm;
+        }
+        .name {
+          font-size: ${safe.nameFontPx}px;
+          font-weight: 700;
+          line-height: 1.25;
+          color: #0f172a;
+        }
+        .meta {
+          font-size: ${safe.metaFontPx}px;
+          color: #334155;
+          line-height: 1.2;
+        }
+        .barcode {
+          width: 100%;
+          min-height: ${safe.barcodeHeightMm}mm;
+          display: grid;
+          place-items: center;
+        }
+        .barcode svg {
+          width: 100%;
+          height: ${safe.barcodeHeightMm}mm;
+          display: block;
+        }
+        .code {
+          font-size: ${safe.metaFontPx}px;
+          font-weight: 700;
+          letter-spacing: 0.3px;
+          color: #111827;
+        }
+        .price {
+          font-size: ${safe.priceFontPx}px;
+          font-weight: 700;
+          color: #065f46;
+          line-height: 1.2;
+        }
+      </style>
+    </head>
+    <body>
+      <section class="sheet">${cards}</section>
+    </body>
+  </html>`;
+};
 
 const nText = (v) => String(v ?? '').trim();
 const nKey = (v) => nText(v).toLowerCase().replace(/[\s_-]+/g, '');
@@ -259,47 +564,37 @@ const barcodeRows = (products) => {
   products.forEach((p) => {
     const sku = nText(p.sku) || `P${p.id}`;
     const vars = p.variants || [];
+    const mainUnit = mainUnitOf(p);
+    const productBarcode = nText(mainUnit?.barcode) || nText(p.barcode);
+
     if (!vars.length) {
-      const mainUnit = mainUnitOf(p);
       rows.push({
+        productId: p.id,
         name: p.name || 'منتج',
         sku,
         size: 'موحد',
         color: '-',
         price: salePriceOf(p),
-        code: nText(mainUnit?.barcode) || nText(p.barcode) || `${sku}-STD`
+        productBarcode,
+        variantBarcode: '',
+        code: productBarcode || `${sku}-STD`
       });
       return;
     }
+
     vars.forEach((v, idx) => rows.push({
+      productId: p.id,
       name: p.name || 'منتج',
       sku,
       size: v.productSize || 'موحد',
       color: v.color || '-',
       price: Number(v.price || p.basePrice || 0),
-      code: nText(v.barcode) || nText(p.barcode) || `${sku}-${v.productSize || 'S'}-${v.color || idx + 1}`
+      productBarcode,
+      variantBarcode: nText(v.barcode),
+      code: nText(v.barcode) || productBarcode || `${sku}-${v.productSize || 'S'}-${v.color || idx + 1}`
     }));
   });
   return rows;
-};
-
-const barcodeHtml = (rows) => {
-  const cards = rows.map((r, i) => `
-    <article class="card">
-      <div class="head"><span>${i + 1}</span><h4>${String(r.name || '').replace(/[<>]/g, '')}</h4></div>
-      <div class="meta">SKU: ${String(r.sku || '').replace(/[<>]/g, '')}</div>
-      <div class="meta">${String(r.size || '').replace(/[<>]/g, '')} / ${String(r.color || '').replace(/[<>]/g, '')}</div>
-      <div class="bar">*${String(r.code || '').replace(/[<>]/g, '')}*</div>
-      <div class="code">${String(r.code || '').replace(/[<>]/g, '')}</div>
-      <div class="price">${Number(r.price || 0).toFixed(2)} ج.م</div>
-    </article>
-  `).join('');
-
-  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"/><style>
-  body{font-family:Tahoma,sans-serif;background:#f8fafc;padding:20px;margin:0}h1{margin:0 0 8px;color:#0f766e}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-  .card{background:#fff;border:1px dashed #94a3b8;border-radius:10px;padding:10px;break-inside:avoid}.head{display:flex;gap:8px;align-items:center}.head span{background:#0f766e;color:#fff;border-radius:999px;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
-  .head h4{margin:0;font-size:13px}.meta{font-size:11px;color:#334155}.bar{text-align:center;font-size:40px;line-height:1;font-family:monospace;letter-spacing:2px;margin-top:6px}.code{text-align:center;font-size:12px;font-weight:700}.price{text-align:center;color:#065f46;font-size:12px;font-weight:700;margin-top:4px}
-  </style></head><body><h1>ملصقات باركود المنتجات</h1><div class="grid">${cards}</div></body></html>`;
 };
 
 const importGroups = (rows) => {
@@ -545,6 +840,19 @@ export default function Products() {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [categoryForm, setCategoryForm] = useState(DEFAULT_CATEGORY);
   const [importSession, setImportSession] = useState(null);
+  const [showBarcodeStudio, setShowBarcodeStudio] = useState(false);
+  const [barcodeStudioProducts, setBarcodeStudioProducts] = useState([]);
+  const [barcodePrinting, setBarcodePrinting] = useState(false);
+  const [barcodeStudioSettings, setBarcodeStudioSettings] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_BARCODE_STUDIO;
+    try {
+      const raw = window.localStorage.getItem(BARCODE_STUDIO_STORAGE_KEY);
+      if (!raw) return DEFAULT_BARCODE_STUDIO;
+      return sanitizeBarcodeStudioSettings(JSON.parse(raw));
+    } catch (err) {
+      return DEFAULT_BARCODE_STUDIO;
+    }
+  });
 
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
@@ -574,6 +882,15 @@ export default function Products() {
 
     return samples;
   }, [importSession]);
+  const barcodeStudioRows = useMemo(() => barcodeRows(barcodeStudioProducts), [barcodeStudioProducts]);
+  const barcodeStudioSafeSettings = useMemo(
+    () => sanitizeBarcodeStudioSettings(barcodeStudioSettings),
+    [barcodeStudioSettings]
+  );
+  const barcodePreview = useMemo(
+    () => buildBarcodeLabels(barcodeStudioRows, barcodeStudioSafeSettings, 10),
+    [barcodeStudioRows, barcodeStudioSafeSettings]
+  );
 
   const notify = useCallback((message, type = 'success') => {
     setToast({ message, type });
@@ -599,6 +916,11 @@ export default function Products() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(visibleColumnKeys));
   }, [visibleColumnKeys]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(BARCODE_STUDIO_STORAGE_KEY, JSON.stringify(sanitizeBarcodeStudioSettings(barcodeStudioSettings)));
+  }, [barcodeStudioSettings]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -1316,19 +1638,85 @@ export default function Products() {
     await safeAlert(`${lines.join('\n')}${overflowText}`, null, { title: `متغيرات: ${product.name}` });
   }, []);
 
-  const printBarcodes = useCallback(async (targetProducts) => {
-    const rows = barcodeRows(targetProducts);
+  const setBarcodeSetting = useCallback((key, value) => {
+    setBarcodeStudioSettings((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const setBarcodeNumberSetting = useCallback((key, rawValue, min, max) => {
+    const num = Number(rawValue);
+    if (!Number.isFinite(num)) return;
+    setBarcodeStudioSettings((prev) => ({ ...prev, [key]: Math.min(max, Math.max(min, num)) }));
+  }, []);
+
+  const applyBarcodePreset = useCallback((presetId) => {
+    const preset = BARCODE_LABEL_PRESETS.find((item) => item.id === presetId) || BARCODE_LABEL_PRESETS[0];
+    setBarcodeStudioSettings((prev) => {
+      if (preset.id === 'custom') {
+        return { ...prev, presetId: 'custom' };
+      }
+      return {
+        ...prev,
+        presetId: preset.id,
+        labelWidthMm: preset.widthMm,
+        labelHeightMm: preset.heightMm
+      };
+    });
+  }, []);
+
+  const resetBarcodeStudioSettings = useCallback(() => {
+    setBarcodeStudioSettings(DEFAULT_BARCODE_STUDIO);
+  }, []);
+
+  const closeBarcodeStudio = useCallback(() => {
+    if (barcodePrinting) return;
+    setShowBarcodeStudio(false);
+    setBarcodeStudioProducts([]);
+  }, [barcodePrinting]);
+
+  const openBarcodeStudio = useCallback(async (targetProducts) => {
+    const rows = barcodeRows(Array.isArray(targetProducts) ? targetProducts : []);
     if (!rows.length) {
       await safeAlert('لا توجد عناصر صالحة للطباعة', null, { type: 'warning', title: 'طباعة باركود' });
       return;
     }
-    const result = await safePrint(barcodeHtml(rows), { title: 'ملصقات باركود المنتجات' });
-    if (result?.error) {
-      await safeAlert(result.error, null, { type: 'error', title: 'طباعة باركود' });
+
+    setBarcodeStudioProducts(targetProducts);
+    setShowBarcodeStudio(true);
+  }, []);
+
+  const executeBarcodeStudioPrint = async () => {
+    if (barcodePrinting || !barcodeStudioRows.length) return;
+
+    const safeSettings = sanitizeBarcodeStudioSettings(barcodeStudioSettings);
+    const { labels, invalidRows } = buildBarcodeLabels(barcodeStudioRows, safeSettings);
+
+    if (!labels.length) {
+      const details = invalidRows.slice(0, 6).map((item, idx) => `${idx + 1}) ${nText(item?.row?.name) || 'بدون اسم'} | ${nText(item?.row?.code) || '-'}`);
+      const helpText = details.length ? `\n\nأمثلة:\n${details.join('\n')}` : '';
+      await safeAlert(`لا توجد أكواد صالحة للطباعة بصيغة ${safeSettings.format}.${helpText}`, null, { type: 'error', title: 'طباعة باركود' });
       return;
     }
-    notify(`تم فتح معاينة طباعة ${rows.length} باركود`, 'success');
-  }, [notify]);
+
+    setBarcodePrinting(true);
+    try {
+      const html = barcodeStudioHtml(labels, safeSettings);
+      const result = await safePrint(html, { title: `ملصقات باركود المنتجات (${labels.length})` });
+      if (result?.error) throw new Error(result.error);
+
+      notify(
+        `تم فتح معاينة ${labels.length} ملصق${invalidRows.length ? `، وتم تجاهل ${invalidRows.length} كود غير صالح` : ''}`,
+        invalidRows.length ? 'warning' : 'success'
+      );
+    } catch (err) {
+      await safeAlert(err.message || 'فشل طباعة الباركود', null, { type: 'error', title: 'طباعة باركود' });
+    } finally {
+      setBarcodePrinting(false);
+    }
+  };
+
+  const printBarcodes = useCallback(async (targetProducts) => {
+    await openBarcodeStudio(targetProducts);
+  }, [openBarcodeStudio]);
 
   const printSelected = async () => {
     const selected = visibleProducts.filter((p) => selectedIds.has(p.id));
@@ -1689,8 +2077,8 @@ export default function Products() {
             {importing ? 'جاري الاستيراد...' : 'استيراد Excel'}
           </button>
           <button type="button" className="products-btn products-btn-dark" onClick={printSelected}>
-            <Printer size={16} />
-            طباعة باركود المحدد
+            <SlidersHorizontal size={16} />
+            استوديو باركود المحدد
           </button>
           <button type="button" className="products-btn products-btn-primary" onClick={openCreate}>
             <Plus size={16} />
@@ -1864,6 +2252,232 @@ export default function Products() {
             isSaving={saving}
           />
         </Suspense>
+      ) : null}
+
+      {showBarcodeStudio ? (
+        <div className="products-modal-backdrop" onClick={closeBarcodeStudio}>
+          <div className="products-modal products-barcode-studio-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <div className="products-import-headline">
+                <h2>استوديو الباركود</h2>
+                <p>{barcodeStudioProducts.length} منتج | {barcodeStudioRows.length} ملصق أساسي قبل التكرار</p>
+              </div>
+              <button type="button" className="icon-btn" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
+                <X size={16} />
+              </button>
+            </header>
+
+            <section className="products-modal-body barcode-studio-body">
+              <div className="barcode-studio-config">
+                <div className="barcode-studio-section">
+                  <h3>نوع الكود ومصدره</h3>
+                  <div className="barcode-studio-grid two">
+                    <label>
+                      نوع الباركود
+                      <select value={barcodeStudioSafeSettings.format} onChange={(e) => setBarcodeSetting('format', e.target.value)} disabled={barcodePrinting}>
+                        {BARCODE_FORMAT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      مصدر الكود
+                      <select value={barcodeStudioSafeSettings.codeSource} onChange={(e) => setBarcodeSetting('codeSource', e.target.value)} disabled={barcodePrinting}>
+                        {BARCODE_CODE_SOURCE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="barcode-studio-section">
+                  <h3>مقاس الملصق والتخطيط</h3>
+                  <div className="barcode-studio-grid three">
+                    <label>
+                      قالب المقاس
+                      <select value={barcodeStudioSafeSettings.presetId} onChange={(e) => applyBarcodePreset(e.target.value)} disabled={barcodePrinting}>
+                        {BARCODE_LABEL_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>{preset.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      عرض الملصق (مم)
+                      <input
+                        type="number"
+                        min="20"
+                        max="120"
+                        step="1"
+                        value={barcodeStudioSafeSettings.labelWidthMm}
+                        onChange={(e) => {
+                          setBarcodeSetting('presetId', 'custom');
+                          setBarcodeNumberSetting('labelWidthMm', e.target.value, 20, 120);
+                        }}
+                        disabled={barcodePrinting}
+                      />
+                    </label>
+                    <label>
+                      ارتفاع الملصق (مم)
+                      <input
+                        type="number"
+                        min="15"
+                        max="90"
+                        step="1"
+                        value={barcodeStudioSafeSettings.labelHeightMm}
+                        onChange={(e) => {
+                          setBarcodeSetting('presetId', 'custom');
+                          setBarcodeNumberSetting('labelHeightMm', e.target.value, 15, 90);
+                        }}
+                        disabled={barcodePrinting}
+                      />
+                    </label>
+                    <label>
+                      عدد الأعمدة
+                      <input type="number" min="1" max="8" step="1" value={barcodeStudioSafeSettings.columns} onChange={(e) => setBarcodeNumberSetting('columns', e.target.value, 1, 8)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      نسخ لكل ملصق
+                      <input type="number" min="1" max="50" step="1" value={barcodeStudioSafeSettings.copiesPerItem} onChange={(e) => setBarcodeNumberSetting('copiesPerItem', e.target.value, 1, 50)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      هامش الصفحة (مم)
+                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.pageMarginMm} onChange={(e) => setBarcodeNumberSetting('pageMarginMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="barcode-studio-section">
+                  <h3>تصميم الباركود</h3>
+                  <div className="barcode-studio-grid three">
+                    <label>
+                      ارتفاع الباركود (مم)
+                      <input type="number" min="6" max="40" step="0.5" value={barcodeStudioSafeSettings.barcodeHeightMm} onChange={(e) => setBarcodeNumberSetting('barcodeHeightMm', e.target.value, 6, 40)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      عرض الخط (px)
+                      <input type="number" min="1" max="4" step="0.1" value={barcodeStudioSafeSettings.barcodeWidthPx} onChange={(e) => setBarcodeNumberSetting('barcodeWidthPx', e.target.value, 1, 4)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      Padding داخلي (مم)
+                      <input type="number" min="0" max="10" step="0.5" value={barcodeStudioSafeSettings.paddingMm} onChange={(e) => setBarcodeNumberSetting('paddingMm', e.target.value, 0, 10)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      مسافة أفقية (مم)
+                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapXMm} onChange={(e) => setBarcodeNumberSetting('gapXMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      مسافة رأسية (مم)
+                      <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapYMm} onChange={(e) => setBarcodeNumberSetting('gapYMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      محاذاة النص
+                      <select value={barcodeStudioSafeSettings.textAlign} onChange={(e) => setBarcodeSetting('textAlign', e.target.value)} disabled={barcodePrinting}>
+                        <option value="center">وسط</option>
+                        <option value="right">يمين</option>
+                        <option value="left">يسار</option>
+                      </select>
+                    </label>
+                    <label>
+                      حجم اسم المنتج
+                      <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.nameFontPx} onChange={(e) => setBarcodeNumberSetting('nameFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      حجم البيانات الصغيرة
+                      <input type="number" min="7" max="18" step="1" value={barcodeStudioSafeSettings.metaFontPx} onChange={(e) => setBarcodeNumberSetting('metaFontPx', e.target.value, 7, 18)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      حجم السعر
+                      <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.priceFontPx} onChange={(e) => setBarcodeNumberSetting('priceFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      لون الباركود
+                      <input type="color" value={barcodeStudioSafeSettings.lineColor} onChange={(e) => setBarcodeSetting('lineColor', e.target.value)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      خلفية الملصق
+                      <input type="color" value={barcodeStudioSafeSettings.cardBackground} onChange={(e) => setBarcodeSetting('cardBackground', e.target.value)} disabled={barcodePrinting} />
+                    </label>
+                    <label>
+                      لون الإطار
+                      <input type="color" value={barcodeStudioSafeSettings.borderColor} onChange={(e) => setBarcodeSetting('borderColor', e.target.value)} disabled={barcodePrinting} />
+                    </label>
+                  </div>
+
+                  <div className="barcode-studio-toggles">
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showBorder} onChange={(e) => setBarcodeSetting('showBorder', e.target.checked)} disabled={barcodePrinting} /> إطار الملصق</label>
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showName} onChange={(e) => setBarcodeSetting('showName', e.target.checked)} disabled={barcodePrinting} /> اسم المنتج</label>
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showSku} onChange={(e) => setBarcodeSetting('showSku', e.target.checked)} disabled={barcodePrinting} /> SKU</label>
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showVariant} onChange={(e) => setBarcodeSetting('showVariant', e.target.checked)} disabled={barcodePrinting} /> بيانات المتغير</label>
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showPrice} onChange={(e) => setBarcodeSetting('showPrice', e.target.checked)} disabled={barcodePrinting} /> السعر</label>
+                    <label><input type="checkbox" checked={barcodeStudioSafeSettings.showCode} onChange={(e) => setBarcodeSetting('showCode', e.target.checked)} disabled={barcodePrinting} /> نص الكود</label>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="barcode-studio-preview">
+                <div className="barcode-preview-head">
+                  <strong>معاينة مباشرة</strong>
+                  <span>أول {barcodePreview.labels.length} ملصق</span>
+                </div>
+
+                {barcodePreview.labels.length === 0 ? (
+                  <div className="barcode-preview-empty">
+                    لا توجد أكواد صالحة للمعاينة بالإعدادات الحالية.
+                  </div>
+                ) : (
+                  <div className="barcode-preview-grid">
+                    {barcodePreview.labels.map((label, index) => {
+                      const size = nText(label.size);
+                      const color = nText(label.color);
+                      const variantText = [size && size !== 'موحد' ? size : '', color && color !== '-' ? color : ''].filter(Boolean).join(' / ');
+                      const hasVariant = Boolean(variantText);
+
+                      return (
+                        <article
+                          key={`${label.code}-${index}`}
+                          className="barcode-preview-card"
+                          style={{
+                            background: barcodeStudioSafeSettings.cardBackground,
+                            border: barcodeStudioSafeSettings.showBorder ? `1px solid ${barcodeStudioSafeSettings.borderColor}` : 'none',
+                            textAlign: barcodeStudioSafeSettings.textAlign
+                          }}
+                        >
+                          {barcodeStudioSafeSettings.showName ? <h4 style={{ fontSize: `${barcodeStudioSafeSettings.nameFontPx}px` }}>{label.name || 'منتج'}</h4> : null}
+                          {barcodeStudioSafeSettings.showSku ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>SKU: {label.sku || '-'}</small> : null}
+                          {barcodeStudioSafeSettings.showVariant && hasVariant ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{variantText}</small> : null}
+                          <div className="barcode-preview-svg" dangerouslySetInnerHTML={{ __html: label.barcodeSvg }} />
+                          {barcodeStudioSafeSettings.showCode ? <div className="code" style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{label.code}</div> : null}
+                          {barcodeStudioSafeSettings.showPrice ? <div className="price" style={{ fontSize: `${barcodeStudioSafeSettings.priceFontPx}px` }}>{Number(label.price || 0).toFixed(2)} ج.م</div> : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {barcodePreview.invalidRows.length ? (
+                  <p className="barcode-preview-warning">
+                    {barcodePreview.invalidRows.length} عنصر غير صالح بالصيغة الحالية ولن يتم طباعته.
+                  </p>
+                ) : null}
+              </aside>
+            </section>
+
+            <footer className="products-modal-footer">
+              <button type="button" className="products-btn products-btn-light" onClick={resetBarcodeStudioSettings} disabled={barcodePrinting}>
+                استرجاع الإعدادات الافتراضية
+              </button>
+              <div className="products-modal-footer-actions">
+                <button type="button" className="products-btn products-btn-light" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
+                  إغلاق
+                </button>
+                <button type="button" className="products-btn products-btn-primary" onClick={executeBarcodeStudioPrint} disabled={barcodePrinting}>
+                  {barcodePrinting ? 'جاري تجهيز الطباعة...' : 'طباعة حسب الإعدادات'}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
       ) : null}
 
       {importSession ? (

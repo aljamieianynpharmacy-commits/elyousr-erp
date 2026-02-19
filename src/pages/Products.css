@@ -598,6 +598,11 @@
   max-width: 920px;
 }
 
+.products-barcode-studio-modal {
+  max-width: 1240px;
+  width: 96%;
+}
+
 .products-modal header {
   display: flex;
   justify-content: space-between;
@@ -634,6 +639,190 @@
   color: #64748b;
   font-size: 12px;
   font-weight: 600;
+}
+
+.barcode-studio-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+  gap: 14px;
+  overflow: hidden;
+}
+
+.barcode-studio-config {
+  overflow-y: auto;
+  padding-inline-end: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.barcode-studio-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
+
+.barcode-studio-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.barcode-studio-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.barcode-studio-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.barcode-studio-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.barcode-studio-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.barcode-studio-grid input,
+.barcode-studio-grid select {
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.barcode-studio-grid input:focus,
+.barcode-studio-grid select:focus {
+  outline: none;
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.barcode-studio-toggles {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.barcode-studio-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.barcode-studio-preview {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.barcode-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.barcode-preview-head span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.barcode-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  padding-inline-end: 2px;
+}
+
+.barcode-preview-card {
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #0f172a;
+}
+
+.barcode-preview-card h4 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.barcode-preview-card small {
+  color: #475569;
+  line-height: 1.2;
+}
+
+.barcode-preview-svg {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  align-items: center;
+}
+
+.barcode-preview-svg svg {
+  width: 100%;
+  height: 54px;
+  display: block;
+}
+
+.barcode-preview-card .code {
+  color: #111827;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.barcode-preview-card .price {
+  color: #065f46;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.barcode-preview-warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.barcode-preview-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 13px;
+  color: #64748b;
+  background: #fff;
 }
 
 .import-mapping-meta {
@@ -855,6 +1044,10 @@
   .variant-generator { grid-template-columns: 1fr; }
   .form-grid.five-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .columns-control { margin-inline-start: 0; }
+  .barcode-studio-body { grid-template-columns: 1fr; }
+  .barcode-studio-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .barcode-studio-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .barcode-preview-grid { max-height: 280px; }
 }
 
 @media (max-width: 760px) {
@@ -869,6 +1062,10 @@
   .products-grid-cell { padding: 10px; }
   .columns-menu { width: min(280px, 90vw); }
   .products-import-modal { width: 96%; }
+  .products-barcode-studio-modal { width: 98%; }
+  .barcode-studio-grid.two,
+  .barcode-studio-grid.three { grid-template-columns: 1fr; }
+  .barcode-studio-toggles { grid-template-columns: 1fr; }
   .import-mapping-grid { grid-template-columns: 1fr; }
   .products-modal-footer { flex-direction: column; align-items: stretch; }
   .products-modal-footer-actions { width: 100%; }

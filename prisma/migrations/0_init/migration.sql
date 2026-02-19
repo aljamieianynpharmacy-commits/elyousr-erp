@@ -1,0 +1,3 @@
+-- Legacy baseline migration.
+-- The initial schema was created before the current migration folders were tracked in this repository.
+-- Intentionally empty to align local history with the existing database migration record.

@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Barcode, Camera, Copy, ImagePlus, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
+import { AlertCircle, Barcode, Camera, Copy, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
 import './ProductModal.css';
 
 const TABS = {
@@ -179,7 +179,6 @@ export default function ProductModal({
 }) {
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
   const [formData, setFormData] = useState(buildInitialState(initialData));
-  const [imageUrlDraft, setImageUrlDraft] = useState('');
   const [validationMessage, setValidationMessage] = useState('');
   const fileInputRef = useRef(null);
 
@@ -189,7 +188,6 @@ export default function ProductModal({
     if (!isOpen) return;
     const nextState = buildInitialState(initialData);
     setFormData(nextState);
-    setImageUrlDraft(nextState.image && !nextState.image.startsWith('data:image/') ? nextState.image : '');
     setValidationMessage('');
     setActiveTab(TABS.BASIC);
   }, [isOpen, initialData]);
@@ -204,10 +202,9 @@ export default function ProductModal({
   }, [isOpen, isSaving, onClose]);
 
   const mainUnit = useMemo(() => normalizeUnit(formData.units[0] || DEFAULT_UNIT_ROW, 0), [formData.units]);
-  const grossMargin = useMemo(() => money(mainUnit.salePrice - mainUnit.purchasePrice), [mainUnit.salePrice, mainUnit.purchasePrice]);
-  const marginRate = useMemo(
-    () => (mainUnit.salePrice > 0 ? Number(((grossMargin / mainUnit.salePrice) * 100).toFixed(1)) : 0),
-    [grossMargin, mainUnit.salePrice]
+  const stockTotalPreview = useMemo(
+    () => Math.max(0, toInt(formData.openingQty, 0) + toInt(formData.displayQty, 0)),
+    [formData.openingQty, formData.displayQty]
   );
 
   const setField = (field, value) => {
@@ -467,7 +464,6 @@ export default function ProductModal({
 
   const clearImage = () => {
     setField('image', '');
-    setImageUrlDraft('');
   };
 
   const onImageFileSelected = (event) => {
@@ -492,7 +488,6 @@ export default function ProductModal({
     reader.onload = () => {
       const result = nText(reader.result);
       setField('image', result);
-      setImageUrlDraft('');
       setValidationMessage('');
     };
     reader.onerror = () => {
@@ -500,11 +495,6 @@ export default function ProductModal({
       setActiveTab(TABS.BASIC);
     };
     reader.readAsDataURL(file);
-  };
-
-  const onImageUrlChanged = (value) => {
-    setImageUrlDraft(value);
-    setField('image', nText(value));
   };
 
   const handleSave = () => {
@@ -641,29 +631,34 @@ export default function ProductModal({
               <div className="basic-layout">
                 <div className="image-panel">
                   <input ref={fileInputRef} type="file" accept="image/*" className="image-file-input" onChange={onImageFileSelected} />
-                  <button type="button" className="image-upload-box" onClick={pickImage}>
-                    {formData.image ? <img src={formData.image} alt={formData.name || 'Product'} /> : <Camera size={34} />}
-                  </button>
-                  <div className="image-actions">
-                    <button type="button" className="btn-inline" onClick={pickImage}>
-                      <ImagePlus size={14} />
-                      رفع صورة
+                  <div className="image-upload-wrap">
+                    <button type="button" className="image-upload-box" onClick={pickImage}>
+                      {formData.image ? <img src={formData.image} alt={formData.name || 'Product'} /> : <Camera size={34} />}
                     </button>
-                    <button type="button" className="btn-inline btn-inline-ghost" onClick={clearImage} disabled={!formData.image}>
-                      <Trash2 size={14} />
-                      مسح
-                    </button>
+                    {formData.image ? (
+                      <button
+                        type="button"
+                        className="image-clear-fab"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clearImage();
+                        }}
+                        aria-label="حذف الصورة"
+                        title="حذف الصورة"
+                        disabled={isSaving}
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
                   </div>
-                  <label className="form-group">
-                    <span>رابط صورة (اختياري)</span>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={imageUrlDraft}
-                      onChange={(event) => onImageUrlChanged(event.target.value)}
-                      placeholder="https://example.com/product.jpg"
-                    />
-                  </label>
+
+                  <div className="image-status-row">
+                    <label className="toggle-switch">
+                      <input type="checkbox" checked={formData.isActive} onChange={(event) => setField('isActive', event.target.checked)} />
+                      <span className="toggle-slider" />
+                      <span>{formData.isActive ? 'المنتج نشط' : 'المنتج غير نشط'}</span>
+                    </label>
+                  </div>
                 </div>
 
                 <div className="main-form-grid">
@@ -740,13 +735,6 @@ export default function ProductModal({
                     </label>
                   </div>
 
-                  <div className="status-row">
-                    <label className="toggle-switch">
-                      <input type="checkbox" checked={formData.isActive} onChange={(event) => setField('isActive', event.target.checked)} />
-                      <span className="toggle-slider" />
-                      <span>{formData.isActive ? 'المنتج نشط' : 'المنتج غير نشط'}</span>
-                    </label>
-                  </div>
                 </div>
               </div>
             </div>
@@ -883,22 +871,6 @@ export default function ProductModal({
                 </table>
               </div>
 
-              <div className="pricing-summary">
-                <article>
-                  <span>سعر البيع الأساسي</span>
-                  <strong>{mainUnit.salePrice.toFixed(2)} ج.م</strong>
-                </article>
-                <article>
-                  <span>سعر الشراء الأساسي</span>
-                  <strong>{mainUnit.purchasePrice.toFixed(2)} ج.م</strong>
-                </article>
-                <article>
-                  <span>هامش الربح</span>
-                  <strong>{grossMargin.toFixed(2)} ج.م</strong>
-                  <small>{marginRate}%</small>
-                </article>
-              </div>
-
               <section className="variants-section">
                 <div className="variants-header">
                   <label className="toggle-switch">
@@ -1009,43 +981,53 @@ export default function ProductModal({
 
           {activeTab === TABS.STOCK ? (
             <div className="form-section">
-              {isEditMode ? <div className="stock-note">سيتم تحديث كميات المخزون الحالية لهذا الصنف.</div> : null}
-              <div className="form-row">
-                <label className="form-group">
-                  <span>الوحدة الافتراضية للمخزون</span>
-                  <select className="form-select" value={formData.openingUnit} onChange={(event) => setField('openingUnit', event.target.value)}>
-                    {formData.units.map((unit, index) => (
-                      <option key={`opening-unit-${index}`} value={nText(unit.unitName) || `unit-${index}`}>
-                        {nText(unit.unitName) || `وحدة ${index + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-group">
-                  <span>كمية المخزن</span>
-                  <input type="number" min="0" className="form-input" value={formData.openingQty} onChange={(event) => setField('openingQty', toInt(event.target.value, 0))} />
-                </label>
-                <label className="form-group">
-                  <span>كمية العرض</span>
-                  <input type="number" min="0" className="form-input" value={formData.displayQty} onChange={(event) => setField('displayQty', toInt(event.target.value, 0))} />
-                </label>
-              </div>
+              <div className="stock-layout">
+                {isEditMode ? <div className="stock-note">سيتم تحديث كميات المخزون الحالية لهذا الصنف.</div> : null}
 
-              <div className="form-row">
-                <label className="form-group">
-                  <span>حد إعادة الطلب</span>
-                  <input type="number" min="0" className="form-input" value={formData.minStock} onChange={(event) => setField('minStock', toInt(event.target.value, 5))} />
-                </label>
-                <label className="form-group">
-                  <span>الحد الأقصى المقترح</span>
-                  <input type="number" min="0" className="form-input" value={formData.maxStock} onChange={(event) => setField('maxStock', toInt(event.target.value, 100))} />
-                </label>
-              </div>
+                <div className="stock-basic-grid">
+                  <label className="form-group">
+                    <span>الوحدة الافتراضية للمخزون</span>
+                    <select className="form-select" value={formData.openingUnit} onChange={(event) => setField('openingUnit', event.target.value)}>
+                      {formData.units.map((unit, index) => (
+                        <option key={`opening-unit-${index}`} value={nText(unit.unitName) || `unit-${index}`}>
+                          {nText(unit.unitName) || `وحدة ${index + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-group">
+                    <span>كمية المخزن</span>
+                    <input type="number" min="0" className="form-input" value={formData.openingQty} onChange={(event) => setField('openingQty', toInt(event.target.value, 0))} />
+                  </label>
+                  <label className="form-group">
+                    <span>كمية العرض</span>
+                    <input type="number" min="0" className="form-input" value={formData.displayQty} onChange={(event) => setField('displayQty', toInt(event.target.value, 0))} />
+                  </label>
+                  <label className="form-group">
+                    <span>حد إعادة الطلب</span>
+                    <input type="number" min="0" className="form-input" value={formData.minStock} onChange={(event) => setField('minStock', toInt(event.target.value, 5))} />
+                  </label>
+                </div>
 
-              <label className="form-group">
-                <span>ملاحظات المخزون</span>
-                <textarea className="form-input" rows={3} value={formData.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="أي ملاحظة تخص التخزين أو التجهيز" />
-              </label>
+                <div className="stock-total-card">
+                  <span>إجمالي الرصيد الحالي</span>
+                  <strong>{stockTotalPreview}</strong>
+                </div>
+
+                <details className="stock-advanced-panel">
+                  <summary>إعدادات متقدمة</summary>
+                  <div className="stock-advanced-content">
+                    <label className="form-group">
+                      <span>الحد الأقصى المقترح</span>
+                      <input type="number" min="0" className="form-input" value={formData.maxStock} onChange={(event) => setField('maxStock', toInt(event.target.value, 100))} />
+                    </label>
+                    <label className="form-group form-grow">
+                      <span>ملاحظات المخزون</span>
+                      <textarea className="form-input" rows={3} value={formData.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="أي ملاحظة تخص التخزين أو التجهيز" />
+                    </label>
+                  </div>
+                </details>
+              </div>
             </div>
           ) : null}
         </div>

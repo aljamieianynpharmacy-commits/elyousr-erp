@@ -1492,50 +1492,149 @@ const dbService = {
     },
 
     // ==================== PRODUCTS ====================
-    async getProducts({ page = 1, pageSize = 50, searchTerm = '', categoryId = null, sortCol = 'id', sortDir = 'desc' } = {}) {
+    async getProducts({
+        page = 1,
+        pageSize = 50,
+        searchTerm = '',
+        categoryId = null,
+        sortCol = 'id',
+        sortDir = 'desc',
+        includeTotal = true
+    } = {}) {
         try {
-            const skip = (page - 1) * pageSize;
+            const safePage = Math.max(1, parseInt(page, 10) || 1);
+            const safePageSize = Math.min(10000, Math.max(1, parseInt(pageSize, 10) || 50));
+            const skip = (safePage - 1) * safePageSize;
             const where = {};
 
-            if (categoryId) where.categoryId = parseInt(categoryId);
+            if (categoryId) where.categoryId = parseInt(categoryId, 10);
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length > 0) {
+                const [unitBarcodeRows, variantBarcodeRows] = await Promise.all([
+                    prisma.productUnit.findMany({
+                        where: { barcode: { startsWith: normalizedSearch } },
+                        select: { productId: true },
+                        take: 150
+                    }),
+                    prisma.variant.findMany({
+                        where: { barcode: { startsWith: normalizedSearch } },
+                        select: { productId: true },
+                        take: 150
+                    })
+                ]);
+
+                const barcodeProductIds = Array.from(new Set([
+                    ...unitBarcodeRows.map((row) => row.productId),
+                    ...variantBarcodeRows.map((row) => row.productId)
+                ])).filter((id) => Number.isFinite(id) && id > 0);
+
                 where.OR = [
                     { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
                     { sku: { startsWith: normalizedSearch, mode: 'insensitive' } },
-                    { barcode: { startsWith: normalizedSearch } },
-                    { productUnits: { some: { barcode: { startsWith: normalizedSearch } } } },
-                    { variants: { some: { barcode: { startsWith: normalizedSearch } } } }
+                    { barcode: { startsWith: normalizedSearch } }
                 ];
+
+                if (barcodeProductIds.length > 0) {
+                    where.OR.push({ id: { in: barcodeProductIds } });
+                }
             }
 
-            // Ø§Ù„ØªØ£ÙƒØ¯ Ù…Ù† Ø£Ù† Ø­Ù‚Ù„ Ø§Ù„ØªØ±ØªÙŠØ¨ ØµØ§Ù„Ø­
             const validSortCols = ['id', 'name', 'basePrice', 'cost', 'createdAt', 'updatedAt'];
             const safeSortDir = sortDir === 'asc' ? 'asc' : 'desc';
             const orderBy = validSortCols.includes(sortCol) ? { [sortCol]: safeSortDir } : { id: 'desc' };
 
-            const [products, total] = await Promise.all([
-                prisma.product.findMany({
-                    skip,
-                    take: pageSize,
-                    where,
-                    orderBy,
-                    include: {
-                        variants: true,
-                        category: true,
-                        inventory: true,
-                        productUnits: true
+            const queryArgs = {
+                skip,
+                take: safePageSize,
+                where,
+                orderBy,
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    categoryId: true,
+                    brand: true,
+                    barcode: true,
+                    image: true,
+                    sku: true,
+                    basePrice: true,
+                    cost: true,
+                    isActive: true,
+                    type: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            icon: true,
+                            color: true,
+                            description: true
+                        }
                     },
-                }),
-                prisma.product.count({ where })
-            ]);
+                    inventory: {
+                        select: {
+                            id: true,
+                            totalQuantity: true,
+                            minStock: true,
+                            maxStock: true,
+                            warehouseQty: true,
+                            displayQty: true,
+                            lastRestock: true,
+                            notes: true,
+                            updatedAt: true
+                        }
+                    },
+                    productUnits: {
+                        select: {
+                            id: true,
+                            unitName: true,
+                            conversionFactor: true,
+                            salePrice: true,
+                            wholesalePrice: true,
+                            minSalePrice: true,
+                            purchasePrice: true,
+                            barcode: true,
+                            updatedAt: true
+                        }
+                    },
+                    variants: {
+                        select: {
+                            id: true,
+                            productSize: true,
+                            color: true,
+                            price: true,
+                            cost: true,
+                            quantity: true,
+                            barcode: true,
+                            updatedAt: true
+                        }
+                    }
+                }
+            };
+
+            const needTotal = includeTotal !== false;
+            let products = [];
+            let total = null;
+
+            if (needTotal) {
+                [products, total] = await Promise.all([
+                    prisma.product.findMany(queryArgs),
+                    prisma.product.count({ where })
+                ]);
+            } else {
+                products = await prisma.product.findMany(queryArgs);
+            }
+
+            const totalPages = needTotal ? Math.ceil((total || 0) / safePageSize) : null;
 
             return {
                 data: products,
                 total,
-                page,
-                totalPages: Math.ceil(total / pageSize)
+                page: safePage,
+                totalPages,
+                hasMore: needTotal ? safePage < totalPages : products.length === safePageSize
             };
         } catch (error) {
             return { error: error.message };
@@ -5851,3 +5950,4 @@ Object.keys(dbService).forEach((methodName) => {
 });
 
 module.exports = dbService;
+

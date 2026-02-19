@@ -45,7 +45,7 @@ const GRID_COLUMNS = [
   { key: 'wholesalePrice', label: 'سعر الجملة', width: 'minmax(100px, 1fr)', minWidth: '100px' },
   { key: 'saleLimit', label: 'حد البيع', width: 'minmax(80px, 1fr)', minWidth: '80px' },
   { key: 'notes', label: 'الملاحظات', width: 'minmax(150px, 1.5fr)', minWidth: '150px' },
-  { key: 'category', label: 'الفئة', width: 'minmax(110px, 1fr)', minWidth: '110px' },
+  { key: 'category', label: 'الفئة', width: 'minmax(150px, 1.5fr)', minWidth: '150px' },
   { key: 'variants', label: 'المتغيرات', width: 'minmax(80px, 1fr)', minWidth: '80px' },
   { key: 'stockState', label: 'حالة المخزون', width: 'minmax(130px, 1fr)', minWidth: '130px' },
   { key: 'updatedAt', label: 'آخر تحديث', width: 'minmax(100px, 1fr)', minWidth: '100px' },
@@ -81,7 +81,15 @@ const nNum = (v, f = 0) => {
   const x = parseFloat(String(v ?? '').replace(/[^0-9.,-]/g, '').replace(/,/g, '.'));
   return Number.isFinite(x) ? x : f;
 };
-const money = (v) => new Intl.NumberFormat('ar-EG', { style: 'currency', currency: 'EGP', maximumFractionDigits: 2 }).format(Number(v || 0));
+const money = (v) => {
+  const num = Number(v || 0);
+  // إذا كان الرقم عدد صحيح، عرضه بدون كسور عشرية
+  if (Number.isInteger(num)) {
+    return num.toLocaleString('ar-EG');
+  }
+  // إذا كان عدد عشري، عرضه بحد أقصى منزلتين عشريتين وإزالة الأصفار الزائدة
+  return num.toLocaleString('ar-EG', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+};
 const csv = (v) => {
   const s = String(v ?? '');
   return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
@@ -289,7 +297,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
   
   if (!product) return null;
 
-  const renderGridCell = (product, columnKey) => {
+  const renderGridCell = React.useCallback((product, columnKey) => {
     const status = productMetaMap.get(product.id)?.status || stock(product);
     const category = categoryMap.get(product.categoryId);
     const productCode = nText(product.sku) || nText(product.barcode) || `#${product.id}`;
@@ -326,10 +334,6 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
             </div>
             <div>
               <strong>{product.name}</strong>
-              <div className="product-meta">
-                {product.brand ? <span>{product.brand}</span> : null}
-                {product.barcode ? <span>BAR: {product.barcode}</span> : null}
-              </div>
             </div>
           </div>
         );
@@ -384,21 +388,21 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
       case 'actions':
         return (
           <div className="row-actions">
-            <button type="button" className="icon-btn-solid edit" title="تعديل" onClick={() => openEdit(product)}><Pencil size={16} color="#fff" /></button>
-            <button type="button" className="icon-btn-solid orange" title="نسخ" onClick={() => duplicateProduct(product)}><Copy size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid edit" title="تعديل" onClick={() => openEdit(product)}>✏️</button>
+            <button type="button" className="icon-btn-solid orange" title="نسخ" onClick={() => duplicateProduct(product)}>📋</button>
             <button type="button" className="icon-btn-solid blue" title="طباعة باركود" onClick={() => printBarcodes([product])}><Barcode size={16} color="#fff" /></button>
-            <button type="button" className="icon-btn-solid danger" title="حذف" onClick={() => deleteProduct(product)}><Trash2 size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid danger" title="حذف" onClick={() => deleteProduct(product)}>🗑️</button>
           </div>
         );
       default:
         return '-';
     }
-  };
+  }, [selectedIds, toggleId, categoryMap, productMetaMap, openEdit, duplicateProduct, printBarcodes, deleteProduct, showVariantsSummary]);
 
   return (
     <div
       className={`products-grid-row ${index % 2 === 0 ? 'even' : 'odd'}`}
-      style={{ ...style, display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}
+      style={{ ...style, display: 'grid', gridTemplateColumns }}
     >
       {activeColumns.map((column) => (
         <div key={`${product.id}-${column.key}`} className={`products-grid-cell cell-${column.key}`}>
@@ -406,6 +410,14 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
         </div>
       ))}
     </div>
+  );
+}, (prevProps, nextProps) => {
+  // مقارنة مخصصة للأداء الأفضل
+  return (
+    prevProps.index === nextProps.index &&
+    prevProps.style === nextProps.style &&
+    prevProps.data.visibleProducts[prevProps.index]?.id === nextProps.data.visibleProducts[nextProps.index]?.id &&
+    prevProps.data.gridTemplateColumns === nextProps.data.gridTemplateColumns
   );
 });
 
@@ -433,6 +445,7 @@ export default function Products() {
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [columnSearches, setColumnSearches] = useState({});
+  const debouncedColumnSearches = useDebouncedValue(columnSearches, 80);
   const [gridHeight, setGridHeight] = useState(getGridHeight);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMN_KEYS;
@@ -737,10 +750,10 @@ export default function Products() {
 
   // بحث في الأعمدة
   const columnFilteredProducts = useMemo(() => {
-    if (Object.keys(columnSearches).length === 0) return visibleProducts;
+    if (Object.keys(debouncedColumnSearches).length === 0) return visibleProducts;
     
     return visibleProducts.filter((product) => {
-      for (const [columnKey, searchValue] of Object.entries(columnSearches)) {
+      for (const [columnKey, searchValue] of Object.entries(debouncedColumnSearches)) {
         const trimmed = nText(searchValue);
         if (!trimmed) continue;
 
@@ -789,7 +802,7 @@ export default function Products() {
       }
       return true;
     });
-  }, [visibleProducts, columnSearches, categoryMap, productMetaMap]);
+  }, [visibleProducts, debouncedColumnSearches, categoryMap, productMetaMap]);
 
   const handleColumnSearchChange = (columnKey, value) => {
     setColumnSearches((prev) => ({
@@ -1579,21 +1592,17 @@ export default function Products() {
         </button>
       </section>
 
-      <div className="products-search-meta">
+      {/* <div className="products-search-meta">
         {isSearchTyping || isSearchBusy ? <span className="pill searching">جاري البحث...</span> : null}
         <span className="pill count">نتائج البحث: {filteredTotal}</span>
         {isSearchLimited ? <span className="pill limited">تم عرض أول {PRODUCT_SEARCH_LIMIT} نتيجة لتسريع العرض</span> : null}
-      </div>
+      </div> */}
 
       <section className="products-table-card">
         <div className="products-table-tools">
           <label className="check-control"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /> تحديد الكل</label>
           <span>الظاهر: {displayedProducts.length}</span>
           <span>المحدد: {selectedIds.size}</span>
-          <button type="button" className="products-btn products-btn-light" onClick={() => setShowSearchRow((prev) => !prev)} title="إظهار/إخفاء مربعات البحث">
-            <Search size={16} />
-            بحث متقدم
-          </button>
           <div className="columns-control" ref={columnsMenuRef}>
             <button type="button" className="products-btn products-btn-light columns-trigger" onClick={() => setShowColumnMenu((prev) => !prev)}>
               <span>الأعمدة</span>
@@ -1601,6 +1610,19 @@ export default function Products() {
             </button>
             {showColumnMenu ? (
               <div className="columns-menu">
+                <label className="column-option">
+                  <input
+                    type="checkbox"
+                    checked={showSearchRow}
+                    onChange={() => {
+                      setShowSearchRow((prev) => !prev);
+                      setShowColumnMenu(false);
+                    }}
+                  />
+                  <Search size={14} style={{ marginRight: '2px' }} />
+                  <span>بحث متقدم</span>
+                </label>
+                <div className="columns-menu-divider" />
                 {GRID_COLUMNS.filter((column) => !column.required).map((column) => (
                   <label key={column.key} className="column-option">
                     <input
@@ -1621,7 +1643,7 @@ export default function Products() {
             <div
               ref={gridHeaderRef}
               className="products-grid-header"
-              style={{ display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}
+              style={{ display: 'grid', gridTemplateColumns }}
             >
               {activeColumns.map((column) => (
                 <div key={column.key} className={`products-grid-head-cell head-${column.key}`}>
@@ -1633,7 +1655,7 @@ export default function Products() {
             {showSearchRow && (
               <div
                 className="products-grid-search-row"
-                style={{ display: 'grid', gridTemplateColumns, minWidth: gridContentWidth }}
+                style={{ display: 'grid', gridTemplateColumns }}
               >
                 {activeColumns.map((column) => (
                   <div key={`search-${column.key}`} className="products-grid-search-cell">

@@ -326,14 +326,16 @@
 .products-grid-viewport {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 .products-grid-scroll {
   width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .products-grid-header,
@@ -341,12 +343,12 @@
   display: grid;
   align-items: center;
   direction: rtl;
-  width: 100%;
 }
 
 .products-grid-header {
   background: #f3f8ff;
   border-bottom: 2px solid #eef3f9;
+  flex-shrink: 0;
 }
 
 .products-grid-search-row {
@@ -418,6 +420,15 @@
   align-items: center;
   min-width: 0;
   flex-shrink: 1;
+  font-family: "Cairo", "Tajawal", "Segoe UI", sans-serif;
+}
+
+
+
+/* تكبير الأسعار */
+.price-sale {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .grid-name-cell {
@@ -557,6 +568,190 @@
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+/* Category Modal Styles */
+.products-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+.products-modal {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 600px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s ease;
+}
+
+.products-modal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.products-modal h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.products-modal-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.form-grid.two-cols {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.form-grid input[type="text"],
+.form-grid input[type="color"] {
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.form-grid input[type="text"]:focus,
+.form-grid input[type="color"]:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+}
+
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 20px;
+}
+
+.category-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.category-row:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.category-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.category-row strong {
+  font-size: 14px;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-row small {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.products-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.icon-btn:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.icon-btn.danger {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.icon-btn.danger:hover {
+  background: #fca5a5;
+  color: #b91c1c;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 1100px) {

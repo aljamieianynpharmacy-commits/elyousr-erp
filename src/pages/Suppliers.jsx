@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { safeAlert } from "../utils/safeAlert";
 import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
+import NewCustomerModal from "../components/NewCustomerModal";
 import SupplierLedger from "./SupplierLedger";
 import "./Suppliers.css";
 
@@ -18,7 +19,11 @@ const formatDate = (value) => {
     return parsed.toLocaleDateString("ar-EG");
 };
 
-const initialSupplierForm = { name: "", phone: "", address: "", balance: "0" };
+const initialSupplierForm = {
+    name: "", phone: "", phone2: "", address: "",
+    city: "", district: "", notes: "",
+    creditLimit: 0, customerType: "عادي", balance: "0"
+};
 
 export default function Suppliers() {
     const [suppliers, setSuppliers] = useState([]);
@@ -150,7 +155,13 @@ export default function Suppliers() {
         setSupplierForm({
             name: supplier.name || "",
             phone: supplier.phone || "",
+            phone2: supplier.phone2 || "",
             address: supplier.address || "",
+            city: supplier.city || "",
+            district: supplier.district || "",
+            notes: supplier.notes || "",
+            creditLimit: 0,
+            customerType: "عادي",
             balance: toNumber(supplier.balance).toFixed(2),
         });
         setShowSupplierModal(true);
@@ -454,67 +465,17 @@ export default function Suppliers() {
             </div>
 
             {/* ─── Add/Edit Supplier Modal ─── */}
-            {showSupplierModal && (
-                <div className="suppliers-modal-overlay" onClick={closeSupplierModal}>
-                    <div className="suppliers-modal" onClick={(e) => e.stopPropagation()}>
-                        <div className="suppliers-modal-header">
-                            <h3>
-                                {editingSupplier ? "✏️ تعديل المورد" : "➕ إضافة مورد جديد"}
-                            </h3>
-                            <button className="suppliers-modal-close" onClick={closeSupplierModal}>✕</button>
-                        </div>
-                        <div className="suppliers-modal-body">
-                            <div className="suppliers-form-group">
-                                <label>اسم المورد</label>
-                                <input
-                                    type="text"
-                                    placeholder="أدخل اسم المورد"
-                                    value={supplierForm.name}
-                                    onChange={(e) => setSupplierForm((prev) => ({ ...prev, name: e.target.value }))}
-                                />
-                            </div>
-                            <div className="suppliers-form-group">
-                                <label>الهاتف</label>
-                                <input
-                                    type="text"
-                                    placeholder="رقم الهاتف"
-                                    value={supplierForm.phone}
-                                    onChange={(e) => setSupplierForm((prev) => ({ ...prev, phone: e.target.value }))}
-                                />
-                            </div>
-                            <div className="suppliers-form-group">
-                                <label>العنوان</label>
-                                <input
-                                    type="text"
-                                    placeholder="عنوان المورد"
-                                    value={supplierForm.address}
-                                    onChange={(e) => setSupplierForm((prev) => ({ ...prev, address: e.target.value }))}
-                                />
-                            </div>
-                            {!editingSupplier && (
-                                <div className="suppliers-form-group">
-                                    <label>الرصيد الافتتاحي</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={supplierForm.balance}
-                                        onChange={(e) => setSupplierForm((prev) => ({ ...prev, balance: e.target.value }))}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                        <div className="suppliers-modal-footer">
-                            <button className="suppliers-btn suppliers-btn-primary" onClick={saveSupplier}>
-                                حفظ
-                            </button>
-                            <button className="suppliers-btn suppliers-btn-secondary" onClick={closeSupplierModal}>
-                                إلغاء
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <NewCustomerModal
+                isOpen={showSupplierModal}
+                customer={supplierForm}
+                onChange={setSupplierForm}
+                onSave={saveSupplier}
+                onClose={closeSupplierModal}
+                existingCustomers={suppliers}
+                title={editingSupplier ? "✏️ تعديل المورد" : "➕ إضافة مورد جديد"}
+                editingCustomerId={editingSupplier?.id || null}
+                isEditMode={Boolean(editingSupplier)}
+            />
 
             {/* ─── Payment Modal ─── */}
             {showPaymentModal && selectedSupplierLive && (

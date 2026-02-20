@@ -522,9 +522,7 @@ export default function Products() {
     latestSearchRequestRef.current = requestId;
 
     if (!term) {
-      setSearchResults([]);
-      setSearchResultsTotal(0);
-      setSearchLoading(false);
+      // Don't clear results here - keep old results visible until new ones arrive
       return;
     }
 
@@ -1747,15 +1745,15 @@ export default function Products() {
 
       <ProductsFilters
         searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
+        onSearchChange={setSearchTerm}
         categoryFilter={categoryFilter}
-        setCategoryFilter={setCategoryFilter}
+        onCategoryFilterChange={setCategoryFilter}
         categories={categories}
         stockFilter={stockFilter}
-        setStockFilter={setStockFilter}
+        onStockFilterChange={setStockFilter}
         sortPreset={sortPreset}
-        setSortPreset={setSortPreset}
-        handleRefresh={handleRefresh}
+        onSortPresetChange={setSortPreset}
+        onRefresh={handleRefresh}
         refreshing={refreshing}
         searchLoading={searchLoading}
       />
@@ -1769,13 +1767,13 @@ export default function Products() {
       <section className="products-table-card">
         <ProductsTableTools
           allVisibleSelected={allVisibleSelected}
-          toggleVisible={toggleVisible}
+          onToggleVisible={toggleVisible}
           displayedCount={displayedProducts.length}
           selectedCount={selectedIds.size}
           visibleColumnKeys={visibleColumnKeys}
-          toggleColumnVisibility={toggleColumnVisibility}
+          onToggleColumnVisibility={toggleColumnVisibility}
           showSearchRow={showSearchRow}
-          setShowSearchRow={setShowSearchRow}
+          onToggleSearchRow={() => setShowSearchRow((prev) => !prev)}
         />
 
 
@@ -1816,27 +1814,39 @@ export default function Products() {
               </div>
             )}
 
-            {tableLoading ? (
+            {loading && displayedProducts.length === 0 ? (
               <div className="products-loading">
                 <span className="spin">🔄</span>
-                <span>{isSearchBusy ? 'جاري البحث...' : 'جاري تحميل المنتجات...'}</span>
+                <span>جاري تحميل المنتجات...</span>
               </div>
-            ) : displayedProducts.length === 0 ? (
+            ) : displayedProducts.length === 0 && !tableLoading ? (
               <div className="products-empty grid-empty">لا توجد منتجات مطابقة</div>
             ) : (
-              <List
-                className="products-grid-list"
-                width="100%"
-                height={gridHeight}
-                itemCount={displayedProducts.length}
-                itemSize={60}
-                itemData={itemData}
-                overscanCount={5}
-                direction="rtl"
-                itemKey={(index) => displayedProducts[index]?.id || index}
-              >
-                {ProductGridRow}
-              </List>
+              <div style={{ position: 'relative' }}>
+                {tableLoading && displayedProducts.length > 0 ? (
+                  <div style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(255,255,255,0.5)', zIndex: 10,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    pointerEvents: 'none'
+                  }}>
+                    <span className="spin" style={{ fontSize: '1.5rem' }}>🔄</span>
+                  </div>
+                ) : null}
+                <List
+                  className="products-grid-list"
+                  width="100%"
+                  height={gridHeight}
+                  itemCount={displayedProducts.length}
+                  itemSize={60}
+                  itemData={itemData}
+                  overscanCount={5}
+                  direction="rtl"
+                  itemKey={(index) => displayedProducts[index]?.id || index}
+                >
+                  {ProductGridRow}
+                </List>
+              </div>
             )}
           </div>
         </div>

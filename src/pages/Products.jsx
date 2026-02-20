@@ -1,21 +1,5 @@
 ﻿import React, { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  Barcode,
-  Boxes,
-  ChevronDown,
-  Download,
-  Layers,
-  Package,
-  Plus,
-  RefreshCw,
-  Search,
-  SlidersHorizontal,
-  Trash2,
-  Upload,
-  Warehouse,
-  X
-} from 'lucide-react';
+
 import JsBarcode from 'jsbarcode';
 import { FixedSizeList as List } from 'react-window';
 import { safeAlert } from '../utils/safeAlert';
@@ -818,20 +802,19 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridContentWidth,
     gridTemplateColumns
   } = data;
 
   const product = visibleProducts[index];
   const [imageError, setImageError] = React.useState(false);
-  
+
   if (!product) return null;
 
-  const renderGridCell = React.useCallback((product, columnKey) => {
-    const status = productMetaMap.get(product.id)?.status || stock(product);
-    const category = categoryMap.get(product.categoryId);
-    const productCode = nText(product.sku) || nText(product.barcode) || `#${product.id}`;
+  const status = productMetaMap.get(product.id)?.status || stock(product);
+  const category = categoryMap.get(product.categoryId);
+  const productCode = nText(product.sku) || nText(product.barcode) || `#${product.id}`;
 
+  const renderCell = (columnKey) => {
     switch (columnKey) {
       case 'select':
         return (
@@ -844,21 +827,21 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
         );
       case 'code':
         return <span className="grid-code">{productCode}</span>;
-      case 'name':
+      case 'name': {
         const imageUrl = product.image ? (product.image.startsWith('http') || product.image.startsWith('data:') ? product.image : `file://${product.image}`) : null;
         return (
           <div className="grid-name-cell">
             <div className="product-avatar">
               {imageUrl && !imageError ? (
-                <img 
-                  src={imageUrl} 
-                  alt={product.name} 
+                <img
+                  src={imageUrl}
+                  alt={product.name}
                   onError={() => setImageError(true)}
                   title={product.name}
                 />
               ) : (
                 <div className="avatar-fallback">
-                  <Package size={16} />
+                  📦
                 </div>
               )}
             </div>
@@ -867,6 +850,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
             </div>
           </div>
         );
+      }
       case 'warehouse':
         return <span>{nInt(product?.inventory?.warehouseQty, 0)}</span>;
       case 'unit':
@@ -881,12 +865,10 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
         return <span>{money(wholesale(product))}</span>;
       case 'saleLimit':
         return <span>{status.min}</span>;
-      case 'notes':
-        return (
-          <span className="grid-notes" title={nText(product?.inventory?.notes) || '-'}>
-            {nText(product?.inventory?.notes) || '-'}
-          </span>
-        );
+      case 'notes': {
+        const notesText = nText(product?.inventory?.notes) || '-';
+        return <span className="grid-notes" title={notesText}>{notesText}</span>;
+      }
       case 'category':
         return (
           <span
@@ -920,14 +902,14 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
           <div className="row-actions">
             <button type="button" className="icon-btn-solid edit" title="تعديل" onClick={() => openEdit(product)}>✏️</button>
             <button type="button" className="icon-btn-solid orange" title="نسخ" onClick={() => duplicateProduct(product)}>📋</button>
-            <button type="button" className="icon-btn-solid blue" title="طباعة باركود" onClick={() => printBarcodes([product])}><Barcode size={16} color="#fff" /></button>
+            <button type="button" className="icon-btn-solid blue" title="طباعة باركود" onClick={() => printBarcodes([product])}>🏷️</button>
             <button type="button" className="icon-btn-solid danger" title="حذف" onClick={() => deleteProduct(product)}>🗑️</button>
           </div>
         );
       default:
         return '-';
     }
-  }, [selectedIds, toggleId, categoryMap, productMetaMap, openEdit, duplicateProduct, printBarcodes, deleteProduct, showVariantsSummary]);
+  };
 
   return (
     <div
@@ -936,7 +918,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     >
       {activeColumns.map((column) => (
         <div key={`${product.id}-${column.key}`} className={`products-grid-cell cell-${column.key}`}>
-          {renderGridCell(product, column.key)}
+          {renderCell(column.key)}
         </div>
       ))}
     </div>
@@ -1156,7 +1138,7 @@ export default function Products() {
 
   useEffect(() => {
     if (!showBarcodeStudio || !barcodePreviewIsMatrix) return;
-    ensureMatrixBarcodeLibrary().catch(() => {});
+    ensureMatrixBarcodeLibrary().catch(() => { });
   }, [showBarcodeStudio, barcodePreviewIsMatrix, ensureMatrixBarcodeLibrary]);
 
   useEffect(() => {
@@ -1405,7 +1387,7 @@ export default function Products() {
   // بحث في الأعمدة
   const columnFilteredProducts = useMemo(() => {
     if (Object.keys(debouncedColumnSearches).length === 0) return visibleProducts;
-    
+
     return visibleProducts.filter((product) => {
       for (const [columnKey, searchValue] of Object.entries(debouncedColumnSearches)) {
         const trimmed = nText(searchValue);
@@ -1465,9 +1447,7 @@ export default function Products() {
     }));
   };
 
-  const displayedProducts = useMemo(() => {
-    return columnFilteredProducts;
-  }, [columnFilteredProducts]);
+  const displayedProducts = columnFilteredProducts;
 
   const metrics = useMemo(() => {
     let variantsCount = 0;
@@ -2441,7 +2421,6 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridContentWidth,
     gridTemplateColumns
   }), [
     displayedProducts,
@@ -2455,7 +2434,6 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridContentWidth,
     gridTemplateColumns
   ]);
 
@@ -2468,24 +2446,19 @@ export default function Products() {
 
         <div className="products-header-actions">
           <button type="button" className="products-btn products-btn-light" onClick={() => setShowCategoryModal(true)}>
-            <Layers size={16} />
-            إدارة الفئات
+            📑 إدارة الفئات
           </button>
           <button type="button" className="products-btn products-btn-light" onClick={exportCsv}>
-            <Download size={16} />
-            تصدير Excel
+            📥 تصدير Excel
           </button>
           <button type="button" className="products-btn products-btn-light" onClick={() => importRef.current?.click()} disabled={importing}>
-            <Upload size={16} />
-            {importing ? 'جاري الاستيراد...' : 'استيراد Excel'}
+            📤 {importing ? 'جاري الاستيراد...' : 'استيراد Excel'}
           </button>
           <button type="button" className="products-btn products-btn-dark" onClick={printSelected}>
-            <SlidersHorizontal size={16} />
-            استوديو باركود المحدد
+            ⚙️ استوديو باركود المحدد
           </button>
           <button type="button" className="products-btn products-btn-primary" onClick={openCreate}>
-            <Plus size={16} />
-            منتج جديد
+            ➕ منتج جديد
           </button>
         </div>
       </header>
@@ -2493,15 +2466,15 @@ export default function Products() {
       <input ref={importRef} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={importFile} />
 
       <section className="products-metrics">
-        <article className="products-metric-card tone-main"><div className="icon-wrap"><Package size={20} /></div><div><h3>إجمالي الأصناف</h3><strong>{metrics.productsCount}</strong></div></article>
-        <article className="products-metric-card tone-blue"><div className="icon-wrap"><Boxes size={20} /></div><div><h3>متغيرات الصفحة</h3><strong>{metrics.variantsCount}</strong></div></article>
-        <article className="products-metric-card tone-green"><div className="icon-wrap"><Warehouse size={20} /></div><div><h3>إجمالي المخزون</h3><strong>{metrics.stockTotal}</strong></div></article>
-        <article className="products-metric-card tone-amber"><div className="icon-wrap"><AlertTriangle size={20} /></div><div><h3>منخفض/نافد</h3><strong>{metrics.lowStockCount}</strong></div></article>
+        <article className="products-metric-card tone-main"><div className="icon-wrap">📦</div><div><h3>إجمالي الأصناف</h3><strong>{metrics.productsCount}</strong></div></article>
+        <article className="products-metric-card tone-blue"><div className="icon-wrap">🧩</div><div><h3>متغيرات الصفحة</h3><strong>{metrics.variantsCount}</strong></div></article>
+        <article className="products-metric-card tone-green"><div className="icon-wrap">🏪</div><div><h3>إجمالي المخزون</h3><strong>{metrics.stockTotal}</strong></div></article>
+        <article className="products-metric-card tone-amber"><div className="icon-wrap">⚠️</div><div><h3>منخفض/نافد</h3><strong>{metrics.lowStockCount}</strong></div></article>
       </section>
 
       <section className="products-filters">
         <label className="products-search">
-          <Search size={16} />
+          <span className="products-search-emoji">🔍</span>
           <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث بالاسم أو الكود أو الباركود" />
           {searchTerm ? (
             <button
@@ -2510,7 +2483,7 @@ export default function Products() {
               onClick={() => setSearchTerm('')}
               aria-label="مسح البحث"
             >
-              <X size={14} />
+              ✕
             </button>
           ) : null}
         </label>
@@ -2532,8 +2505,7 @@ export default function Products() {
         </select>
 
         <button type="button" className="products-btn products-btn-light" onClick={handleRefresh} disabled={refreshing || searchLoading}>
-          <RefreshCw size={16} className={refreshing || searchLoading ? 'spin' : ''} />
-          تحديث
+          <span className={refreshing || searchLoading ? 'spin' : ''}>🔄</span> تحديث
         </button>
       </section>
 
@@ -2551,7 +2523,7 @@ export default function Products() {
           <div className="columns-control" ref={columnsMenuRef}>
             <button type="button" className="products-btn products-btn-light columns-trigger" onClick={() => setShowColumnMenu((prev) => !prev)}>
               <span>الأعمدة</span>
-              <ChevronDown size={15} />
+              <span>▼</span>
             </button>
             {showColumnMenu ? (
               <div className="columns-menu">
@@ -2564,7 +2536,7 @@ export default function Products() {
                       setShowColumnMenu(false);
                     }}
                   />
-                  <Search size={14} style={{ marginRight: '2px' }} />
+                  <span style={{ marginRight: '2px' }}>🔍</span>
                   <span>بحث متقدم</span>
                 </label>
                 <div className="columns-menu-divider" />
@@ -2620,7 +2592,7 @@ export default function Products() {
 
             {tableLoading ? (
               <div className="products-loading">
-                <RefreshCw size={18} className="spin" />
+                <span className="spin">🔄</span>
                 <span>{isSearchBusy ? 'جاري البحث...' : 'جاري تحميل المنتجات...'}</span>
               </div>
             ) : displayedProducts.length === 0 ? (
@@ -2666,7 +2638,7 @@ export default function Products() {
                 <p>{barcodeStudioProducts.length} منتج | {barcodeStudioRows.length} ملصق أساسي قبل التكرار</p>
               </div>
               <button type="button" className="icon-btn" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
-                <X size={16} />
+                ✕
               </button>
             </header>
 
@@ -3000,7 +2972,7 @@ export default function Products() {
                 <p>{importSession.fileName} | {importSession.rows.length} صف</p>
               </div>
               <button type="button" className="icon-btn" onClick={closeImportSession} disabled={importing}>
-                <X size={16} />
+                ✕
               </button>
             </header>
 
@@ -3067,7 +3039,7 @@ export default function Products() {
           <div className="products-modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h2>إدارة الفئات</h2>
-              <button type="button" className="icon-btn" onClick={() => setShowCategoryModal(false)}><X size={16} /></button>
+              <button type="button" className="icon-btn" onClick={() => setShowCategoryModal(false)}>✕</button>
             </header>
 
             <section className="products-modal-body">
@@ -3078,13 +3050,13 @@ export default function Products() {
                 <label>الأيقونة<input type="text" value={categoryForm.icon} onChange={(e) => setCategoryForm((p) => ({ ...p, icon: e.target.value }))} /></label>
               </div>
 
-              <button type="button" className="products-btn products-btn-primary" onClick={saveCategory}><Plus size={14} />إضافة فئة</button>
+              <button type="button" className="products-btn products-btn-primary" onClick={saveCategory}>➕ إضافة فئة</button>
 
               <div className="category-list">
                 {categories.length === 0 ? <div className="products-empty">لا توجد فئات</div> : categories.map((c) => (
                   <article className="category-row" key={c.id}>
                     <div><strong>{c.icon || '📦'} {c.name}</strong><small>{c.description || 'بدون وصف'}</small></div>
-                    <button type="button" className="icon-btn danger" onClick={() => deleteCategory(c.id, c.name)}><Trash2 size={14} /></button>
+                    <button type="button" className="icon-btn danger" onClick={() => deleteCategory(c.id, c.name)}>🗑️</button>
                   </article>
                 ))}
               </div>

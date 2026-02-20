@@ -187,25 +187,22 @@ export default function Returns() {
             showToast('رقم فاتورة غير صالح', 'error');
             return;
         }
-        setLoading(true);
         try {
             const sale = await window.api.getSaleById(id);
-            if (sale?.error) { showToast(sale.error, 'error'); }
+            if (sale?.error) { showToast(sale.error || 'تعذر تحميل الفاتورة', 'error'); }
             else {
                 const selectedCustomerId = selCust?.id ? String(selCust.id) : '';
                 const saleCustomerId = sale?.customer?.id ? String(sale.customer.id) : '';
                 if (selCust && selectedCustomerId !== saleCustomerId) {
-                    showToast('هذه الفاتورة غير مسجلة على العميل المحدد', 'error');
-                    setSearch('');
+                    showToast('هذه الفاتورة ليست للعميل المحدد', 'error');
                     return;
                 }
                 if (!selCust && sale.customer) { upd({ customerId: sale.customer.id, customerName: sale.customer.name }); }
                 setSelSale(sale);
                 setCustSales(prev => { const exists = prev.find(s => s.id === sale.id); return exists ? prev : [sale, ...prev]; });
-                showToast(`تم تحميل فاتورة #${id}`, 'success');
             }
         } catch (er) { console.error(er); showToast('خطأ في جلب الفاتورة', 'error'); }
-        finally { setLoading(false); searchRef.current?.focus(); }
+        finally { searchRef.current?.focus(); }
     };
 
     // ─── Sound ───
@@ -371,7 +368,7 @@ export default function Returns() {
                             <input ref={searchRef} type="text" placeholder="🔍 ابحث برقم الفاتورة فقط (مثال: #1234)" value={searchTerm} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSearchSubmit(e); if (e.key === 'Escape') setSearch(''); }} style={{ padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 16, flex: 1, minWidth: 200 }} autoFocus />
                         </div>
                         {/* Invoice History or Empty */}
-                        {selCust ? (
+                        {(selCust || custSales.length > 0) ? (
                             <div style={{ flex: 1, overflowY: 'auto' }}>
                                 <div style={{ fontSize: 13, color: '#4b5563', fontWeight: 'bold', marginBottom: 10 }}>📋 سجل الفواتير ({custSales.length})</div>
                                 {custSales.length === 0 ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 16, fontWeight: 'bold', textAlign: 'center', padding: 40 }}><div><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div>لا يوجد فواتير</div></div>

@@ -29,3 +29,23 @@ export const safeAlert = (message, focusEl, options = {}) => {
     }, 0);
   });
 };
+
+export const safeConfirm = async (message, title = 'تأكيد') => {
+  if (typeof window !== 'undefined' && window.api?.showMessageBox) {
+    const result = await window.api.showMessageBox({
+      type: 'question',
+      title,
+      message: String(message ?? ''),
+      buttons: ['موافق', 'إلغاء'],
+      defaultId: 0,
+      cancelId: 1
+    });
+    return result?.response === 0;
+  }
+
+  if (typeof window !== 'undefined' && window.confirm) {
+    return window.confirm(message);
+  }
+
+  return false;
+};

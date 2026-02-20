@@ -2027,9 +2027,16 @@ const dbService = {
     },
 
     // ==================== SALES ====================
-    async getSales() {
+    async getSales(options = {}) {
         try {
-            const sales = await prisma.sale.findMany({
+            const { customerId, limit } = options;
+            const whereClause = {};
+            if (customerId) {
+                whereClause.customerId = parseInt(customerId);
+            }
+
+            const queryArgs = {
+                where: whereClause,
                 include: {
                     customer: true,
                     paymentMethod: true,
@@ -2039,10 +2046,21 @@ const dbService = {
                                 include: { product: true }
                             }
                         }
+                    },
+                    returns: {
+                        include: {
+                            items: true
+                        }
                     }
                 },
                 orderBy: { createdAt: 'desc' }
-            });
+            };
+
+            if (limit) {
+                queryArgs.take = parseInt(limit);
+            }
+
+            const sales = await prisma.sale.findMany(queryArgs);
 
             return sales.map((sale) => ({
                 ...sale,

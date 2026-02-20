@@ -191,6 +191,9 @@ ipcMain.handle('db:addVariant', async (event, variantData) => {
 ipcMain.handle('db:getSales', async (event, options) => {
     return await dbService.getSales(options);
 });
+ipcMain.handle('db:getSaleById', async (event, saleId) => {
+    return await dbService.getSaleById(saleId);
+});
 ipcMain.handle('db:createSale', async (event, saleData) => {
     return await dbService.createSale(saleData);
 });

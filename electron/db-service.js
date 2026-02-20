@@ -2072,6 +2072,38 @@ const dbService = {
         }
     },
 
+    async getSaleById(saleId) {
+        try {
+            const sale = await prisma.sale.findUnique({
+                where: { id: parseInt(saleId) },
+                include: {
+                    customer: true,
+                    paymentMethod: true,
+                    items: {
+                        include: {
+                            variant: {
+                                include: { product: true }
+                            }
+                        }
+                    },
+                    returns: {
+                        include: {
+                            items: true
+                        }
+                    }
+                }
+            });
+            if (!sale) return { error: 'لم يتم العثور على الفاتورة' };
+            return {
+                ...sale,
+                payment: sale?.paymentMethod?.name || null,
+                paymentMethodCode: sale?.paymentMethod?.code || null
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
     async createSale(saleData) {
         const perf = startPerfTimer('db:createSale', {
             hasCustomer: Boolean(saleData?.customerId),

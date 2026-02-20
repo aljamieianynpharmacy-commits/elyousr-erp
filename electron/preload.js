@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Sales
     getSales: (options) => ipcRenderer.invoke('db:getSales', options),
+    getSaleById: (saleId) => ipcRenderer.invoke('db:getSaleById', saleId),
     createSale: (saleData) => ipcRenderer.invoke('db:createSale', saleData),
     printSale: (saleId) => ipcRenderer.invoke('print:sale', saleId),
     printHTML: (options) => ipcRenderer.invoke('print:printHTML', options),

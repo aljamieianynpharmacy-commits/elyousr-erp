@@ -1,12 +1,12 @@
 /* ========== Suppliers Page ========== */
 
-/* --- Page Header --- */
 .suppliers-page {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+/* --- Header --- */
 .suppliers-header {
   display: flex;
   justify-content: space-between;
@@ -33,7 +33,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  font-size: 18px;
 }
 
 .suppliers-header-actions {
@@ -112,26 +112,23 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  font-size: 20px;
 }
 
 .suppliers-stat-icon.is-total {
   background: linear-gradient(135deg, #ede9fe, #ddd6fe);
-  color: #7c3aed;
 }
 
 .suppliers-stat-icon.is-debt {
   background: linear-gradient(135deg, #fee2e2, #fecaca);
-  color: #dc2626;
 }
 
 .suppliers-stat-icon.is-credit {
   background: linear-gradient(135deg, #dbeafe, #bfdbfe);
-  color: #2563eb;
 }
 
 .suppliers-stat-icon.is-net {
   background: linear-gradient(135deg, #d1fae5, #a7f3d0);
-  color: #059669;
 }
 
 .suppliers-stat-info {
@@ -153,21 +150,10 @@
   line-height: 1.2;
 }
 
-.suppliers-stat-value.is-debt {
-  color: #dc2626;
-}
-
-.suppliers-stat-value.is-credit {
-  color: #2563eb;
-}
-
-.suppliers-stat-value.is-net-negative {
-  color: #dc2626;
-}
-
-.suppliers-stat-value.is-net-positive {
-  color: #059669;
-}
+.suppliers-stat-value.is-debt { color: #dc2626; }
+.suppliers-stat-value.is-credit { color: #2563eb; }
+.suppliers-stat-value.is-net-negative { color: #dc2626; }
+.suppliers-stat-value.is-net-positive { color: #059669; }
 
 /* --- Search & Filter Bar --- */
 .suppliers-search-bar {
@@ -187,16 +173,16 @@
   align-items: center;
 }
 
-.suppliers-search-icon {
+.suppliers-search-emoji {
   position: absolute;
   right: 12px;
-  color: #94a3b8;
+  font-size: 16px;
   pointer-events: none;
 }
 
 .suppliers-search-wrapper input {
   width: 100%;
-  padding: 10px 40px 10px 14px;
+  padding: 10px 38px 10px 14px;
   border: 1.5px solid #e2e8f0;
   border-radius: 10px;
   font-size: 14px;
@@ -256,7 +242,6 @@
   font-size: 13px;
   font-weight: 700;
   color: #475569;
-  text-transform: uppercase;
   letter-spacing: 0.3px;
   border-bottom: 2px solid #e2e8f0;
   white-space: nowrap;
@@ -296,19 +281,11 @@
   font-size: 15px !important;
 }
 
-.suppliers-balance-cell.is-negative {
-  color: #dc2626 !important;
-}
+.suppliers-balance-cell.is-negative { color: #dc2626 !important; }
+.suppliers-balance-cell.is-positive { color: #2563eb !important; }
+.suppliers-balance-cell.is-zero { color: #059669 !important; }
 
-.suppliers-balance-cell.is-positive {
-  color: #2563eb !important;
-}
-
-.suppliers-balance-cell.is-zero {
-  color: #059669 !important;
-}
-
-/* --- Action Buttons in Table --- */
+/* --- Action Buttons --- */
 .suppliers-actions-cell {
   text-align: center !important;
 }
@@ -327,46 +304,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   padding: 0;
   background: transparent;
+  font-size: 16px;
 }
 
 .suppliers-action-btn:hover {
   transform: translateY(-1px);
 }
 
-.suppliers-action-btn.is-ledger {
-  color: #6366f1;
-}
-
-.suppliers-action-btn.is-ledger:hover {
-  background: #eef2ff;
-}
-
-.suppliers-action-btn.is-payment {
-  color: #059669;
-}
-
-.suppliers-action-btn.is-payment:hover {
-  background: #ecfdf5;
-}
-
-.suppliers-action-btn.is-edit {
-  color: #f59e0b;
-}
-
-.suppliers-action-btn.is-edit:hover {
-  background: #fffbeb;
-}
-
-.suppliers-action-btn.is-delete {
-  color: #dc2626;
-}
-
-.suppliers-action-btn.is-delete:hover {
-  background: #fef2f2;
-}
+.suppliers-action-btn.is-ledger:hover { background: #eef2ff; }
+.suppliers-action-btn.is-payment:hover { background: #ecfdf5; }
+.suppliers-action-btn.is-edit:hover { background: #fffbeb; }
+.suppliers-action-btn.is-delete:hover { background: #fef2f2; }
 
 /* --- Empty State --- */
 .suppliers-empty {
@@ -380,7 +331,7 @@
 }
 
 .suppliers-empty-icon {
-  color: #cbd5e1;
+  font-size: 40px;
   margin-bottom: 4px;
 }
 
@@ -392,10 +343,7 @@
 /* --- Modals --- */
 .suppliers-modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background-color: rgba(15, 23, 42, 0.5);
   backdrop-filter: blur(4px);
   display: flex;
@@ -422,14 +370,8 @@
 }
 
 @keyframes suppliers-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .suppliers-modal-header {
@@ -450,25 +392,6 @@
   gap: 8px;
 }
 
-.suppliers-modal-header-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.suppliers-modal-header-icon.is-supplier {
-  background: linear-gradient(135deg, #ede9fe, #ddd6fe);
-  color: #7c3aed;
-}
-
-.suppliers-modal-header-icon.is-payment {
-  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
-  color: #059669;
-}
-
 .suppliers-modal-close {
   width: 32px;
   height: 32px;
@@ -480,6 +403,7 @@
   justify-content: center;
   cursor: pointer;
   color: #64748b;
+  font-size: 18px;
   transition: all 0.2s ease;
   padding: 0;
 }
@@ -530,7 +454,6 @@
   outline: none;
 }
 
-/* Payment info box */
 .suppliers-payment-info {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -548,14 +471,8 @@
   font-size: 14px;
 }
 
-.suppliers-payment-info-row .label {
-  color: #64748b;
-}
-
-.suppliers-payment-info-row .value {
-  font-weight: 700;
-  color: #1e293b;
-}
+.suppliers-payment-info-row .label { color: #64748b; }
+.suppliers-payment-info-row .value { font-weight: 700; color: #1e293b; }
 
 .suppliers-payment-preview {
   background: linear-gradient(135deg, #ecfdf5, #d1fae5);
@@ -568,16 +485,8 @@
   font-size: 14px;
 }
 
-.suppliers-payment-preview .label {
-  color: #059669;
-  font-weight: 600;
-}
-
-.suppliers-payment-preview .value {
-  font-weight: 700;
-  font-size: 16px;
-  color: #047857;
-}
+.suppliers-payment-preview .label { color: #059669; font-weight: 600; }
+.suppliers-payment-preview .value { font-weight: 700; font-size: 16px; color: #047857; }
 
 .suppliers-modal-footer {
   padding: 16px 24px;
@@ -592,7 +501,7 @@
   padding: 10px 16px;
 }
 
-/* --- Loading State --- */
+/* --- Loading --- */
 .suppliers-loading {
   display: flex;
   flex-direction: column;

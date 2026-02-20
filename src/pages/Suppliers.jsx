@@ -1,10 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { safeAlert } from "../utils/safeAlert";
 import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
-import {
-    Users, TrendingDown, TrendingUp, Scale, Search, RefreshCw, Download,
-    Plus, FileText, DollarSign, Edit2, Trash2, X, Inbox, UserPlus, Truck
-} from "lucide-react";
 import SupplierLedger from "./SupplierLedger";
 import "./Suppliers.css";
 
@@ -316,23 +312,18 @@ export default function Suppliers() {
             {/* ─── Header ─── */}
             <div className="suppliers-header">
                 <h1>
-                    <span className="suppliers-header-icon">
-                        <Truck size={20} />
-                    </span>
+                    <span className="suppliers-header-icon">🚛</span>
                     إدارة الموردين
                 </h1>
                 <div className="suppliers-header-actions">
                     <button className="suppliers-btn suppliers-btn-secondary" onClick={() => loadSuppliers(true)}>
-                        <RefreshCw size={15} />
-                        تحديث
+                        🔄 تحديث
                     </button>
                     <button className="suppliers-btn suppliers-btn-secondary" onClick={exportCsv}>
-                        <Download size={15} />
-                        تصدير CSV
+                        📥 تصدير CSV
                     </button>
                     <button className="suppliers-btn suppliers-btn-primary" onClick={openAddSupplierModal}>
-                        <Plus size={15} />
-                        إضافة مورد
+                        ➕ إضافة مورد
                     </button>
                 </div>
             </div>
@@ -340,36 +331,28 @@ export default function Suppliers() {
             {/* ─── Stats Cards ─── */}
             <div className="suppliers-stats">
                 <div className="suppliers-stat-card">
-                    <div className="suppliers-stat-icon is-total">
-                        <Users size={22} />
-                    </div>
+                    <div className="suppliers-stat-icon is-total">👥</div>
                     <div className="suppliers-stat-info">
                         <span className="suppliers-stat-label">عدد الموردين</span>
                         <span className="suppliers-stat-value">{filteredSuppliers.length}</span>
                     </div>
                 </div>
                 <div className="suppliers-stat-card">
-                    <div className="suppliers-stat-icon is-debt">
-                        <TrendingDown size={22} />
-                    </div>
+                    <div className="suppliers-stat-icon is-debt">📉</div>
                     <div className="suppliers-stat-info">
                         <span className="suppliers-stat-label">مستحقات علينا</span>
                         <span className="suppliers-stat-value is-debt">{formatMoney(stats.debtAmount)}</span>
                     </div>
                 </div>
                 <div className="suppliers-stat-card">
-                    <div className="suppliers-stat-icon is-credit">
-                        <TrendingUp size={22} />
-                    </div>
+                    <div className="suppliers-stat-icon is-credit">📈</div>
                     <div className="suppliers-stat-info">
                         <span className="suppliers-stat-label">رصيد دائن للموردين</span>
                         <span className="suppliers-stat-value is-credit">{formatMoney(stats.creditAmount)}</span>
                     </div>
                 </div>
                 <div className="suppliers-stat-card">
-                    <div className="suppliers-stat-icon is-net">
-                        <Scale size={22} />
-                    </div>
+                    <div className="suppliers-stat-icon is-net">⚖️</div>
                     <div className="suppliers-stat-info">
                         <span className="suppliers-stat-label">صافي الرصيد</span>
                         <span className={`suppliers-stat-value ${stats.net < 0 ? "is-net-negative" : "is-net-positive"}`}>
@@ -382,7 +365,7 @@ export default function Suppliers() {
             {/* ─── Search & Filter ─── */}
             <div className="suppliers-search-bar">
                 <div className="suppliers-search-wrapper">
-                    <Search size={18} className="suppliers-search-icon" />
+                    <span className="suppliers-search-emoji">🔍</span>
                     <input
                         type="text"
                         placeholder="بحث بالاسم أو الهاتف أو العنوان..."
@@ -418,7 +401,7 @@ export default function Suppliers() {
                                 <tr>
                                     <td colSpan={7}>
                                         <div className="suppliers-empty">
-                                            <Inbox size={40} className="suppliers-empty-icon" />
+                                            <span className="suppliers-empty-icon">📭</span>
                                             <span className="suppliers-empty-text">لا توجد بيانات</span>
                                         </div>
                                     </td>
@@ -443,30 +426,22 @@ export default function Suppliers() {
                                                         className="suppliers-action-btn is-ledger"
                                                         onClick={() => setShowLedger(supplier.id)}
                                                         title="كشف الحساب"
-                                                    >
-                                                        <FileText size={16} />
-                                                    </button>
+                                                    >📄</button>
                                                     <button
                                                         className="suppliers-action-btn is-payment"
                                                         onClick={() => openPaymentModal(supplier)}
                                                         title="تسجيل سداد"
-                                                    >
-                                                        <DollarSign size={16} />
-                                                    </button>
+                                                    >💰</button>
                                                     <button
                                                         className="suppliers-action-btn is-edit"
                                                         onClick={() => openEditSupplierModal(supplier)}
                                                         title="تعديل"
-                                                    >
-                                                        <Edit2 size={16} />
-                                                    </button>
+                                                    >✏️</button>
                                                     <button
                                                         className="suppliers-action-btn is-delete"
                                                         onClick={() => deleteSupplier(supplier.id)}
                                                         title="حذف"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
+                                                    >🗑️</button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -484,14 +459,9 @@ export default function Suppliers() {
                     <div className="suppliers-modal" onClick={(e) => e.stopPropagation()}>
                         <div className="suppliers-modal-header">
                             <h3>
-                                <span className="suppliers-modal-header-icon is-supplier">
-                                    {editingSupplier ? <Edit2 size={16} /> : <UserPlus size={16} />}
-                                </span>
-                                {editingSupplier ? "تعديل المورد" : "إضافة مورد جديد"}
+                                {editingSupplier ? "✏️ تعديل المورد" : "➕ إضافة مورد جديد"}
                             </h3>
-                            <button className="suppliers-modal-close" onClick={closeSupplierModal}>
-                                <X size={18} />
-                            </button>
+                            <button className="suppliers-modal-close" onClick={closeSupplierModal}>✕</button>
                         </div>
                         <div className="suppliers-modal-body">
                             <div className="suppliers-form-group">
@@ -551,15 +521,8 @@ export default function Suppliers() {
                 <div className="suppliers-modal-overlay" onClick={closePaymentModal}>
                     <div className="suppliers-modal" onClick={(e) => e.stopPropagation()}>
                         <div className="suppliers-modal-header">
-                            <h3>
-                                <span className="suppliers-modal-header-icon is-payment">
-                                    <DollarSign size={16} />
-                                </span>
-                                تسجيل سداد مورد
-                            </h3>
-                            <button className="suppliers-modal-close" onClick={closePaymentModal}>
-                                <X size={18} />
-                            </button>
+                            <h3>💰 تسجيل سداد مورد</h3>
+                            <button className="suppliers-modal-close" onClick={closePaymentModal}>✕</button>
                         </div>
                         <div className="suppliers-modal-body">
                             <div className="suppliers-payment-info">

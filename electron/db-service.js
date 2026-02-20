@@ -1568,6 +1568,7 @@ const dbService = {
         pageSize = 50,
         searchTerm = '',
         categoryId = null,
+        stockFilter = 'all',
         sortCol = 'id',
         sortDir = 'desc',
         includeTotal = true,
@@ -1585,6 +1586,15 @@ const dbService = {
             const where = {};
 
             if (categoryId) where.categoryId = parseInt(categoryId, 10);
+
+            // Stock filter – server-side so frontend doesn't need to fetch all products
+            const safeStockFilter = String(stockFilter || 'all').trim().toLowerCase();
+            if (safeStockFilter === 'out') {
+                where.inventory = { totalQuantity: { lte: 0 } };
+            } else if (safeStockFilter === 'available') {
+                where.inventory = { totalQuantity: { gt: 0 } };
+            }
+            // 'low' is handled client-side because Prisma can't compare totalQuantity <= minStock
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length > 0) {
@@ -1607,7 +1617,7 @@ const dbService = {
                 ])).filter((id) => Number.isFinite(id) && id > 0);
 
                 where.OR = [
-                    { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
+                    { name: { contains: normalizedSearch, mode: 'insensitive' } },
                     { sku: { startsWith: normalizedSearch, mode: 'insensitive' } },
                     { barcode: { startsWith: normalizedSearch } }
                 ];

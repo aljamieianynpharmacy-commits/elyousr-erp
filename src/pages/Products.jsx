@@ -1,4 +1,4 @@
-﻿import React, { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import JsBarcode from 'jsbarcode';
 import { FixedSizeList as List } from 'react-window';
@@ -41,7 +41,7 @@ const ProductModal = lazy(loadProductModal);
 
 const PRODUCT_FETCH_CHUNK = 10000;
 const PRODUCT_SEARCH_LIMIT = 120;
-const PRODUCT_SEARCH_DEBOUNCE_MS = 120;
+const PRODUCT_SEARCH_DEBOUNCE_MS = 200;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 
 
@@ -230,7 +230,6 @@ export default function Products() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebouncedValue(searchTerm, PRODUCT_SEARCH_DEBOUNCE_MS);
-  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [sortPreset, setSortPreset] = useState('latest');
@@ -479,6 +478,7 @@ export default function Products() {
           pageSize: PRODUCT_FETCH_CHUNK,
           searchTerm: '',
           categoryId: categoryFilter || null,
+          stockFilter: stockFilter || 'all',
           sortCol: activeSort.sortCol,
           sortDir: activeSort.sortDir,
           includeImage: false
@@ -513,7 +513,7 @@ export default function Products() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter]);
+  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, stockFilter]);
 
   const loadSearchProducts = useCallback(async (rawTerm, options = false) => {
     const term = nText(rawTerm);
@@ -535,14 +535,14 @@ export default function Products() {
       let page = 1;
       let totalPages = 1;
       let total = 0;
-      const pageSize = stockFilter === 'all' ? PRODUCT_SEARCH_LIMIT : PRODUCT_FETCH_CHUNK;
 
       do {
         const res = await window.api.getProducts({
           page,
-          pageSize,
+          pageSize: PRODUCT_SEARCH_LIMIT,
           searchTerm: term,
           categoryId: categoryFilter || null,
+          stockFilter: stockFilter || 'all',
           sortCol: activeSort.sortCol,
           sortDir: activeSort.sortDir,
           includeImage: false
@@ -557,10 +557,10 @@ export default function Products() {
         totalPages = Math.max(1, nInt(res?.totalPages, 1));
         page += 1;
 
-        if (stockFilter === 'all' && allRows.length >= PRODUCT_SEARCH_LIMIT) break;
+        if (allRows.length >= PRODUCT_SEARCH_LIMIT) break;
       } while (page <= totalPages);
 
-      setSearchResults(stockFilter === 'all' ? allRows.slice(0, PRODUCT_SEARCH_LIMIT) : allRows);
+      setSearchResults(allRows.slice(0, PRODUCT_SEARCH_LIMIT));
       setSearchResultsTotal(total);
     } catch (err) {
       if (requestId !== latestSearchRequestRef.current) return;
@@ -578,12 +578,12 @@ export default function Products() {
   }, [loadCategories]);
 
   useEffect(() => {
-    if (nText(deferredSearchTerm)) return;
+    if (nText(debouncedSearchTerm)) return;
     loadProducts();
-  }, [deferredSearchTerm, loadProducts]);
+  }, [debouncedSearchTerm, loadProducts]);
 
   useEffect(() => {
-    const term = nText(deferredSearchTerm);
+    const term = nText(debouncedSearchTerm);
     if (!term) {
       latestSearchRequestRef.current += 1;
       setSearchResults([]);
@@ -592,25 +592,25 @@ export default function Products() {
       return;
     }
     loadSearchProducts(term);
-  }, [deferredSearchTerm, loadSearchProducts]);
+  }, [debouncedSearchTerm, loadSearchProducts]);
 
   const refreshVisibleProducts = useCallback(async () => {
-    const term = nText(deferredSearchTerm);
+    const term = nText(debouncedSearchTerm);
     if (term) {
       await Promise.all([loadProducts(true), loadSearchProducts(term, true)]);
       return;
     }
     await loadProducts(true);
-  }, [deferredSearchTerm, loadProducts, loadSearchProducts]);
+  }, [debouncedSearchTerm, loadProducts, loadSearchProducts]);
 
   const handleRefresh = useCallback(() => {
-    const term = nText(deferredSearchTerm);
+    const term = nText(debouncedSearchTerm);
     if (term) {
       loadSearchProducts(term);
       return;
     }
     loadProducts(true);
-  }, [deferredSearchTerm, loadProducts, loadSearchProducts]);
+  }, [debouncedSearchTerm, loadProducts, loadSearchProducts]);
 
   const categoryMap = useMemo(() => {
     const map = new Map();
@@ -618,7 +618,7 @@ export default function Products() {
     return map;
   }, [categories]);
 
-  const isSearchMode = nText(deferredSearchTerm).length > 0;
+  const isSearchMode = nText(debouncedSearchTerm).length > 0;
   const activeProducts = isSearchMode ? searchResults : products;
 
   const preparedProducts = useMemo(() => (

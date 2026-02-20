@@ -89,6 +89,9 @@ export default function Returns() {
     const [showConfirm, setShowConfirm] = useState(false);
     const [searchResults, setSearchResults] = useState([]);
     const [showSearchResults, setShowSearchResults] = useState(false);
+    const [rightTab, setRightTab] = useState('search');
+    const [prodSearch, setProdSearch] = useState('');
+    const [allVariants, setAllVariants] = useState([]);
 
     const selCust = useMemo(() => sess?.customerId ? customers.find(c => c.id === sess.customerId) || null : null, [sess?.customerId, customers]);
     const [custSales, setCustSales] = useState([]);
@@ -100,7 +103,7 @@ export default function Returns() {
     const cartCount = useMemo(() => cart.reduce((s, i) => s + i.returnQty, 0), [cart]);
 
     // ─── Init ───
-    useEffect(() => { (async () => { setLoading(true); try { const [c, m] = await Promise.all([window.api.getCustomers(), window.api.getPaymentMethods()]); if (!c?.error) setCustomers(Array.isArray(c) ? c : (c?.data || [])); if (!m?.error) setPM(filterPosPaymentMethods(m || []).filter(isCashMethod)); } catch (e) { console.error(e) } finally { setLoading(false) } })() }, []);
+    useEffect(() => { (async () => { setLoading(true); try { const [c, m, v] = await Promise.all([window.api.getCustomers(), window.api.getPaymentMethods(), window.api.getVariants()]); if (!c?.error) setCustomers(Array.isArray(c) ? c : (c?.data || [])); if (!m?.error) setPM(filterPosPaymentMethods(m || []).filter(isCashMethod)); if (!v?.error) setAllVariants(Array.isArray(v) ? v : []); } catch (e) { console.error(e) } finally { setLoading(false) } })() }, []);
     useEffect(() => {
         if (!paymentMethods.length) return;
         const selected = String(sess?.paymentMethodId || '');
@@ -115,7 +118,7 @@ export default function Returns() {
     useEffect(() => { const h = (e) => { if (custDDRef.current && !custDDRef.current.contains(e.target)) setShowCL(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, []);
     useEffect(() => { setCustIdx(-1) }, [custSearch]);
     useEffect(() => { if (custIdx >= 0 && custListRef.current) { const it = custListRef.current.querySelectorAll('[data-ci]'); if (it[custIdx]) it[custIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } }, [custIdx]);
-    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setSearchResults([]); setShowSearchResults(false); }, [activeId]);
+    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setSearchResults([]); setShowSearchResults(false); setProdSearch(''); }, [activeId]);
 
     // ─── Filtered Customers ───
     const filtCust = useMemo(() => { if (!Array.isArray(customers)) return []; if (showCustList && !custSearch) return customers.slice(0, 50); if (!custSearch) return []; const t = custSearch.toLowerCase(); return customers.filter(c => c.name.toLowerCase().includes(t) || c.phone?.includes(t)).slice(0, 20); }, [customers, custSearch, showCustList]);
@@ -129,6 +132,45 @@ export default function Returns() {
     useEffect(() => { if (!selSale) { setSaleItems([]); return; } const rMap = {}; if (selSale.returns && Array.isArray(selSale.returns)) for (const r of selSale.returns) if (r.items) for (const ri of r.items) rMap[ri.variantId] = (rMap[ri.variantId] || 0) + ri.quantity; setSaleItems(selSale.items.map(item => { const ar = rMap[item.variantId] || 0; return { itemId: `${selSale.id}-${item.variantId}`, saleId: selSale.id, variantId: item.variantId, productName: item.variant?.product?.name || 'محذوف', size: item.variant?.productSize || '-', color: item.variant?.color || '-', price: item.price, barcode: item.variant?.barcode || '', soldQty: item.quantity, alreadyReturned: ar, maxQuantity: Math.max(0, item.quantity - ar), dbSku: item.variant?.product?.sku || '' }; })); }, [selSale]);
 
     const ageDays = (s) => Math.floor((new Date() - new Date(s.createdAt)) / 86400000);
+
+    // ─── Customer variant map (tracks what variants exist in customer invoices) ───
+    const customerVariantMap = useMemo(() => {
+        const map = {};
+        if (!custSales || !Array.isArray(custSales)) return map;
+        for (const sale of custSales) {
+            if (!sale.items) continue;
+            for (const item of sale.items) {
+                const vid = item.variantId;
+                if (!map[vid]) map[vid] = { soldQty: 0, returnedQty: 0 };
+                map[vid].soldQty += item.quantity;
+            }
+            if (sale.returns && Array.isArray(sale.returns)) {
+                for (const r of sale.returns) if (r.items) for (const ri of r.items) {
+                    if (map[ri.variantId]) map[ri.variantId].returnedQty += ri.quantity;
+                }
+            }
+        }
+        for (const vid in map) map[vid].remainingQty = Math.max(0, map[vid].soldQty - map[vid].returnedQty);
+        return map;
+    }, [custSales]);
+
+    // ─── Filtered products for search tab ───
+    const filteredProds = useMemo(() => {
+        if (!prodSearch || prodSearch.trim() === '') return [];
+        const term = prodSearch.toLowerCase();
+        const groups = {};
+        for (const v of allVariants) {
+            const nameMatch = v.product?.name?.toLowerCase().includes(term);
+            const barcodeMatch = v.barcode && String(v.barcode).includes(prodSearch);
+            const skuMatch = v.product?.sku && String(v.product.sku).toLowerCase().includes(term);
+            if (!nameMatch && !barcodeMatch && !skuMatch) continue;
+            const pid = v.productId;
+            if (!groups[pid]) groups[pid] = { id: pid, name: v.product?.name || '', basePrice: v.price, variants: [], totalQuantity: 0 };
+            groups[pid].variants.push(v);
+            groups[pid].totalQuantity += v.quantity || 0;
+        }
+        return Object.values(groups).slice(0, 20);
+    }, [allVariants, prodSearch]);
 
     // ─── Return progress for invoice ───
     const getReturnProgress = (sale) => { if (!sale.items || !sale.returns) return 0; let total = 0, returned = 0; for (const it of sale.items) total += it.quantity; if (sale.returns) for (const r of sale.returns) if (r.items) for (const ri of r.items) returned += ri.quantity; return total > 0 ? Math.round((returned / total) * 100) : 0; };
@@ -194,6 +236,44 @@ export default function Returns() {
     const updPrice = (id, val) => upd({ cart: cart.map(c => c.itemId === id ? { ...c, price: Math.max(0, toNumber(val)) } : c) });
     const rmCart = (id) => upd({ cart: cart.filter(c => c.itemId !== id) });
 
+    // ─── Add from product search tab (with customer invoice validation) ───
+    const addFromSearch = (variant) => {
+        if (selCust) {
+            const info = customerVariantMap[variant.id];
+            if (!info || info.soldQty === 0) {
+                showToast('⚠️ هذا المنتج غير موجود في فواتير هذا العميل!', 'error');
+                playBeep(false);
+                return;
+            }
+            if (info.remainingQty <= 0) {
+                showToast('⚠️ تم إرجاع كامل الكمية المباعة من هذا المنتج', 'warning');
+                playBeep(false);
+                return;
+            }
+            // Find the first sale with remaining quantity for this variant
+            for (const sale of custSales) {
+                if (!sale.items) continue;
+                const saleItem = sale.items.find(i => i.variantId === variant.id);
+                if (!saleItem) continue;
+                const rMap = {};
+                if (sale.returns && Array.isArray(sale.returns))
+                    for (const r of sale.returns) if (r.items) for (const ri of r.items) rMap[ri.variantId] = (rMap[ri.variantId] || 0) + ri.quantity;
+                const ar = rMap[variant.id] || 0;
+                const remaining = saleItem.quantity - ar;
+                if (remaining > 0) {
+                    addToCart({ itemId: `${sale.id}-${variant.id}`, saleId: sale.id, variantId: variant.id, productName: variant.product?.name || '', size: variant.productSize || '-', color: variant.color || '-', price: saleItem.price, barcode: variant.barcode || '', soldQty: saleItem.quantity, alreadyReturned: ar, maxQuantity: remaining });
+                    playBeep(true);
+                    return;
+                }
+            }
+            showToast('⚠️ تم إرجاع كامل الكمية المباعة', 'warning');
+            playBeep(false);
+        } else {
+            addToCart({ itemId: `free-${variant.id}`, saleId: null, variantId: variant.id, productName: variant.product?.name || '', size: variant.productSize || '-', color: variant.color || '-', price: variant.price, barcode: variant.barcode || '', maxQuantity: Infinity });
+            playBeep(true);
+        }
+    };
+
     // ─── Return ALL items from invoice ───
     const returnAllItems = () => { if (!saleItems.length) return; let added = 0; const prev = [...(sess.cart || [])]; for (const item of saleItems) { if (item.maxQuantity <= 0) continue; const ex = prev.find(c => c.itemId === item.itemId); if (!ex) { prev.push({ ...item, returnQty: item.maxQuantity }); added++; } else if (ex.returnQty < item.maxQuantity) { ex.returnQty = item.maxQuantity; added++; } } upd({ cart: prev }); showToast(`تم إضافة ${added} صنف للسلة`, 'success'); };
 
@@ -240,53 +320,115 @@ export default function Returns() {
 
             {/* ═══ Main ═══ */}
             <div style={{ display: 'flex', gap: 20, flex: 1, overflow: 'hidden' }}>
-                {/* ── LEFT: Search + Invoices ── */}
+                {/* ── LEFT: Product Search & Invoices (Tabbed) ── */}
                 <div style={{ flex: 2, display: 'flex', flexDirection: 'column', backgroundColor: '#fff', padding: 15, borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,.1)' }}>
-                    {/* Search */}
-                    <div style={{ display: 'flex', gap: 10, marginBottom: 15, alignItems: 'center', position: 'relative' }}>
-                        <input ref={searchRef} type="text" placeholder="🔍 اكتب #رقم_فاتورة أو اسم/باركود منتج..." value={searchTerm} onChange={e => { setSearch(e.target.value); setShowSearchResults(false); }} onKeyDown={e => { if (e.key === 'Enter') handleSearchSubmit(e); if (e.key === 'Escape') { setShowSearchResults(false); setSearch(''); } }} style={{ padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 16, flex: 1, minWidth: 200 }} autoFocus />
-                        <div style={{ display: 'flex', gap: 4, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
-                            <button onClick={() => { setBarcode(false); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: !barcodeMode ? '#fff' : 'transparent', color: !barcodeMode ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: !barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📝 اسم</button>
-                            <button onClick={() => { setBarcode(true); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: barcodeMode ? '#fff' : 'transparent', color: barcodeMode ? '#dc2626' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📦 باركود</button>
-                        </div>
-                        {/* Multi-result dropdown */}
-                        {showSearchResults && searchResults.length > 0 && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 5, maxHeight: 250, overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,.1)' }}>
-                            <div style={{ padding: '8px 12px', backgroundColor: '#f9fafb', fontSize: 12, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>اختر المنتج ({searchResults.length} نتيجة)</div>
-                            {searchResults.map((r, i) => <div key={i} onClick={() => { addToCart(r); setShowSearchResults(false); setSearch(''); searchRef.current?.focus(); }} style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', transition: 'background .15s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f0f9ff'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}>
-                                <div><div style={{ fontWeight: 'bold', fontSize: 13 }}>{r.productName}</div><div style={{ fontSize: 11, color: '#6b7280' }}>{r.size} - {r.color} {r.barcode ? `| ${r.barcode}` : ''}</div></div>
-                                <span style={{ fontWeight: 'bold', color: '#059669' }}>{r.price} ج.م</span>
-                            </div>)}
-                        </div>}
+                    {/* Tab Switcher */}
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 12, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
+                        <button onClick={() => setRightTab('search')} style={{ flex: 1, padding: '9px 12px', borderRadius: 6, border: 'none', backgroundColor: rightTab === 'search' ? '#fff' : 'transparent', color: rightTab === 'search' ? '#dc2626' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: rightTab === 'search' ? '0 1px 3px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>🔍 بحث المنتجات{filteredProds.length > 0 && <span style={{ marginRight: 4, fontSize: 10, backgroundColor: '#fee2e2', color: '#dc2626', padding: '1px 6px', borderRadius: 10 }}>{filteredProds.length}</span>}</button>
+                        <button onClick={() => setRightTab('invoices')} style={{ flex: 1, padding: '9px 12px', borderRadius: 6, border: 'none', backgroundColor: rightTab === 'invoices' ? '#fff' : 'transparent', color: rightTab === 'invoices' ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: rightTab === 'invoices' ? '0 1px 3px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📋 فواتير العميل{selCust && custSales.length > 0 && <span style={{ marginRight: 4, fontSize: 10, backgroundColor: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: 10 }}>{custSales.length}</span>}</button>
                     </div>
 
-                    {/* Invoice History or Empty */}
-                    {selCust ? (
-                        <div style={{ flex: 1, overflowY: 'auto' }}>
-                            <div style={{ fontSize: 13, color: '#4b5563', fontWeight: 'bold', marginBottom: 10 }}>📋 سجل الفواتير ({custSales.length})</div>
-                            {custSales.length === 0 ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 16, fontWeight: 'bold', textAlign: 'center', padding: 40 }}><div><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div>لا يوجد فواتير</div></div>
-                                : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{custSales.map(sale => {
-                                    const ag = ageDays(sale), old = ag > 14, isSel = selSale?.id === sale.id, prog = getReturnProgress(sale);
-                                    return <div key={sale.id} style={{ border: `2px solid ${isSel ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', transition: 'all .2s', borderLeft: isSel ? '4px solid #3b82f6' : undefined }}>
-                                        <div onClick={() => { setSelSale(isSel ? null : sale); }} style={{ padding: '10px 14px', backgroundColor: isSel ? '#eff6ff' : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background .2s' }} onMouseEnter={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#f9fafb' }} onMouseLeave={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#fff' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                                                <span style={{ fontWeight: 'bold', color: isSel ? '#1e40af' : '#1f2937', fontSize: 13 }}>#{sale.id}</span>
-                                                <span style={{ fontSize: 11, color: '#6b7280' }}>{new Date(sale.createdAt).toLocaleDateString('ar-EG')}</span>
-                                                {old && <span style={{ fontSize: 10, backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: 4 }}>⚠️ {ag} يوم</span>}
-                                                {prog > 0 && <div style={{ flex: 1, maxWidth: 80, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden', marginRight: 5 }}><div style={{ width: `${prog}%`, height: '100%', backgroundColor: prog >= 100 ? '#10b981' : '#f59e0b', borderRadius: 3, transition: 'width .3s' }} /></div>}
-                                                {prog > 0 && <span style={{ fontSize: 10, color: prog >= 100 ? '#10b981' : '#f59e0b' }}>{prog}%</span>}
-                                            </div>
-                                            <span style={{ fontWeight: 'bold', color: '#059669', fontSize: 13 }}>{sale.total?.toFixed(2)}</span>
-                                        </div>
-                                        {isSel && <div style={{ backgroundColor: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
-                                            {old && <div style={{ padding: '8px 14px', backgroundColor: '#fef3c7', fontSize: 12, color: '#92400e', borderBottom: '1px solid #fde68a' }}>⚠️ فاتورة قديمة ({ag} يوم)</div>}
-                                            <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'flex-end' }}><button onClick={e => { e.stopPropagation(); returnAllItems(); }} style={{ padding: '5px 12px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>↩ إرجاع كل الفاتورة</button></div>
-                                            <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead style={{ backgroundColor: '#f9fafb' }}><tr><th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 12, color: '#4b5563' }}>المنتج</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}>بيع/مرتجع</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}>سعر</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}></th></tr></thead>
-                                                <tbody>{saleItems.map(it => <tr key={it.itemId} style={{ borderBottom: '1px solid #e5e7eb' }}><td style={{ padding: '8px 12px', fontSize: 13 }}><div style={{ fontWeight: 'bold' }}>{it.productName}</div><div style={{ fontSize: 11, color: '#6b7280' }}>{it.size} - {it.color}</div></td><td style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12 }}>{it.soldQty}{it.alreadyReturned > 0 && <span style={{ color: '#ef4444', fontSize: 11 }}> ({it.alreadyReturned}↩)</span>}</td><td style={{ padding: '8px 12px', textAlign: 'center', color: '#059669', fontWeight: 'bold', fontSize: 13 }}>{it.price}</td><td style={{ padding: '8px 12px', textAlign: 'center' }}>{it.maxQuantity > 0 ? <button onClick={e => { e.stopPropagation(); addToCart(it); }} style={{ padding: '5px 12px', backgroundColor: '#e0f2fe', border: '1px solid #93c5fd', color: '#1e40af', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 'bold', transition: 'all .2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#bfdbfe'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#e0f2fe'}>+ ({it.maxQuantity})</button> : <span style={{ fontSize: 11, color: '#9ca3af', backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>✓ تم</span>}</td></tr>)}</tbody></table>
-                                        </div>}
-                                    </div>;
-                                })}</div>}
+                    {rightTab === 'search' ? (<>
+                        {/* Product Search */}
+                        <div style={{ marginBottom: 12, position: 'relative' }}>
+                            <input type="text" placeholder="🔍 ابحث بالاسم أو الباركود..." value={prodSearch} onChange={e => setProdSearch(e.target.value)} style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, boxSizing: 'border-box' }} autoFocus />
+                            {prodSearch && <button onClick={() => setProdSearch('')} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 18 }}>×</button>}
                         </div>
-                    ) : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#9ca3af', fontSize: 18, fontWeight: 'bold', textAlign: 'center', padding: 40 }}><div><div style={{ fontSize: 48, marginBottom: 10 }}>👤</div><div>اختر عميل أو اكتب <span style={{ color: '#3b82f6' }}>#رقم_فاتورة</span></div><div style={{ fontSize: 12, marginTop: 10, color: '#d1d5db' }}>مثال: #1234</div></div></div>}
+                        {/* Product Cards Grid */}
+                        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto' }}>
+                            {filteredProds.length === 0 ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', textAlign: 'center', padding: 40 }}>
+                                    <div><div style={{ fontSize: 48, marginBottom: 10 }}>{prodSearch ? '🔎' : '📦'}</div><div style={{ fontSize: 14, fontWeight: 'bold' }}>{prodSearch ? 'لا توجد نتائج' : 'ابحث عن منتج لإرجاعه'}</div></div>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                                    {filteredProds.map(prod => {
+                                        const hasCust = !!selCust;
+                                        const prodInInvoice = hasCust && prod.variants.some(v => customerVariantMap[v.id]?.soldQty > 0);
+                                        const prodFullyReturned = hasCust && prodInInvoice && prod.variants.every(v => !customerVariantMap[v.id] || customerVariantMap[v.id].remainingQty <= 0);
+                                        const borderColor = !hasCust ? '#e5e7eb' : prodInInvoice ? (prodFullyReturned ? '#fbbf24' : '#10b981') : '#e5e7eb';
+                                        return (
+                                            <div key={prod.id} style={{ border: `2px solid ${borderColor}`, borderRadius: 10, padding: 10, cursor: 'pointer', backgroundColor: '#fff', transition: 'all .2s', boxShadow: '0 1px 3px rgba(0,0,0,.05)', position: 'relative', opacity: hasCust && !prodInInvoice ? 0.55 : 1 }}
+                                                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,.12)'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,.05)'; }}>
+                                                {/* Status badge */}
+                                                {hasCust && <div style={{ position: 'absolute', top: 6, left: 6, fontSize: 10, padding: '1px 5px', borderRadius: 4, backgroundColor: prodInInvoice ? (prodFullyReturned ? '#fef3c7' : '#ecfdf5') : '#f3f4f6', color: prodInInvoice ? (prodFullyReturned ? '#92400e' : '#047857') : '#9ca3af', fontWeight: 'bold' }}>
+                                                    {prodInInvoice ? (prodFullyReturned ? '↩ مكتمل' : '✅ مُباع') : '⚠️ غير مُباع'}
+                                                </div>}
+                                                <div style={{ fontWeight: 'bold', fontSize: 13, color: '#1f2937', marginTop: hasCust ? 22 : 0, marginBottom: 4, lineHeight: 1.3 }}>{prod.name}</div>
+                                                <div style={{ color: '#059669', fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>{prod.basePrice?.toFixed(2)} ج.م</div>
+                                                {prod.variants.length > 1 && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{prod.variants.length} مقاس</div>}
+                                                {/* Return info */}
+                                                {hasCust && prodInInvoice && <div style={{ fontSize: 10, color: '#4b5563', backgroundColor: '#f0fdf4', borderRadius: 4, padding: '3px 5px', marginBottom: 4, border: '1px solid #bbf7d0' }}>
+                                                    {prod.variants.filter(v => customerVariantMap[v.id]).map(v => {
+                                                        const info = customerVariantMap[v.id];
+                                                        return <div key={v.id}>{v.productSize || v.color || '-'}: بيع {info.soldQty} | مرتجع {info.returnedQty} | <b style={{ color: info.remainingQty > 0 ? '#059669' : '#ef4444' }}>متبقي {info.remainingQty}</b></div>;
+                                                    })}
+                                                </div>}
+                                                {/* Variant buttons */}
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                                    {prod.variants.length === 1 ? (
+                                                        <button onClick={() => addFromSearch(prod.variants[0])} style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #93c5fd', backgroundColor: '#e0f2fe', color: '#1e40af', cursor: 'pointer', fontSize: 12, fontWeight: 'bold', transition: 'all .2s' }}
+                                                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#bfdbfe'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#e0f2fe'}>+ إضافة</button>
+                                                    ) : prod.variants.map(v => {
+                                                        const vInfo = selCust ? customerVariantMap[v.id] : null;
+                                                        const vAvail = !selCust || (vInfo && vInfo.remainingQty > 0);
+                                                        return <button key={v.id} onClick={() => addFromSearch(v)} disabled={selCust && !vAvail}
+                                                            style={{ padding: '4px 8px', borderRadius: 5, border: `1px solid ${vAvail ? '#93c5fd' : '#e5e7eb'}`, backgroundColor: vAvail ? '#e0f2fe' : '#f9fafb', color: vAvail ? '#1e40af' : '#9ca3af', cursor: vAvail ? 'pointer' : 'not-allowed', fontSize: 11, fontWeight: 'bold', transition: 'all .2s' }}
+                                                            title={vInfo ? `بيع: ${vInfo.soldQty} | متبقي: ${vInfo.remainingQty}` : ''}>{v.productSize || v.color || '-'}{vInfo ? ` (${vInfo.remainingQty})` : ''}</button>;
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </>) : (<>
+                        {/* Search (invoice# / barcode) */}
+                        <div style={{ display: 'flex', gap: 10, marginBottom: 15, alignItems: 'center', position: 'relative' }}>
+                            <input ref={searchRef} type="text" placeholder="🔍 اكتب #رقم_فاتورة أو اسم/باركود منتج..." value={searchTerm} onChange={e => { setSearch(e.target.value); setShowSearchResults(false); }} onKeyDown={e => { if (e.key === 'Enter') handleSearchSubmit(e); if (e.key === 'Escape') { setShowSearchResults(false); setSearch(''); } }} style={{ padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 16, flex: 1, minWidth: 200 }} autoFocus />
+                            <div style={{ display: 'flex', gap: 4, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
+                                <button onClick={() => { setBarcode(false); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: !barcodeMode ? '#fff' : 'transparent', color: !barcodeMode ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: !barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📝 اسم</button>
+                                <button onClick={() => { setBarcode(true); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: barcodeMode ? '#fff' : 'transparent', color: barcodeMode ? '#dc2626' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📦 باركود</button>
+                            </div>
+                            {showSearchResults && searchResults.length > 0 && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 5, maxHeight: 250, overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,.1)' }}>
+                                <div style={{ padding: '8px 12px', backgroundColor: '#f9fafb', fontSize: 12, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>اختر المنتج ({searchResults.length} نتيجة)</div>
+                                {searchResults.map((r, i) => <div key={i} onClick={() => { addToCart(r); setShowSearchResults(false); setSearch(''); searchRef.current?.focus(); }} style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', transition: 'background .15s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f0f9ff'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}>
+                                    <div><div style={{ fontWeight: 'bold', fontSize: 13 }}>{r.productName}</div><div style={{ fontSize: 11, color: '#6b7280' }}>{r.size} - {r.color} {r.barcode ? `| ${r.barcode}` : ''}</div></div>
+                                    <span style={{ fontWeight: 'bold', color: '#059669' }}>{r.price} ج.م</span>
+                                </div>)}
+                            </div>}
+                        </div>
+                        {/* Invoice History or Empty */}
+                        {selCust ? (
+                            <div style={{ flex: 1, overflowY: 'auto' }}>
+                                <div style={{ fontSize: 13, color: '#4b5563', fontWeight: 'bold', marginBottom: 10 }}>📋 سجل الفواتير ({custSales.length})</div>
+                                {custSales.length === 0 ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 16, fontWeight: 'bold', textAlign: 'center', padding: 40 }}><div><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div>لا يوجد فواتير</div></div>
+                                    : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{custSales.map(sale => {
+                                        const ag = ageDays(sale), old = ag > 14, isSel = selSale?.id === sale.id, prog = getReturnProgress(sale);
+                                        return <div key={sale.id} style={{ border: `2px solid ${isSel ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', transition: 'all .2s', borderLeft: isSel ? '4px solid #3b82f6' : undefined }}>
+                                            <div onClick={() => { setSelSale(isSel ? null : sale); }} style={{ padding: '10px 14px', backgroundColor: isSel ? '#eff6ff' : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background .2s' }} onMouseEnter={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#f9fafb' }} onMouseLeave={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#fff' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                                                    <span style={{ fontWeight: 'bold', color: isSel ? '#1e40af' : '#1f2937', fontSize: 13 }}>#{sale.id}</span>
+                                                    <span style={{ fontSize: 11, color: '#6b7280' }}>{new Date(sale.createdAt).toLocaleDateString('ar-EG')}</span>
+                                                    {old && <span style={{ fontSize: 10, backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: 4 }}>⚠️ {ag} يوم</span>}
+                                                    {prog > 0 && <div style={{ flex: 1, maxWidth: 80, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden', marginRight: 5 }}><div style={{ width: `${prog}%`, height: '100%', backgroundColor: prog >= 100 ? '#10b981' : '#f59e0b', borderRadius: 3, transition: 'width .3s' }} /></div>}
+                                                    {prog > 0 && <span style={{ fontSize: 10, color: prog >= 100 ? '#10b981' : '#f59e0b' }}>{prog}%</span>}
+                                                </div>
+                                                <span style={{ fontWeight: 'bold', color: '#059669', fontSize: 13 }}>{sale.total?.toFixed(2)}</span>
+                                            </div>
+                                            {isSel && <div style={{ backgroundColor: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                                                {old && <div style={{ padding: '8px 14px', backgroundColor: '#fef3c7', fontSize: 12, color: '#92400e', borderBottom: '1px solid #fde68a' }}>⚠️ فاتورة قديمة ({ag} يوم)</div>}
+                                                <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'flex-end' }}><button onClick={e => { e.stopPropagation(); returnAllItems(); }} style={{ padding: '5px 12px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}>↩ إرجاع كل الفاتورة</button></div>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead style={{ backgroundColor: '#f9fafb' }}><tr><th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 12, color: '#4b5563' }}>المنتج</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}>بيع/مرتجع</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}>سعر</th><th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: '#4b5563' }}></th></tr></thead>
+                                                    <tbody>{saleItems.map(it => <tr key={it.itemId} style={{ borderBottom: '1px solid #e5e7eb' }}><td style={{ padding: '8px 12px', fontSize: 13 }}><div style={{ fontWeight: 'bold' }}>{it.productName}</div><div style={{ fontSize: 11, color: '#6b7280' }}>{it.size} - {it.color}</div></td><td style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12 }}>{it.soldQty}{it.alreadyReturned > 0 && <span style={{ color: '#ef4444', fontSize: 11 }}> ({it.alreadyReturned}↩)</span>}</td><td style={{ padding: '8px 12px', textAlign: 'center', color: '#059669', fontWeight: 'bold', fontSize: 13 }}>{it.price}</td><td style={{ padding: '8px 12px', textAlign: 'center' }}>{it.maxQuantity > 0 ? <button onClick={e => { e.stopPropagation(); addToCart(it); }} style={{ padding: '5px 12px', backgroundColor: '#e0f2fe', border: '1px solid #93c5fd', color: '#1e40af', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 'bold', transition: 'all .2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#bfdbfe'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#e0f2fe'}>+ ({it.maxQuantity})</button> : <span style={{ fontSize: 11, color: '#9ca3af', backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>✓ تم</span>}</td></tr>)}</tbody></table>
+                                            </div>}
+                                        </div>;
+                                    })}</div>}
+                            </div>
+                        ) : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#9ca3af', fontSize: 18, fontWeight: 'bold', textAlign: 'center', padding: 40 }}><div><div style={{ fontSize: 48, marginBottom: 10 }}>👤</div><div>اختر عميل أو اكتب <span style={{ color: '#3b82f6' }}>#رقم_فاتورة</span></div><div style={{ fontSize: 12, marginTop: 10, color: '#d1d5db' }}>مثال: #1234</div></div></div>}
+                    </>)}
                 </div>
 
                 {/* ── RIGHT: Cart + Customer ── */}

@@ -81,14 +81,11 @@ export default function Returns() {
     const searchRef = useRef(null);
     const custDDRef = useRef(null);
     const custListRef = useRef(null);
-    const [barcodeMode, setBarcode] = useState(true);
     const [searchTerm, setSearch] = useState('');
     const [custSearch, setCustSearch] = useState('');
     const [showCustList, setShowCL] = useState(false);
     const [custIdx, setCustIdx] = useState(-1);
     const [showConfirm, setShowConfirm] = useState(false);
-    const [searchResults, setSearchResults] = useState([]);
-    const [showSearchResults, setShowSearchResults] = useState(false);
     const [rightTab, setRightTab] = useState('search');
     const [prodSearch, setProdSearch] = useState('');
     const [allVariants, setAllVariants] = useState([]);
@@ -112,13 +109,13 @@ export default function Returns() {
     }, [paymentMethods, sess?.paymentMethodId, upd]);
 
     // ─── Keys ───
-    useEffect(() => { const h = (e) => { if (showConfirm) return; if (e.key === 'F1') { e.preventDefault(); handleCheckoutFlow(); } else if (e.key === 'F3') { e.preventDefault(); setBarcode(p => !p); } else if (e.key === 'F4') { e.preventDefault(); searchRef.current?.focus(); } else if (e.key === 'F5') { e.preventDefault(); const ci = document.querySelector('input[placeholder*="ابحث عن عميل"]'); if (ci) ci.focus(); } else if (e.key === 'Escape' && cart.length > 0) { e.preventDefault(); upd({ cart: [] }); showToast('تم إفراغ السلة', 'warning'); } }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h) }, [cart, showConfirm, upd]);
+    useEffect(() => { const h = (e) => { if (showConfirm) return; if (e.key === 'F1') { e.preventDefault(); handleCheckoutFlow(); } else if (e.key === 'F4') { e.preventDefault(); searchRef.current?.focus(); } else if (e.key === 'F5') { e.preventDefault(); const ci = document.querySelector('input[placeholder*="ابحث عن عميل"]'); if (ci) ci.focus(); } else if (e.key === 'Escape' && cart.length > 0) { e.preventDefault(); upd({ cart: [] }); showToast('تم إفراغ السلة', 'warning'); } }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h) }, [cart, showConfirm, upd]);
 
     // ─── Click outside ───
     useEffect(() => { const h = (e) => { if (custDDRef.current && !custDDRef.current.contains(e.target)) setShowCL(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, []);
     useEffect(() => { setCustIdx(-1) }, [custSearch]);
     useEffect(() => { if (custIdx >= 0 && custListRef.current) { const it = custListRef.current.querySelectorAll('[data-ci]'); if (it[custIdx]) it[custIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } }, [custIdx]);
-    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setSearchResults([]); setShowSearchResults(false); setProdSearch(''); }, [activeId]);
+    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setProdSearch(''); }, [activeId]);
 
     // ─── Filtered Customers ───
     const filtCust = useMemo(() => { if (!Array.isArray(customers)) return []; if (showCustList && !custSearch) return customers.slice(0, 50); if (!custSearch) return []; const t = custSearch.toLowerCase(); return customers.filter(c => c.name.toLowerCase().includes(t) || c.phone?.includes(t)).slice(0, 20); }, [customers, custSearch, showCustList]);
@@ -175,56 +172,40 @@ export default function Returns() {
     // ─── Return progress for invoice ───
     const getReturnProgress = (sale) => { if (!sale.items || !sale.returns) return 0; let total = 0, returned = 0; for (const it of sale.items) total += it.quantity; if (sale.returns) for (const r of sale.returns) if (r.items) for (const ri of r.items) returned += ri.quantity; return total > 0 ? Math.round((returned / total) * 100) : 0; };
 
-    // ─── Search with invoice# support + multi-result ───
+    // ─── Invoice lookup (invoice number only) ───
     const handleSearchSubmit = async (e) => {
         e.preventDefault();
         const term = searchTerm.trim();
         if (!term) return;
-        // Invoice number search: #123
-        if (term.startsWith('#')) {
-            const id = parseInt(term.slice(1));
-            if (!id) { showToast('رقم فاتورة غير صالح', 'error'); return; }
-            setLoading(true);
-            try {
-                const sale = await window.api.getSaleById(id);
-                if (sale?.error) { showToast(sale.error, 'error'); } else {
-                    // Auto-set customer
-                    if (sale.customer) { upd({ customerId: sale.customer.id, customerName: sale.customer.name }); }
-                    setSelSale(sale);
-                    setCustSales(prev => { const exists = prev.find(s => s.id === sale.id); return exists ? prev : [sale, ...prev]; });
-                    showToast(`تم تحميل فاتورة #${id}`, 'success');
-                }
-            } catch (er) { console.error(er); showToast('خطأ في جلب الفاتورة', 'error'); }
-            finally { setLoading(false); setSearch(''); searchRef.current?.focus(); }
+        const invoiceNo = term.startsWith('#') ? term.slice(1).trim() : term;
+        if (!/^\d+$/.test(invoiceNo)) {
+            showToast('اكتب رقم فاتورة صحيح فقط (مثال: #1234)', 'error');
             return;
         }
-        // Product search
+        const id = Number(invoiceNo);
+        if (!Number.isInteger(id) || id <= 0) {
+            showToast('رقم فاتورة غير صالح', 'error');
+            return;
+        }
         setLoading(true);
         try {
-            // Search in selected invoice first
-            if (selSale && saleItems.length > 0) {
-                const m = saleItems.find(i => (i.barcode && String(i.barcode) === term) || (i.dbSku && String(i.dbSku).toLowerCase() === term.toLowerCase()));
-                if (m) { if (m.maxQuantity <= 0) showToast('تم إرجاع كل الكمية مسبقاً', 'warning'); else addToCart(m); setSearch(''); setLoading(false); searchRef.current?.focus(); playBeep(true); return; }
+            const sale = await window.api.getSaleById(id);
+            if (sale?.error) { showToast(sale.error, 'error'); }
+            else {
+                const selectedCustomerId = selCust?.id ? String(selCust.id) : '';
+                const saleCustomerId = sale?.customer?.id ? String(sale.customer.id) : '';
+                if (selCust && selectedCustomerId !== saleCustomerId) {
+                    showToast('هذه الفاتورة غير مسجلة على العميل المحدد', 'error');
+                    setSearch('');
+                    return;
+                }
+                if (!selCust && sale.customer) { upd({ customerId: sale.customer.id, customerName: sale.customer.name }); }
+                setSelSale(sale);
+                setCustSales(prev => { const exists = prev.find(s => s.id === sale.id); return exists ? prev : [sale, ...prev]; });
+                showToast(`تم تحميل فاتورة #${id}`, 'success');
             }
-            const res = await window.api.getProducts({ searchTerm: term, limit: 10 });
-            const products = Array.isArray(res) ? res : (res?.data || []);
-            // Exact barcode match
-            let mv = null;
-            for (const p of products) if (p.variants?.length > 0) { mv = p.variants.find(v => String(v.barcode) === term); if (mv) { mv.product = p; break; } }
-            if (mv) { addToCart({ itemId: `free-${mv.id}`, saleId: null, variantId: mv.id, productName: mv.product.name, size: mv.productSize || '-', color: mv.color || '-', price: mv.price, maxQuantity: Infinity }); setSearch(''); playBeep(true); }
-            else if (products.length === 1 && products[0].variants?.length === 1) {
-                const v = products[0].variants[0];
-                addToCart({ itemId: `free-${v.id}`, saleId: null, variantId: v.id, productName: products[0].name, size: v.productSize || '-', color: v.color || '-', price: v.price, maxQuantity: Infinity });
-                setSearch(''); playBeep(true);
-            } else if (products.length > 0) {
-                // Show multi-result dropdown
-                const results = [];
-                for (const p of products) if (p.variants) for (const v of p.variants) results.push({ itemId: `free-${v.id}`, saleId: null, variantId: v.id, productName: p.name, size: v.productSize || '-', color: v.color || '-', price: v.price, barcode: v.barcode, maxQuantity: Infinity });
-                setSearchResults(results.slice(0, 15));
-                setShowSearchResults(true);
-            } else { showToast('لم يتم العثور على المنتج!', 'error'); playBeep(false); }
-        } catch (er) { console.error(er); }
-        finally { setLoading(false); if (barcodeMode) searchRef.current?.focus(); }
+        } catch (er) { console.error(er); showToast('خطأ في جلب الفاتورة', 'error'); }
+        finally { setLoading(false); searchRef.current?.focus(); }
     };
 
     // ─── Sound ───
@@ -385,20 +366,9 @@ export default function Returns() {
                             )}
                         </div>
                     </>) : (<>
-                        {/* Search (invoice# / barcode) */}
+                        {/* Search (invoice number only) */}
                         <div style={{ display: 'flex', gap: 10, marginBottom: 15, alignItems: 'center', position: 'relative' }}>
-                            <input ref={searchRef} type="text" placeholder="🔍 اكتب #رقم_فاتورة أو اسم/باركود منتج..." value={searchTerm} onChange={e => { setSearch(e.target.value); setShowSearchResults(false); }} onKeyDown={e => { if (e.key === 'Enter') handleSearchSubmit(e); if (e.key === 'Escape') { setShowSearchResults(false); setSearch(''); } }} style={{ padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 16, flex: 1, minWidth: 200 }} autoFocus />
-                            <div style={{ display: 'flex', gap: 4, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
-                                <button onClick={() => { setBarcode(false); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: !barcodeMode ? '#fff' : 'transparent', color: !barcodeMode ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: !barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📝 اسم</button>
-                                <button onClick={() => { setBarcode(true); searchRef.current?.focus(); }} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: barcodeMode ? '#fff' : 'transparent', color: barcodeMode ? '#dc2626' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: barcodeMode ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📦 باركود</button>
-                            </div>
-                            {showSearchResults && searchResults.length > 0 && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 5, maxHeight: 250, overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,.1)' }}>
-                                <div style={{ padding: '8px 12px', backgroundColor: '#f9fafb', fontSize: 12, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>اختر المنتج ({searchResults.length} نتيجة)</div>
-                                {searchResults.map((r, i) => <div key={i} onClick={() => { addToCart(r); setShowSearchResults(false); setSearch(''); searchRef.current?.focus(); }} style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', transition: 'background .15s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f0f9ff'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}>
-                                    <div><div style={{ fontWeight: 'bold', fontSize: 13 }}>{r.productName}</div><div style={{ fontSize: 11, color: '#6b7280' }}>{r.size} - {r.color} {r.barcode ? `| ${r.barcode}` : ''}</div></div>
-                                    <span style={{ fontWeight: 'bold', color: '#059669' }}>{r.price} ج.م</span>
-                                </div>)}
-                            </div>}
+                            <input ref={searchRef} type="text" placeholder="🔍 ابحث برقم الفاتورة فقط (مثال: #1234)" value={searchTerm} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSearchSubmit(e); if (e.key === 'Escape') setSearch(''); }} style={{ padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 16, flex: 1, minWidth: 200 }} autoFocus />
                         </div>
                         {/* Invoice History or Empty */}
                         {selCust ? (

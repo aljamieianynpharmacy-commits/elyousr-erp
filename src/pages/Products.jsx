@@ -7,6 +7,35 @@ import { safeConfirm } from '../utils/safeConfirm';
 import { safePrint } from '../printing/safePrint';
 import './Products.css';
 
+// Extracted components
+import ProductsMetrics from '../components/products/ProductsMetrics';
+import ProductsFilters from '../components/products/ProductsFilters';
+import ProductsTableTools from '../components/products/ProductsTableTools';
+import CategoryModal from '../components/products/CategoryModal';
+import ImportModal from '../components/products/ImportModal';
+import BarcodeStudioModal from '../components/products/BarcodeStudioModal';
+import {
+  getGridHeight, nText, nKey, nInt, nNum, money, csv,
+  stock, unitsOf, mainUnitOf, salePriceOf, costPriceOf, wholesale,
+  DEFAULT_UNIT, DEFAULT_CATEGORY, GRID_COLUMNS, SORT_PRESETS,
+  DEFAULT_VISIBLE_COLUMN_KEYS
+} from '../utils/productUtils';
+import {
+  BARCODE_FORMAT_OPTIONS, BARCODE_CODE_SOURCE_OPTIONS, BARCODE_LABEL_PRESETS,
+  BARCODE_STUDIO_TABS, DEFAULT_BARCODE_STUDIO,
+  sanitizeBarcodeStudioSettings, barcodeValueFromSource, normalizeBarcodeByFormat,
+  buildBarcodeLabels, barcodeStudioHtml, barcodeRows,
+  isMatrixBarcodeFormat,
+  BARCODE_STUDIO_STORAGE_KEY,
+  BARCODE_TEMPLATE_STORAGE_KEY,
+  sanitizeBarcodeTemplate,
+  parseBarcodeTemplates
+} from '../utils/barcodeUtils';
+import {
+  IMPORT_FIELD_OPTIONS, parseLine, delimiter, toImportHeaders,
+  buildImportFieldAutoMapping, mapRowsWithImportMapping, importGroups
+} from '../utils/importUtils';
+
 const loadProductModal = () => import('../components/products/ProductModal');
 const ProductModal = lazy(loadProductModal);
 
@@ -14,564 +43,17 @@ const PRODUCT_FETCH_CHUNK = 10000;
 const PRODUCT_SEARCH_LIMIT = 120;
 const PRODUCT_SEARCH_DEBOUNCE_MS = 120;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
-const BARCODE_STUDIO_STORAGE_KEY = 'products.barcodeStudio.v1';
-const BARCODE_TEMPLATE_STORAGE_KEY = 'products.barcodeTemplates.v1';
-const DEFAULT_UNIT = 'قطعة';
 
-const GRID_COLUMNS = [
-  { key: 'select', label: '', width: '52px', required: true, minWidth: '52px' },
-  { key: 'code', label: 'الكود', width: 'minmax(100px, 1fr)', minWidth: '100px' },
-  { key: 'name', label: 'اسم الصنف', width: 'minmax(200px, 2fr)', minWidth: '200px' },
-  { key: 'warehouse', label: 'المخزن', width: 'minmax(80px, 1fr)', minWidth: '80px' },
-  { key: 'unit', label: 'الوحدة', width: 'minmax(70px, 1fr)', minWidth: '70px' },
-  { key: 'quantity', label: 'الكمية', width: 'minmax(80px, 1fr)', minWidth: '80px' },
-  { key: 'salePrice', label: 'سعر البيع', width: 'minmax(100px, 1fr)', minWidth: '100px' },
-  { key: 'costPrice', label: 'سعر التكلفة', width: 'minmax(100px, 1fr)', minWidth: '100px' },
-  { key: 'wholesalePrice', label: 'سعر الجملة', width: 'minmax(100px, 1fr)', minWidth: '100px' },
-  { key: 'saleLimit', label: 'حد البيع', width: 'minmax(80px, 1fr)', minWidth: '80px' },
-  { key: 'notes', label: 'الملاحظات', width: 'minmax(150px, 1.5fr)', minWidth: '150px' },
-  { key: 'category', label: 'الفئة', width: 'minmax(150px, 1.5fr)', minWidth: '150px' },
-  { key: 'variants', label: 'المتغيرات', width: 'minmax(80px, 1fr)', minWidth: '80px' },
-  { key: 'stockState', label: 'حالة المخزون', width: 'minmax(130px, 1fr)', minWidth: '130px' },
-  { key: 'updatedAt', label: 'آخر تحديث', width: 'minmax(100px, 1fr)', minWidth: '100px' },
-  { key: 'actions', label: 'إجراءات', width: '180px', required: true, minWidth: '180px' }
-];
 
-const DEFAULT_VISIBLE_COLUMN_KEYS = GRID_COLUMNS.filter((col) => !col.required).map((col) => col.key);
 
-const getGridHeight = () => {
-  if (typeof window === 'undefined') return 460;
-  const reserved = window.innerWidth < 900 ? 380 : 280;
-  return Math.max(260, window.innerHeight - reserved);
-};
 
-const SORT_PRESETS = [
-  { id: 'latest', label: 'الأحدث', sortCol: 'createdAt', sortDir: 'desc' },
-  { id: 'oldest', label: 'الأقدم', sortCol: 'createdAt', sortDir: 'asc' },
-  { id: 'name_asc', label: 'الاسم (أ - ي)', sortCol: 'name', sortDir: 'asc' },
-  { id: 'name_desc', label: 'الاسم (ي - أ)', sortCol: 'name', sortDir: 'desc' },
-  { id: 'price_desc', label: 'السعر الأعلى', sortCol: 'basePrice', sortDir: 'desc' },
-  { id: 'price_asc', label: 'السعر الأقل', sortCol: 'basePrice', sortDir: 'asc' }
-];
 
-const DEFAULT_CATEGORY = { name: '', description: '', color: '#0f766e', icon: '🧵' };
-const MM_TO_PX = 3.7795275591;
 
-const BARCODE_FORMAT_OPTIONS = [
-  { value: 'CODE128', label: 'CODE128 (يدعم نص/أرقام)' },
-  { value: 'CODE128A', label: 'CODE128A (رموز وتحكم)' },
-  { value: 'CODE128B', label: 'CODE128B (نص/حروف كبيرة وصغيرة)' },
-  { value: 'CODE128C', label: 'CODE128C (أرقام زوجية فقط)' },
-  { value: 'QRCODE', label: 'QR Code (ثنائي الأبعاد)' },
-  { value: 'DATAMATRIX', label: 'DataMatrix (ثنائي الأبعاد)' },
-  { value: 'CODE39', label: 'CODE39 (حروف كبيرة وأرقام)' },
-  { value: 'CODE93', label: 'CODE93 (قياسي)' },
-  { value: 'CODE93FullASCII', label: 'CODE93 Full ASCII' },
-  { value: 'EAN13', label: 'EAN-13 (12/13 رقم)' },
-  { value: 'EAN8', label: 'EAN-8 (7/8 رقم)' },
-  { value: 'EAN5', label: 'EAN-5 (5 أرقام)' },
-  { value: 'EAN2', label: 'EAN-2 (رقمان)' },
-  { value: 'UPC', label: 'UPC-A (11/12 رقم)' },
-  { value: 'UPCE', label: 'UPC-E (6/7/8 أرقام)' },
-  { value: 'ITF14', label: 'ITF-14 (14 رقم)' },
-  { value: 'ITF', label: 'ITF (أرقام زوجية الطول)' },
-  { value: 'MSI', label: 'MSI (أرقام)' },
-  { value: 'MSI10', label: 'MSI10 (Checksum Mod10)' },
-  { value: 'MSI11', label: 'MSI11 (Checksum Mod11)' },
-  { value: 'MSI1010', label: 'MSI1010 (Double Mod10)' },
-  { value: 'MSI1110', label: 'MSI1110 (Mod11 + Mod10)' },
-  { value: 'pharmacode', label: 'Pharmacode' },
-  { value: 'codabar', label: 'Codabar' }
-];
 
-const MATRIX_BARCODE_FORMATS = new Set(['QRCODE', 'DATAMATRIX']);
-const isMatrixBarcodeFormat = (format) => MATRIX_BARCODE_FORMATS.has(format);
 
-const BARCODE_CODE_SOURCE_OPTIONS = [
-  { value: 'auto', label: 'تلقائي (متغير ثم منتج ثم SKU)' },
-  { value: 'variant', label: 'باركود المتغير فقط' },
-  { value: 'product', label: 'باركود المنتج فقط' },
-  { value: 'sku', label: 'SKU فقط' }
-];
 
-const BARCODE_LABEL_PRESETS = [
-  { id: 'small', label: 'صغير 38×25 مم', widthMm: 38, heightMm: 25 },
-  { id: 'medium', label: 'متوسط 50×30 مم', widthMm: 50, heightMm: 30 },
-  { id: 'large', label: 'كبير 58×40 مم', widthMm: 58, heightMm: 40 },
-  { id: 'custom', label: 'مخصص', widthMm: null, heightMm: null }
-];
 
-const BARCODE_STUDIO_TABS = [
-  { id: 'templates', label: 'القوالب', hint: 'حفظ واسترجاع إعدادات الطباعة حسب الطابعة والمقاس.' },
-  { id: 'source', label: 'النوع والمصدر', hint: 'اختيار نوع الباركود ومن أين يُقرأ الكود.' },
-  { id: 'layout', label: 'المقاس والتخطيط', hint: 'التحكم في أبعاد الملصق، الأعمدة، والهوامش.' },
-  { id: 'design', label: 'التصميم', hint: 'ألوان الملصق، أحجام الخطوط، وعناصر العرض.' }
-];
 
-const DEFAULT_BARCODE_STUDIO = {
-  format: 'CODE128',
-  codeSource: 'auto',
-  presetId: 'medium',
-  labelWidthMm: 50,
-  labelHeightMm: 30,
-  columns: 4,
-  copiesPerItem: 1,
-  pageMarginMm: 6,
-  gapXMm: 4,
-  gapYMm: 4,
-  paddingMm: 2,
-  barcodeHeightMm: 12,
-  barcodeWidthPx: 1.8,
-  nameFontPx: 12,
-  metaFontPx: 10,
-  priceFontPx: 12,
-  textAlign: 'center',
-  lineColor: '#0f172a',
-  cardBackground: '#ffffff',
-  borderColor: '#cbd5e1',
-  showBorder: true,
-  showName: true,
-  showSku: true,
-  showVariant: true,
-  showPrice: true,
-  showCode: true
-};
-
-const inRange = (value, fallback, min, max) => {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.min(max, Math.max(min, num));
-};
-
-const sanitizeBarcodeStudioSettings = (raw = {}) => {
-  const presetIds = new Set(BARCODE_LABEL_PRESETS.map((preset) => preset.id));
-  const allowedFormats = new Set(BARCODE_FORMAT_OPTIONS.map((option) => option.value));
-  const allowedSources = new Set(BARCODE_CODE_SOURCE_OPTIONS.map((option) => option.value));
-  const allowedAlign = new Set(['center', 'right', 'left']);
-
-  return {
-    format: allowedFormats.has(raw.format) ? raw.format : DEFAULT_BARCODE_STUDIO.format,
-    codeSource: allowedSources.has(raw.codeSource) ? raw.codeSource : DEFAULT_BARCODE_STUDIO.codeSource,
-    presetId: presetIds.has(raw.presetId) ? raw.presetId : DEFAULT_BARCODE_STUDIO.presetId,
-    labelWidthMm: inRange(raw.labelWidthMm, DEFAULT_BARCODE_STUDIO.labelWidthMm, 20, 120),
-    labelHeightMm: inRange(raw.labelHeightMm, DEFAULT_BARCODE_STUDIO.labelHeightMm, 15, 90),
-    columns: Math.round(inRange(raw.columns, DEFAULT_BARCODE_STUDIO.columns, 1, 8)),
-    copiesPerItem: Math.round(inRange(raw.copiesPerItem, DEFAULT_BARCODE_STUDIO.copiesPerItem, 1, 50)),
-    pageMarginMm: inRange(raw.pageMarginMm, DEFAULT_BARCODE_STUDIO.pageMarginMm, 0, 20),
-    gapXMm: inRange(raw.gapXMm, DEFAULT_BARCODE_STUDIO.gapXMm, 0, 20),
-    gapYMm: inRange(raw.gapYMm, DEFAULT_BARCODE_STUDIO.gapYMm, 0, 20),
-    paddingMm: inRange(raw.paddingMm, DEFAULT_BARCODE_STUDIO.paddingMm, 0, 10),
-    barcodeHeightMm: inRange(raw.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 40),
-    barcodeWidthPx: inRange(raw.barcodeWidthPx, DEFAULT_BARCODE_STUDIO.barcodeWidthPx, 1, 6),
-    nameFontPx: Math.round(inRange(raw.nameFontPx, DEFAULT_BARCODE_STUDIO.nameFontPx, 8, 22)),
-    metaFontPx: Math.round(inRange(raw.metaFontPx, DEFAULT_BARCODE_STUDIO.metaFontPx, 7, 18)),
-    priceFontPx: Math.round(inRange(raw.priceFontPx, DEFAULT_BARCODE_STUDIO.priceFontPx, 8, 22)),
-    textAlign: allowedAlign.has(raw.textAlign) ? raw.textAlign : DEFAULT_BARCODE_STUDIO.textAlign,
-    lineColor: nText(raw.lineColor) || DEFAULT_BARCODE_STUDIO.lineColor,
-    cardBackground: nText(raw.cardBackground) || DEFAULT_BARCODE_STUDIO.cardBackground,
-    borderColor: nText(raw.borderColor) || DEFAULT_BARCODE_STUDIO.borderColor,
-    showBorder: raw.showBorder !== false,
-    showName: raw.showName !== false,
-    showSku: raw.showSku !== false,
-    showVariant: raw.showVariant !== false,
-    showPrice: raw.showPrice !== false,
-    showCode: raw.showCode !== false
-  };
-};
-
-const escapeHtml = (value) => String(value ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
-
-const mmToPx = (value, fallback = 10) => Math.max(1, Math.round(inRange(value, fallback, 0.1, 200) * MM_TO_PX));
-
-const barcodeValueFromSource = (row, source) => {
-  const variantBarcode = nText(row.variantBarcode);
-  const productBarcode = nText(row.productBarcode);
-  const skuValue = nText(row.sku);
-
-  switch (source) {
-    case 'variant':
-      return variantBarcode;
-    case 'product':
-      return productBarcode;
-    case 'sku':
-      return skuValue;
-    case 'auto':
-    default:
-      return variantBarcode || productBarcode || skuValue || nText(row.code);
-  }
-};
-
-const normalizeBarcodeByFormat = (value, format) => {
-  const text = nText(value);
-  if (!text) return null;
-  if (
-    format === 'CODE128'
-    || format === 'CODE128A'
-    || format === 'CODE128B'
-    || format === 'CODE93FullASCII'
-    || format === 'QRCODE'
-    || format === 'DATAMATRIX'
-  ) return text;
-
-  const digits = text.replace(/\D/g, '');
-  const upperText = text.toUpperCase();
-
-  switch (format) {
-    case 'CODE128C':
-      if (!digits || digits.length % 2 !== 0) return null;
-      return digits;
-    case 'CODE39': {
-      const cleaned = upperText.replace(/\s+/g, ' ');
-      return /^[0-9A-Z\-\. $\/\+%]+$/.test(cleaned) ? cleaned : null;
-    }
-    case 'CODE93': {
-      const cleaned = upperText.replace(/\s+/g, ' ');
-      return /^[0-9A-Z\-\. $\/\+%]+$/.test(cleaned) ? cleaned : null;
-    }
-    case 'EAN13':
-      if (!digits) return null;
-      if (digits.length >= 13) return digits.slice(0, 13);
-      if (digits.length === 12) return digits;
-      return null;
-    case 'EAN8':
-      if (!digits) return null;
-      if (digits.length >= 8) return digits.slice(0, 8);
-      if (digits.length === 7) return digits;
-      return null;
-    case 'EAN5':
-      if (!digits) return null;
-      if (digits.length >= 5) return digits.slice(0, 5);
-      return null;
-    case 'EAN2':
-      if (!digits) return null;
-      if (digits.length >= 2) return digits.slice(0, 2);
-      return null;
-    case 'UPC':
-      if (!digits) return null;
-      if (digits.length >= 12) return digits.slice(0, 12);
-      if (digits.length === 11) return digits;
-      return null;
-    case 'UPCE':
-      if (!digits) return null;
-      if (digits.length >= 8) return digits.slice(0, 8);
-      if (digits.length === 6 || digits.length === 7) return digits;
-      return null;
-    case 'ITF14':
-      if (!digits) return null;
-      if (digits.length >= 14) return digits.slice(0, 14);
-      return null;
-    case 'ITF':
-      if (!digits || digits.length % 2 !== 0) return null;
-      return digits;
-    case 'MSI':
-    case 'MSI10':
-    case 'MSI11':
-    case 'MSI1010':
-    case 'MSI1110':
-    case 'pharmacode':
-      return digits || null;
-    case 'codabar': {
-      const cleaned = upperText.replace(/\s+/g, '');
-      if (!/^[0-9A-D\-\$:\/\.\+]+$/.test(cleaned)) return null;
-      const startsWithGuard = /^[A-D]/.test(cleaned);
-      const endsWithGuard = /[A-D]$/.test(cleaned);
-      if (startsWithGuard && endsWithGuard) return cleaned;
-      return `A${cleaned}A`;
-    }
-    default:
-      return text;
-  }
-};
-
-const buildBarcodeSvg = (value, settings, bwipLibrary = null) => {
-  if (typeof document === 'undefined') return '';
-
-  if (isMatrixBarcodeFormat(settings.format)) {
-    if (!bwipLibrary || typeof bwipLibrary.toSVG !== 'function') {
-      return '';
-    }
-
-    const bcid = settings.format === 'QRCODE' ? 'qrcode' : 'datamatrix';
-
-    try {
-      const svg = bwipLibrary.toSVG({
-        bcid,
-        text: value,
-        scale: Math.max(1, Math.round(inRange(settings.barcodeWidthPx, 2, 1, 6))),
-        width: inRange(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 80),
-        height: inRange(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm, 6, 80),
-        padding: 0,
-        includetext: false,
-        barcolor: settings.lineColor
-      });
-      return typeof svg === 'string' ? svg : '';
-    } catch (err) {
-      return '';
-    }
-  }
-
-  try {
-    const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    let isValid = true;
-
-    JsBarcode(svgNode, value, {
-      format: settings.format,
-      width: settings.barcodeWidthPx,
-      height: mmToPx(settings.barcodeHeightMm, DEFAULT_BARCODE_STUDIO.barcodeHeightMm),
-      margin: 0,
-      lineColor: settings.lineColor,
-      displayValue: false,
-      background: 'transparent',
-      valid: (valid) => { isValid = valid; }
-    });
-
-    return isValid ? svgNode.outerHTML : '';
-  } catch (err) {
-    return '';
-  }
-};
-
-const buildBarcodeLabels = (rows, settings, limit = Number.POSITIVE_INFINITY, bwipLibrary = null) => {
-  const labels = [];
-  const invalidRows = [];
-  const copies = Math.max(1, Math.round(inRange(settings.copiesPerItem, 1, 1, 50)));
-
-  for (const row of rows) {
-    const rawCode = barcodeValueFromSource(row, settings.codeSource);
-    const normalizedCode = normalizeBarcodeByFormat(rawCode, settings.format);
-    if (!normalizedCode) {
-      invalidRows.push({ row, reason: 'invalid-format' });
-      continue;
-    }
-
-    const svg = buildBarcodeSvg(normalizedCode, settings, bwipLibrary);
-    if (!svg) {
-      invalidRows.push({ row, reason: 'render-failed' });
-      continue;
-    }
-
-    const base = {
-      ...row,
-      code: normalizedCode,
-      barcodeSvg: svg
-    };
-
-    for (let idx = 0; idx < copies; idx += 1) {
-      labels.push(base);
-      if (labels.length >= limit) {
-        return { labels, invalidRows };
-      }
-    }
-  }
-
-  return { labels, invalidRows };
-};
-
-const barcodeStudioHtml = (labels, settings) => {
-  const safe = sanitizeBarcodeStudioSettings(settings);
-  const textAlign = safe.textAlign === 'left' ? 'left' : safe.textAlign === 'right' ? 'right' : 'center';
-  const isMatrixFormat = isMatrixBarcodeFormat(safe.format);
-  const cards = labels.map((label) => {
-    const size = nText(label.size);
-    const color = nText(label.color);
-    const hasVariant = (size && size !== 'موحد') || (color && color !== '-');
-    const variantText = [size && size !== 'موحد' ? size : '', color && color !== '-' ? color : ''].filter(Boolean).join(' / ');
-
-    return `
-      <article class="label">
-        ${safe.showName ? `<div class="name">${escapeHtml(label.name || 'منتج')}</div>` : ''}
-        ${safe.showSku ? `<div class="meta">SKU: ${escapeHtml(label.sku || '-')}</div>` : ''}
-        ${safe.showVariant && hasVariant ? `<div class="meta">${escapeHtml(variantText)}</div>` : ''}
-        <div class="barcode ${isMatrixFormat ? 'matrix' : 'linear'}">${label.barcodeSvg}</div>
-        ${safe.showCode ? `<div class="code">${escapeHtml(label.code || '')}</div>` : ''}
-        ${safe.showPrice ? `<div class="price">${Number(label.price || 0).toFixed(2)} ج.م</div>` : ''}
-      </article>
-    `;
-  }).join('');
-
-  return `<!doctype html>
-  <html lang="ar" dir="rtl">
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>ملصقات باركود المنتجات</title>
-      <style>
-        @page { margin: ${safe.pageMarginMm}mm; }
-        * { box-sizing: border-box; }
-        body {
-          margin: 0;
-          padding: ${safe.pageMarginMm}mm;
-          font-family: Tahoma, "Segoe UI", sans-serif;
-          background: #f8fafc;
-        }
-        .sheet {
-          display: grid;
-          grid-template-columns: repeat(${safe.columns}, ${safe.labelWidthMm}mm);
-          justify-content: center;
-          column-gap: ${safe.gapXMm}mm;
-          row-gap: ${safe.gapYMm}mm;
-        }
-        .label {
-          width: ${safe.labelWidthMm}mm;
-          min-height: ${safe.labelHeightMm}mm;
-          background: ${safe.cardBackground};
-          border: ${safe.showBorder ? `1px solid ${safe.borderColor}` : 'none'};
-          border-radius: 3mm;
-          padding: ${safe.paddingMm}mm;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          text-align: ${textAlign};
-          break-inside: avoid;
-          gap: 1.1mm;
-        }
-        .name {
-          font-size: ${safe.nameFontPx}px;
-          font-weight: 700;
-          line-height: 1.25;
-          color: #0f172a;
-        }
-        .meta {
-          font-size: ${safe.metaFontPx}px;
-          color: #334155;
-          line-height: 1.2;
-        }
-        .barcode {
-          width: 100%;
-          min-height: ${safe.barcodeHeightMm}mm;
-          display: grid;
-          place-items: center;
-        }
-        .barcode.linear svg {
-          width: 100%;
-          height: ${safe.barcodeHeightMm}mm;
-          display: block;
-        }
-        .barcode.matrix svg {
-          width: auto;
-          max-width: 100%;
-          height: ${safe.barcodeHeightMm}mm;
-          display: block;
-        }
-        .code {
-          font-size: ${safe.metaFontPx}px;
-          font-weight: 700;
-          letter-spacing: 0.3px;
-          color: #111827;
-        }
-        .price {
-          font-size: ${safe.priceFontPx}px;
-          font-weight: 700;
-          color: #065f46;
-          line-height: 1.2;
-        }
-      </style>
-    </head>
-    <body>
-      <section class="sheet">${cards}</section>
-    </body>
-  </html>`;
-};
-
-const nText = (v) => String(v ?? '').trim();
-const nKey = (v) => nText(v).toLowerCase().replace(/[\s_-]+/g, '');
-const nInt = (v, f = 0) => {
-  const x = parseInt(String(v ?? '').replace(/[^0-9-]/g, ''), 10);
-  return Number.isFinite(x) ? x : f;
-};
-const nNum = (v, f = 0) => {
-  const x = parseFloat(String(v ?? '').replace(/[^0-9.,-]/g, '').replace(/,/g, '.'));
-  return Number.isFinite(x) ? x : f;
-};
-const money = (v) => {
-  const num = Number(v || 0);
-  // إذا كان الرقم عدد صحيح، عرضه بدون كسور عشرية
-  if (Number.isInteger(num)) {
-    return num.toLocaleString('ar-EG');
-  }
-  // إذا كان عدد عشري، عرضه بحد أقصى منزلتين عشريتين وإزالة الأصفار الزائدة
-  return num.toLocaleString('ar-EG', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-};
-const csv = (v) => {
-  const s = String(v ?? '');
-  return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-const normalizeTemplateValue = (value, maxLength = 64) => nText(value).slice(0, maxLength);
-
-const sanitizeBarcodeTemplate = (template, fallbackIndex = 1) => {
-  const now = Date.now();
-  const createdAt = Number.isFinite(Number(template?.createdAt)) ? Number(template.createdAt) : now;
-  const updatedAt = Number.isFinite(Number(template?.updatedAt)) ? Number(template.updatedAt) : createdAt;
-
-  return {
-    id: nText(template?.id) || `barcode-template-${createdAt}-${fallbackIndex}`,
-    name: normalizeTemplateValue(template?.name, 80) || `قالب ${fallbackIndex}`,
-    printer: normalizeTemplateValue(template?.printer, 80),
-    settings: sanitizeBarcodeStudioSettings(template?.settings),
-    createdAt,
-    updatedAt
-  };
-};
-
-const parseBarcodeTemplates = (rawValue) => {
-  if (!rawValue) return [];
-
-  try {
-    const parsed = JSON.parse(rawValue);
-    if (!Array.isArray(parsed)) return [];
-
-    const uniqueIds = new Set();
-    const sanitized = [];
-
-    parsed.forEach((item, index) => {
-      const template = sanitizeBarcodeTemplate(item, index + 1);
-      if (uniqueIds.has(template.id)) return;
-      uniqueIds.add(template.id);
-      sanitized.push(template);
-    });
-
-    return sanitized.sort((a, b) => b.updatedAt - a.updatedAt);
-  } catch (err) {
-    return [];
-  }
-};
-
-const stock = (p) => {
-  const variantsTotal = (p.variants || []).reduce((s, v) => s + nInt(v.quantity), 0);
-  const total = nInt(p.inventory?.totalQuantity, variantsTotal);
-  const min = nInt(p.inventory?.minStock, 5);
-  if (total <= 0) return { key: 'out', label: 'نافد', tone: 'danger', total, min };
-  if (total <= min) return { key: 'low', label: 'منخفض', tone: 'warning', total, min };
-  return { key: 'ok', label: 'متاح', tone: 'success', total, min };
-};
-
-const unitsOf = (product) => (Array.isArray(product?.productUnits) ? product.productUnits : []);
-const mainUnitOf = (product) => {
-  const units = unitsOf(product);
-  if (!units.length) return null;
-  return units.find((unit) => nNum(unit.conversionFactor, 1) === 1) || units[0];
-};
-const salePriceOf = (product) => nNum(mainUnitOf(product)?.salePrice, nNum(product?.basePrice, 0));
-const costPriceOf = (product) => nNum(mainUnitOf(product)?.purchasePrice, nNum(product?.cost, 0));
-
-const wholesale = (product) => {
-  const mainUnit = mainUnitOf(product);
-  if (mainUnit) {
-    return nNum(mainUnit.wholesalePrice, nNum(mainUnit.salePrice, nNum(product?.basePrice, 0)));
-  }
-  const variants = Array.isArray(product?.variants) ? product.variants : [];
-  if (variants.length > 0) {
-    const prices = variants.map((variant) => nNum(variant.price, nNum(product.basePrice, 0)));
-    return Math.min(...prices);
-  }
-  return nNum(product?.basePrice, 0);
-};
 
 const useDebouncedValue = (value, delayMs) => {
   const [debounced, setDebounced] = useState(value);
@@ -584,210 +66,7 @@ const useDebouncedValue = (value, delayMs) => {
   return debounced;
 };
 
-const parseLine = (line, delim) => {
-  const out = [];
-  let cur = '';
-  let q = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const c = line[i];
-    const n = line[i + 1];
-    if (c === '"') {
-      if (q && n === '"') {
-        cur += '"';
-        i += 1;
-      } else q = !q;
-      continue;
-    }
-    if (c === delim && !q) {
-      out.push(cur.trim());
-      cur = '';
-    } else cur += c;
-  }
-  out.push(cur.trim());
-  return out;
-};
 
-const delimiter = (header) => {
-  const c = header.split(',').length;
-  const s = header.split(';').length;
-  const t = header.split('\t').length;
-  if (t >= c && t >= s) return '\t';
-  if (s > c) return ';';
-  return ',';
-};
-
-const IMPORT_FIELD_OPTIONS = [
-  { key: 'name', label: 'اسم المنتج', required: true, aliases: ['name', 'productname', 'اسم المنتج', 'اسم الصنف', 'الصنف'] },
-  { key: 'category', label: 'الفئة', aliases: ['category', 'categoryname', 'الفئة', 'التصنيف'] },
-  { key: 'brand', label: 'الماركة', aliases: ['brand', 'الماركة', 'العلامة التجارية'] },
-  { key: 'sku', label: 'SKU / كود', aliases: ['sku', 'code', 'productcode', 'كود', 'كود الصنف'] },
-  { key: 'barcode', label: 'باركود المنتج', aliases: ['barcode', 'productbarcode', 'باركود', 'باركود المنتج'] },
-  { key: 'description', label: 'الوصف', aliases: ['description', 'الوصف', 'desc'] },
-  { key: 'salePrice', label: 'سعر البيع', aliases: ['saleprice', 'price', 'sellingprice', 'سعر البيع', 'سعر'] },
-  { key: 'costPrice', label: 'سعر التكلفة', aliases: ['costprice', 'purchaseprice', 'cost', 'التكلفة', 'سعر التكلفة'] },
-  { key: 'image', label: 'صورة', aliases: ['image', 'photo', 'صورة', 'رابط الصورة'] },
-  { key: 'warehouseQty', label: 'كمية المخزن', aliases: ['warehouseqty', 'warehouse', 'مخزن', 'كمية المخزن'] },
-  { key: 'displayQty', label: 'كمية العرض', aliases: ['displayqty', 'display', 'عرض', 'كمية العرض'] },
-  { key: 'minStock', label: 'الحد الأدنى', aliases: ['minstock', 'minimumstock', 'الحد الأدنى', 'حد البيع'] },
-  { key: 'notes', label: 'ملاحظات', aliases: ['notes', 'note', 'ملاحظات'] },
-  { key: 'size', label: 'المقاس', aliases: ['size', 'productsize', 'المقاس'] },
-  { key: 'color', label: 'اللون', aliases: ['color', 'colour', 'اللون'] },
-  { key: 'variantBarcode', label: 'باركود المتغير', aliases: ['variantbarcode', 'barcodesizecolor', 'باركود المتغير'] },
-  { key: 'variantPrice', label: 'سعر المتغير', aliases: ['variantprice', 'pricevariant', 'سعر المتغير'] },
-  { key: 'variantCost', label: 'تكلفة المتغير', aliases: ['variantcost', 'costvariant', 'تكلفة المتغير'] },
-  { key: 'variantQty', label: 'كمية المتغير', aliases: ['variantqty', 'variantquantity', 'quantity', 'qty', 'كمية المتغير', 'الكمية'] }
-];
-
-const toImportHeaders = (headers) => (
-  headers.map((label, index) => {
-    const cleanLabel = nText(label) || `عمود ${index + 1}`;
-    return {
-      id: String(index),
-      index,
-      label: cleanLabel,
-      key: nKey(cleanLabel) || `column${index + 1}`
-    };
-  })
-);
-
-const buildImportFieldAutoMapping = (headers = []) => {
-  const mapping = Object.fromEntries(IMPORT_FIELD_OPTIONS.map((field) => [field.key, '']));
-  const usedHeaders = new Set();
-
-  IMPORT_FIELD_OPTIONS.forEach((field) => {
-    const aliasKeys = (field.aliases || []).map((alias) => nKey(alias)).filter(Boolean);
-    if (!aliasKeys.length) return;
-
-    let match = headers.find((header) => (
-      !usedHeaders.has(header.id)
-      && aliasKeys.some((alias) => header.key === alias)
-    ));
-
-    if (!match) {
-      match = headers.find((header) => (
-        !usedHeaders.has(header.id)
-        && aliasKeys.some((alias) => (
-          header.key.includes(alias)
-          || alias.includes(header.key)
-        ))
-      ));
-    }
-
-    if (match) {
-      mapping[field.key] = match.id;
-      usedHeaders.add(match.id);
-    }
-  });
-
-  return mapping;
-};
-
-const mapRowsWithImportMapping = (rows, mapping) => (
-  rows.map((values) => {
-    const mappedRow = {};
-
-    IMPORT_FIELD_OPTIONS.forEach((field) => {
-      const columnId = mapping?.[field.key];
-      if (columnId === undefined || columnId === null || columnId === '') {
-        mappedRow[field.key] = '';
-        return;
-      }
-
-      const columnIndex = Number(columnId);
-      mappedRow[field.key] = nText(values[columnIndex] ?? '');
-    });
-
-    return mappedRow;
-  })
-);
-
-const barcodeRows = (products) => {
-  const rows = [];
-  products.forEach((p) => {
-    const sku = nText(p.sku) || `P${p.id}`;
-    const vars = p.variants || [];
-    const mainUnit = mainUnitOf(p);
-    const productBarcode = nText(mainUnit?.barcode) || nText(p.barcode);
-
-    if (!vars.length) {
-      rows.push({
-        productId: p.id,
-        name: p.name || 'منتج',
-        sku,
-        size: 'موحد',
-        color: '-',
-        price: salePriceOf(p),
-        productBarcode,
-        variantBarcode: '',
-        code: productBarcode || `${sku}-STD`
-      });
-      return;
-    }
-
-    vars.forEach((v, idx) => rows.push({
-      productId: p.id,
-      name: p.name || 'منتج',
-      sku,
-      size: v.productSize || 'موحد',
-      color: v.color || '-',
-      price: Number(v.price || p.basePrice || 0),
-      productBarcode,
-      variantBarcode: nText(v.barcode),
-      code: nText(v.barcode) || productBarcode || `${sku}-${v.productSize || 'S'}-${v.color || idx + 1}`
-    }));
-  });
-  return rows;
-};
-
-const importGroups = (rows) => {
-  const groups = [];
-  let currentGroup = null;
-
-  for (const row of rows) {
-    const name = nText(row.name);
-    const isMain = Boolean(name);
-
-    if (isMain) {
-      if (currentGroup) groups.push(currentGroup);
-      currentGroup = {
-        product: {
-          name,
-          category: nText(row.category),
-          brand: nText(row.brand),
-          sku: nText(row.sku),
-          barcode: nText(row.barcode),
-          description: nText(row.description),
-          basePrice: nNum(row.salePrice || row.variantPrice, 0),
-          cost: nNum(row.costPrice || row.variantCost, 0),
-          image: nText(row.image)
-        },
-        inventory: {
-          warehouseQty: nInt(row.warehouseQty, 0),
-          displayQty: nInt(row.displayQty, 0),
-          minStock: nInt(row.minStock, 5),
-          maxStock: 100,
-          notes: nText(row.notes)
-        },
-        variants: []
-      };
-    }
-
-    if (currentGroup) {
-      const size = nText(row.size);
-      const color = nText(row.color);
-      const vBarcode = nText(row.variantBarcode);
-      const price = nNum(row.variantPrice, nNum(row.salePrice, 0));
-      const cost = nNum(row.variantCost, nNum(row.costPrice, 0));
-      const qty = nInt(row.variantQty, 0);
-
-      if (size || color || qty > 0 || vBarcode) {
-        currentGroup.variants.push({ size, color, barcode: vBarcode, price, cost, quantity: qty });
-      }
-    }
-  }
-  if (currentGroup) groups.push(currentGroup);
-  return groups;
-};
 
 const ProductGridRow = React.memo(({ index, style, data }) => {
   const {
@@ -983,7 +262,7 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState(null);
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [categoryForm, setCategoryForm] = useState(DEFAULT_CATEGORY);
+
   const [importSession, setImportSession] = useState(null);
   const [showBarcodeStudio, setShowBarcodeStudio] = useState(false);
   const [barcodeStudioProducts, setBarcodeStudioProducts] = useState([]);
@@ -2370,8 +1649,8 @@ export default function Products() {
     }
   };
 
-  const saveCategory = async () => {
-    const name = nText(categoryForm.name);
+  const saveCategory = async (categoryData) => {
+    const name = nText(categoryData.name);
     if (!name) {
       await safeAlert('اسم الفئة مطلوب', null, { type: 'warning', title: 'بيانات ناقصة' });
       return;
@@ -2379,9 +1658,9 @@ export default function Products() {
 
     const res = await window.api.addCategory({
       name,
-      description: nText(categoryForm.description) || null,
-      color: nText(categoryForm.color) || '#0f766e',
-      icon: nText(categoryForm.icon) || '🧵'
+      description: nText(categoryData.description) || null,
+      color: nText(categoryData.color) || '#0f766e',
+      icon: nText(categoryData.icon) || '🧵'
     });
 
     if (res?.error) {
@@ -2389,7 +1668,6 @@ export default function Products() {
       return;
     }
 
-    setCategoryForm(DEFAULT_CATEGORY);
     await loadCategories();
     notify('تم إضافة الفئة', 'success');
   };
@@ -2465,49 +1743,22 @@ export default function Products() {
 
       <input ref={importRef} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={importFile} />
 
-      <section className="products-metrics">
-        <article className="products-metric-card tone-main"><div className="icon-wrap">📦</div><div><h3>إجمالي الأصناف</h3><strong>{metrics.productsCount}</strong></div></article>
-        <article className="products-metric-card tone-blue"><div className="icon-wrap">🧩</div><div><h3>متغيرات الصفحة</h3><strong>{metrics.variantsCount}</strong></div></article>
-        <article className="products-metric-card tone-green"><div className="icon-wrap">🏪</div><div><h3>إجمالي المخزون</h3><strong>{metrics.stockTotal}</strong></div></article>
-        <article className="products-metric-card tone-amber"><div className="icon-wrap">⚠️</div><div><h3>منخفض/نافد</h3><strong>{metrics.lowStockCount}</strong></div></article>
-      </section>
+      <ProductsMetrics metrics={metrics} />
 
-      <section className="products-filters">
-        <label className="products-search">
-          <span className="products-search-emoji">🔍</span>
-          <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث بالاسم أو الكود أو الباركود" />
-          {searchTerm ? (
-            <button
-              type="button"
-              className="products-search-clear"
-              onClick={() => setSearchTerm('')}
-              aria-label="مسح البحث"
-            >
-              ✕
-            </button>
-          ) : null}
-        </label>
-
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-          <option value="">كل الفئات</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.icon || '📦'} {c.name}</option>)}
-        </select>
-
-        <select value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
-          <option value="all">كل الحالات</option>
-          <option value="available">متاح</option>
-          <option value="low">منخفض</option>
-          <option value="out">نافد</option>
-        </select>
-
-        <select value={sortPreset} onChange={(e) => setSortPreset(e.target.value)}>
-          {SORT_PRESETS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
-
-        <button type="button" className="products-btn products-btn-light" onClick={handleRefresh} disabled={refreshing || searchLoading}>
-          <span className={refreshing || searchLoading ? 'spin' : ''}>🔄</span> تحديث
-        </button>
-      </section>
+      <ProductsFilters
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        categoryFilter={categoryFilter}
+        setCategoryFilter={setCategoryFilter}
+        categories={categories}
+        stockFilter={stockFilter}
+        setStockFilter={setStockFilter}
+        sortPreset={sortPreset}
+        setSortPreset={setSortPreset}
+        handleRefresh={handleRefresh}
+        refreshing={refreshing}
+        searchLoading={searchLoading}
+      />
 
       {/* <div className="products-search-meta">
         {isSearchTyping || isSearchBusy ? <span className="pill searching">جاري البحث...</span> : null}
@@ -2516,44 +1767,19 @@ export default function Products() {
       </div> */}
 
       <section className="products-table-card">
-        <div className="products-table-tools">
-          <label className="check-control"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /> تحديد الكل</label>
-          <span>الظاهر: {displayedProducts.length}</span>
-          <span>المحدد: {selectedIds.size}</span>
-          <div className="columns-control" ref={columnsMenuRef}>
-            <button type="button" className="products-btn products-btn-light columns-trigger" onClick={() => setShowColumnMenu((prev) => !prev)}>
-              <span>الأعمدة</span>
-              <span>▼</span>
-            </button>
-            {showColumnMenu ? (
-              <div className="columns-menu">
-                <label className="column-option">
-                  <input
-                    type="checkbox"
-                    checked={showSearchRow}
-                    onChange={() => {
-                      setShowSearchRow((prev) => !prev);
-                      setShowColumnMenu(false);
-                    }}
-                  />
-                  <span style={{ marginRight: '2px' }}>🔍</span>
-                  <span>بحث متقدم</span>
-                </label>
-                <div className="columns-menu-divider" />
-                {GRID_COLUMNS.filter((column) => !column.required).map((column) => (
-                  <label key={column.key} className="column-option">
-                    <input
-                      type="checkbox"
-                      checked={visibleColumnKeys.includes(column.key)}
-                      onChange={() => toggleColumnVisibility(column.key)}
-                    />
-                    <span>{column.label}</span>
-                  </label>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </div>
+        <ProductsTableTools
+          allVisibleSelected={allVisibleSelected}
+          toggleVisible={toggleVisible}
+          displayedCount={displayedProducts.length}
+          selectedCount={selectedIds.size}
+          visibleColumnKeys={visibleColumnKeys}
+          toggleColumnVisibility={toggleColumnVisibility}
+          showSearchRow={showSearchRow}
+          setShowSearchRow={setShowSearchRow}
+        />
+
+
+
 
         <div className="products-grid-viewport" ref={gridViewportRef}>
           <div className="products-grid-scroll">
@@ -2614,456 +1840,72 @@ export default function Products() {
             )}
           </div>
         </div>
-      </section>
+      </section >
 
-      {showProductModal ? (
-        <Suspense fallback={null}>
-          <ProductModal
-            isOpen={showProductModal}
-            onClose={closeProductModal}
-            onSave={handleSaveProduct}
-            initialData={editingProduct}
-            categories={categories}
-            isSaving={saving}
-          />
-        </Suspense>
-      ) : null}
+      {
+        showProductModal ? (
+          <Suspense fallback={null} >
+            <ProductModal
+              isOpen={showProductModal}
+              onClose={closeProductModal}
+              onSave={handleSaveProduct}
+              initialData={editingProduct}
+              categories={categories}
+              isSaving={saving}
+            />
+          </Suspense>
+        ) : null
+      }
 
       {showBarcodeStudio ? (
-        <div className="products-modal-backdrop" onClick={closeBarcodeStudio}>
-          <div className="products-modal products-barcode-studio-modal" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <div className="products-import-headline">
-                <h2>استوديو الباركود</h2>
-                <p>{barcodeStudioProducts.length} منتج | {barcodeStudioRows.length} ملصق أساسي قبل التكرار</p>
-              </div>
-              <button type="button" className="icon-btn" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
-                ✕
-              </button>
-            </header>
-
-            <section className="products-modal-body barcode-studio-body">
-              <div className="barcode-studio-config">
-                <div className="barcode-studio-tabs-shell">
-                  <div className="barcode-studio-tabs" role="tablist" aria-label="أقسام إعدادات الباركود">
-                    {BARCODE_STUDIO_TABS.map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={barcodeStudioTab === tab.id}
-                        className={`barcode-studio-tab-btn ${barcodeStudioTab === tab.id ? 'active' : ''}`}
-                        onClick={() => setBarcodeStudioTab(tab.id)}
-                        disabled={barcodePrinting}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="barcode-studio-tab-hint">{activeBarcodeStudioTab.hint}</p>
-                  <div className="barcode-studio-quick-stats">
-                    <span>الصيغة: <strong>{barcodeStudioSafeSettings.format}</strong></span>
-                    <span>المقاس: <strong>{barcodeStudioSafeSettings.labelWidthMm}×{barcodeStudioSafeSettings.labelHeightMm} مم</strong></span>
-                    <span>الشبكة: <strong>{barcodeStudioSafeSettings.columns} عمود / {barcodeStudioSafeSettings.copiesPerItem} نسخة</strong></span>
-                    <span>القالب: <strong>{activeBarcodeTemplate?.name || 'مخصص'}</strong></span>
-                  </div>
-                </div>
-
-                {barcodeStudioTab === 'templates' ? (
-                  <div className="barcode-studio-section">
-                    <h3>قوالب الطباعة المحفوظة</h3>
-                    <div className="barcode-studio-grid two">
-                      <label>
-                        القالب المحفوظ
-                        <select
-                          value={activeBarcodeTemplateId}
-                          onChange={(e) => applyBarcodeTemplate(e.target.value)}
-                          disabled={barcodePrinting}
-                        >
-                          <option value="">بدون قالب محفوظ</option>
-                          {barcodeTemplates.map((template) => (
-                            <option key={template.id} value={template.id}>
-                              {template.name}{template.printer ? ` | ${template.printer}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        اسم الطابعة
-                        <input
-                          type="text"
-                          maxLength={80}
-                          placeholder="مثال: Zebra ZD220"
-                          value={barcodeTemplatePrinter}
-                          onChange={(e) => setBarcodeTemplatePrinter(e.target.value)}
-                          disabled={barcodePrinting}
-                        />
-                      </label>
-                      <label className="barcode-template-name-field">
-                        اسم القالب
-                        <input
-                          type="text"
-                          maxLength={80}
-                          placeholder="مثال: 50x30 مخزن"
-                          value={barcodeTemplateName}
-                          onChange={(e) => setBarcodeTemplateName(e.target.value)}
-                          disabled={barcodePrinting}
-                        />
-                      </label>
-                    </div>
-                    <div className="barcode-template-actions">
-                      <button type="button" className="products-btn products-btn-light" onClick={saveNewBarcodeTemplate} disabled={barcodePrinting}>
-                        حفظ كقالب جديد
-                      </button>
-                      <button type="button" className="products-btn products-btn-light" onClick={updateBarcodeTemplate} disabled={barcodePrinting || !activeBarcodeTemplateId}>
-                        تحديث القالب الحالي
-                      </button>
-                      <button type="button" className="products-btn products-btn-light" onClick={deleteBarcodeTemplate} disabled={barcodePrinting || !activeBarcodeTemplateId}>
-                        حذف القالب
-                      </button>
-                    </div>
-                    {activeBarcodeTemplate ? (
-                      <p className="barcode-template-note">
-                        آخر تحديث: {new Date(activeBarcodeTemplate.updatedAt).toLocaleString('ar-EG')}
-                      </p>
-                    ) : (
-                      <p className="barcode-template-note">
-                        احفظ الإعدادات الحالية كقالب لاستخدامها لاحقًا حسب المقاس والطابعة.
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-
-                {barcodeStudioTab === 'source' ? (
-                  <div className="barcode-studio-section">
-                    <h3>نوع الكود ومصدره</h3>
-                    <div className="barcode-studio-grid two">
-                      <label>
-                        نوع الباركود
-                        <select value={barcodeStudioSafeSettings.format} onChange={(e) => setBarcodeSetting('format', e.target.value)} disabled={barcodePrinting}>
-                          {BARCODE_FORMAT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        مصدر الكود
-                        <select value={barcodeStudioSafeSettings.codeSource} onChange={(e) => setBarcodeSetting('codeSource', e.target.value)} disabled={barcodePrinting}>
-                          {BARCODE_CODE_SOURCE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                ) : null}
-
-                {barcodeStudioTab === 'layout' ? (
-                  <div className="barcode-studio-section">
-                    <h3>مقاس الملصق والتخطيط</h3>
-                    <div className="barcode-studio-grid three">
-                      <label>
-                        قالب المقاس
-                        <select value={barcodeStudioSafeSettings.presetId} onChange={(e) => applyBarcodePreset(e.target.value)} disabled={barcodePrinting}>
-                          {BARCODE_LABEL_PRESETS.map((preset) => (
-                            <option key={preset.id} value={preset.id}>{preset.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        عرض الملصق (مم)
-                        <input
-                          type="number"
-                          min="20"
-                          max="120"
-                          step="1"
-                          value={barcodeStudioSafeSettings.labelWidthMm}
-                          onChange={(e) => {
-                            setBarcodeSetting('presetId', 'custom');
-                            setBarcodeNumberSetting('labelWidthMm', e.target.value, 20, 120);
-                          }}
-                          disabled={barcodePrinting}
-                        />
-                      </label>
-                      <label>
-                        ارتفاع الملصق (مم)
-                        <input
-                          type="number"
-                          min="15"
-                          max="90"
-                          step="1"
-                          value={barcodeStudioSafeSettings.labelHeightMm}
-                          onChange={(e) => {
-                            setBarcodeSetting('presetId', 'custom');
-                            setBarcodeNumberSetting('labelHeightMm', e.target.value, 15, 90);
-                          }}
-                          disabled={barcodePrinting}
-                        />
-                      </label>
-                      <label>
-                        عدد الأعمدة
-                        <input type="number" min="1" max="8" step="1" value={barcodeStudioSafeSettings.columns} onChange={(e) => setBarcodeNumberSetting('columns', e.target.value, 1, 8)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        نسخ لكل ملصق
-                        <input type="number" min="1" max="50" step="1" value={barcodeStudioSafeSettings.copiesPerItem} onChange={(e) => setBarcodeNumberSetting('copiesPerItem', e.target.value, 1, 50)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        هامش الصفحة (مم)
-                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.pageMarginMm} onChange={(e) => setBarcodeNumberSetting('pageMarginMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                      </label>
-                    </div>
-                  </div>
-                ) : null}
-
-                {barcodeStudioTab === 'design' ? (
-                  <div className="barcode-studio-section">
-                    <h3>تصميم الباركود</h3>
-                    <div className="barcode-studio-grid three">
-                      <label>
-                        ارتفاع الباركود (مم)
-                        <input type="number" min="6" max="40" step="0.5" value={barcodeStudioSafeSettings.barcodeHeightMm} onChange={(e) => setBarcodeNumberSetting('barcodeHeightMm', e.target.value, 6, 40)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        عرض الخط (px)
-                        <input type="number" min="1" max="6" step="0.1" value={barcodeStudioSafeSettings.barcodeWidthPx} onChange={(e) => setBarcodeNumberSetting('barcodeWidthPx', e.target.value, 1, 6)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        Padding داخلي (مم)
-                        <input type="number" min="0" max="10" step="0.5" value={barcodeStudioSafeSettings.paddingMm} onChange={(e) => setBarcodeNumberSetting('paddingMm', e.target.value, 0, 10)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        مسافة أفقية (مم)
-                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapXMm} onChange={(e) => setBarcodeNumberSetting('gapXMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        مسافة رأسية (مم)
-                        <input type="number" min="0" max="20" step="0.5" value={barcodeStudioSafeSettings.gapYMm} onChange={(e) => setBarcodeNumberSetting('gapYMm', e.target.value, 0, 20)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        محاذاة النص
-                        <select value={barcodeStudioSafeSettings.textAlign} onChange={(e) => setBarcodeSetting('textAlign', e.target.value)} disabled={barcodePrinting}>
-                          <option value="center">وسط</option>
-                          <option value="right">يمين</option>
-                          <option value="left">يسار</option>
-                        </select>
-                      </label>
-                      <label>
-                        حجم اسم المنتج
-                        <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.nameFontPx} onChange={(e) => setBarcodeNumberSetting('nameFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        حجم البيانات الصغيرة
-                        <input type="number" min="7" max="18" step="1" value={barcodeStudioSafeSettings.metaFontPx} onChange={(e) => setBarcodeNumberSetting('metaFontPx', e.target.value, 7, 18)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        حجم السعر
-                        <input type="number" min="8" max="22" step="1" value={barcodeStudioSafeSettings.priceFontPx} onChange={(e) => setBarcodeNumberSetting('priceFontPx', e.target.value, 8, 22)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        لون الباركود
-                        <input type="color" value={barcodeStudioSafeSettings.lineColor} onChange={(e) => setBarcodeSetting('lineColor', e.target.value)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        خلفية الملصق
-                        <input type="color" value={barcodeStudioSafeSettings.cardBackground} onChange={(e) => setBarcodeSetting('cardBackground', e.target.value)} disabled={barcodePrinting} />
-                      </label>
-                      <label>
-                        لون الإطار
-                        <input type="color" value={barcodeStudioSafeSettings.borderColor} onChange={(e) => setBarcodeSetting('borderColor', e.target.value)} disabled={barcodePrinting} />
-                      </label>
-                    </div>
-
-                    <div className="barcode-studio-toggles">
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showBorder} onChange={(e) => setBarcodeSetting('showBorder', e.target.checked)} disabled={barcodePrinting} /> إطار الملصق</label>
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showName} onChange={(e) => setBarcodeSetting('showName', e.target.checked)} disabled={barcodePrinting} /> اسم المنتج</label>
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showSku} onChange={(e) => setBarcodeSetting('showSku', e.target.checked)} disabled={barcodePrinting} /> SKU</label>
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showVariant} onChange={(e) => setBarcodeSetting('showVariant', e.target.checked)} disabled={barcodePrinting} /> بيانات المتغير</label>
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showPrice} onChange={(e) => setBarcodeSetting('showPrice', e.target.checked)} disabled={barcodePrinting} /> السعر</label>
-                      <label><input type="checkbox" checked={barcodeStudioSafeSettings.showCode} onChange={(e) => setBarcodeSetting('showCode', e.target.checked)} disabled={barcodePrinting} /> نص الكود</label>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <aside className="barcode-studio-preview">
-                <div className="barcode-preview-head">
-                  <strong>معاينة مباشرة</strong>
-                  <span>أول {barcodePreview.labels.length} ملصق</span>
-                </div>
-
-                {barcodePreviewIsMatrix && matrixBarcodeEngineLoading ? (
-                  <p className="barcode-preview-note">جاري تحميل محرك QR/DataMatrix...</p>
-                ) : null}
-                {barcodePreviewIsMatrix && matrixBarcodeEngineError ? (
-                  <p className="barcode-preview-engine-error">تعذر تحميل محرك QR/DataMatrix: {matrixBarcodeEngineError}</p>
-                ) : null}
-
-                {barcodePreview.labels.length === 0 ? (
-                  <div className="barcode-preview-empty">
-                    {barcodePreviewIsMatrix && matrixBarcodeEngineLoading
-                      ? 'انتظر اكتمال تحميل محرك الأكواد الثنائية لعرض المعاينة.'
-                      : 'لا توجد أكواد صالحة للمعاينة بالإعدادات الحالية.'}
-                  </div>
-                ) : (
-                  <div className="barcode-preview-grid">
-                    {barcodePreview.labels.map((label, index) => {
-                      const size = nText(label.size);
-                      const color = nText(label.color);
-                      const variantText = [size && size !== 'موحد' ? size : '', color && color !== '-' ? color : ''].filter(Boolean).join(' / ');
-                      const hasVariant = Boolean(variantText);
-
-                      return (
-                        <article
-                          key={`${label.code}-${index}`}
-                          className="barcode-preview-card"
-                          style={{
-                            background: barcodeStudioSafeSettings.cardBackground,
-                            border: barcodeStudioSafeSettings.showBorder ? `1px solid ${barcodeStudioSafeSettings.borderColor}` : 'none',
-                            textAlign: barcodeStudioSafeSettings.textAlign
-                          }}
-                        >
-                          {barcodeStudioSafeSettings.showName ? <h4 style={{ fontSize: `${barcodeStudioSafeSettings.nameFontPx}px` }}>{label.name || 'منتج'}</h4> : null}
-                          {barcodeStudioSafeSettings.showSku ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>SKU: {label.sku || '-'}</small> : null}
-                          {barcodeStudioSafeSettings.showVariant && hasVariant ? <small style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{variantText}</small> : null}
-                          <div className={`barcode-preview-svg ${barcodePreviewIsMatrix ? 'matrix' : 'linear'}`} dangerouslySetInnerHTML={{ __html: label.barcodeSvg }} />
-                          {barcodeStudioSafeSettings.showCode ? <div className="code" style={{ fontSize: `${barcodeStudioSafeSettings.metaFontPx}px` }}>{label.code}</div> : null}
-                          {barcodeStudioSafeSettings.showPrice ? <div className="price" style={{ fontSize: `${barcodeStudioSafeSettings.priceFontPx}px` }}>{Number(label.price || 0).toFixed(2)} ج.م</div> : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {barcodePreview.invalidRows.length && !(barcodePreviewIsMatrix && !matrixBarcodeLibrary) ? (
-                  <p className="barcode-preview-warning">
-                    {barcodePreview.invalidRows.length} عنصر غير صالح بالصيغة الحالية ولن يتم طباعته.
-                  </p>
-                ) : null}
-              </aside>
-            </section>
-
-            <footer className="products-modal-footer">
-              <button type="button" className="products-btn products-btn-light" onClick={resetBarcodeStudioSettings} disabled={barcodePrinting}>
-                استرجاع الإعدادات الافتراضية
-              </button>
-              <div className="products-modal-footer-actions">
-                <button type="button" className="products-btn products-btn-light" onClick={closeBarcodeStudio} disabled={barcodePrinting}>
-                  إغلاق
-                </button>
-                <button type="button" className="products-btn products-btn-light" onClick={executeBarcodeStudioPdfExport} disabled={barcodePrinting}>
-                  {barcodePrinting ? 'جاري تجهيز الملف...' : 'تصدير PDF مباشر'}
-                </button>
-                <button type="button" className="products-btn products-btn-primary" onClick={executeBarcodeStudioPrint} disabled={barcodePrinting}>
-                  {barcodePrinting ? 'جاري المعالجة...' : 'طباعة حسب الإعدادات'}
-                </button>
-              </div>
-            </footer>
-          </div>
-        </div>
+        <BarcodeStudioModal
+          barcodeStudioProducts={barcodeStudioProducts}
+          barcodeStudioRows={barcodeStudioRows}
+          barcodeStudioSafeSettings={barcodeStudioSafeSettings}
+          barcodeStudioTab={barcodeStudioTab}
+          setBarcodeStudioTab={setBarcodeStudioTab}
+          barcodePrinting={barcodePrinting}
+          barcodePreview={barcodePreview}
+          barcodePreviewIsMatrix={barcodePreviewIsMatrix}
+          matrixBarcodeEngineLoading={matrixBarcodeEngineLoading}
+          matrixBarcodeEngineError={matrixBarcodeEngineError}
+          barcodeTemplates={barcodeTemplates}
+          activeBarcodeTemplateId={activeBarcodeTemplateId}
+          activeBarcodeTemplate={activeBarcodeTemplate}
+          barcodeTemplateName={barcodeTemplateName}
+          setBarcodeTemplateName={setBarcodeTemplateName}
+          barcodeTemplatePrinter={barcodeTemplatePrinter}
+          setBarcodeTemplatePrinter={setBarcodeTemplatePrinter}
+          setBarcodeSetting={setBarcodeSetting}
+          setBarcodeNumberSetting={setBarcodeNumberSetting}
+          applyBarcodePreset={applyBarcodePreset}
+          applyBarcodeTemplate={applyBarcodeTemplate}
+          saveNewBarcodeTemplate={saveNewBarcodeTemplate}
+          updateBarcodeTemplate={updateBarcodeTemplate}
+          deleteBarcodeTemplate={deleteBarcodeTemplate}
+          resetBarcodeStudioSettings={resetBarcodeStudioSettings}
+          closeBarcodeStudio={closeBarcodeStudio}
+          executeBarcodeStudioPrint={executeBarcodeStudioPrint}
+          executeBarcodeStudioPdfExport={executeBarcodeStudioPdfExport}
+        />
       ) : null}
 
-      {importSession ? (
-        <div className="products-modal-backdrop" onClick={closeImportSession}>
-          <div className="products-modal products-import-modal" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <div className="products-import-headline">
-                <h2>مطابقة أعمدة الاستيراد</h2>
-                <p>{importSession.fileName} | {importSession.rows.length} صف</p>
-              </div>
-              <button type="button" className="icon-btn" onClick={closeImportSession} disabled={importing}>
-                ✕
-              </button>
-            </header>
+      <ImportModal
+        session={importSession}
+        importing={importing}
+        onClose={closeImportSession}
+        onUpdateFieldMapping={updateImportFieldMapping}
+        onApplyAutoMapping={applyAutoImportMapping}
+        onStartImport={startMappedImport}
+      />
 
-            <section className="products-modal-body">
-              <div className="import-mapping-meta">
-                <span>عدد الأعمدة: <strong>{importSession.headers.length}</strong></span>
-                <span>عدد الصفوف: <strong>{importSession.rows.length}</strong></span>
-              </div>
-              <p className="import-mapping-note">
-                اختَر لكل حقل العمود المناسب من ملف Excel. الحقول غير المطلوبة يمكنك تركها على "تجاهل هذا الحقل".
-              </p>
-
-              <div className="import-mapping-grid">
-                {IMPORT_FIELD_OPTIONS.map((field) => {
-                  const selectedColumn = importSession.mapping?.[field.key] ?? '';
-                  const sampleValue = selectedColumn ? importColumnSamples.get(selectedColumn) : '';
-
-                  return (
-                    <label key={field.key} className={`import-mapping-row ${field.required ? 'required' : ''}`}>
-                      <span className="import-mapping-label">
-                        {field.label}
-                        {field.required ? ' *' : ''}
-                      </span>
-                      <select
-                        value={selectedColumn}
-                        onChange={(e) => updateImportFieldMapping(field.key, e.target.value)}
-                        disabled={importing}
-                      >
-                        <option value="">{field.required ? 'اختر عمودًا...' : 'تجاهل هذا الحقل'}</option>
-                        {importSession.headers.map((header) => (
-                          <option key={`${field.key}-${header.id}`} value={header.id}>
-                            {header.label}
-                          </option>
-                        ))}
-                      </select>
-                      <small className="import-mapping-sample">
-                        {sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}
-                      </small>
-                    </label>
-                  );
-                })}
-              </div>
-            </section>
-
-            <footer className="products-modal-footer">
-              <button type="button" className="products-btn products-btn-light" onClick={applyAutoImportMapping} disabled={importing}>
-                مطابقة تلقائية
-              </button>
-              <div className="products-modal-footer-actions">
-                <button type="button" className="products-btn products-btn-light" onClick={closeImportSession} disabled={importing}>
-                  إلغاء
-                </button>
-                <button type="button" className="products-btn products-btn-primary" onClick={startMappedImport} disabled={importing}>
-                  {importing ? 'جاري الاستيراد...' : 'بدء الاستيراد'}
-                </button>
-              </div>
-            </footer>
-          </div>
-        </div>
-      ) : null}
-
-      {showCategoryModal ? (
-        <div className="products-modal-backdrop" onClick={() => setShowCategoryModal(false)}>
-          <div className="products-modal" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <h2>إدارة الفئات</h2>
-              <button type="button" className="icon-btn" onClick={() => setShowCategoryModal(false)}>✕</button>
-            </header>
-
-            <section className="products-modal-body">
-              <div className="form-grid two-cols">
-                <label>اسم الفئة<input type="text" value={categoryForm.name} onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))} /></label>
-                <label>الوصف<input type="text" value={categoryForm.description} onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))} /></label>
-                <label>اللون<input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm((p) => ({ ...p, color: e.target.value }))} /></label>
-                <label>الأيقونة<input type="text" value={categoryForm.icon} onChange={(e) => setCategoryForm((p) => ({ ...p, icon: e.target.value }))} /></label>
-              </div>
-
-              <button type="button" className="products-btn products-btn-primary" onClick={saveCategory}>➕ إضافة فئة</button>
-
-              <div className="category-list">
-                {categories.length === 0 ? <div className="products-empty">لا توجد فئات</div> : categories.map((c) => (
-                  <article className="category-row" key={c.id}>
-                    <div><strong>{c.icon || '📦'} {c.name}</strong><small>{c.description || 'بدون وصف'}</small></div>
-                    <button type="button" className="icon-btn danger" onClick={() => deleteCategory(c.id, c.name)}>🗑️</button>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
-      ) : null}
+      <CategoryModal
+        isOpen={showCategoryModal}
+        onClose={() => setShowCategoryModal(false)}
+        categories={categories}
+        onSave={saveCategory}
+        onDelete={deleteCategory}
+      />
 
       {toast ? <div className={`products-toast ${toast.type || 'success'}`}>{toast.message}</div> : null}
     </div>

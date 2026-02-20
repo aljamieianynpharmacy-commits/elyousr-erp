@@ -1454,10 +1454,10 @@ const dbService = {
                 where: { username }
             });
 
-            if (!user) return { error: 'Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯' };
+            if (!user) return { error: 'المستخدم غير موجود' };
 
             const valid = await bcrypt.compare(password, user.password);
-            if (!valid) return { error: 'ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± ØµØ­ÙŠØ­Ø©' };
+            if (!valid) return { error: 'كلمة المرور غير صحيحة' };
 
             const token = jwt.sign({ id: user.id, role: user.role }, SECRET_KEY);
             return { token, user: { id: user.id, name: user.name, role: user.role } };
@@ -1491,7 +1491,7 @@ const dbService = {
             const salesAmount = sales.reduce((sum, sale) => sum + sale.total, 0);
             const expensesAmount = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-            // Ø­Ø³Ø§Ø¨ Ø§Ù„Ø¯ÙŠÙˆÙ† Ù…Ù† CustomerTransaction
+            // حساب الديون من CustomerTransaction
             const customerDebtResult = await prisma.customerTransaction.aggregate({
                 _sum: {
                     debit: true,
@@ -1697,7 +1697,7 @@ const dbService = {
 
     async addProduct(productData) {
         try {
-            // ØªÙ†Ø¸ÙŠÙ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
+            // تنظيف البيانات
             const basePrice = toMoney(productData.basePrice, 0);
             const cost = toMoney(productData.cost, 0);
             const units = normalizeProductUnits(productData.units, basePrice, cost);
@@ -2088,7 +2088,7 @@ const dbService = {
                     }
                 });
 
-                // Ø¥Ù†Ø´Ø§Ø¡ Ø¨Ù†ÙˆØ¯ Ø§Ù„ÙØ§ØªÙˆØ±Ø© ÙˆØªØ­Ø¯ÙŠØ« Ø§Ù„Ù…Ø®Ø²ÙˆÙ†
+                // إنشاء بنود الفاتورة وتحديث المخزون
                 for (let i = 0; i < saleData.items.length; i++) {
                     const item = saleData.items[i];
 
@@ -2116,7 +2116,7 @@ const dbService = {
                     saleType: saleData.saleType
                 });
 
-                // Ø¥Ù†Ø´Ø§Ø¡ Ø³Ø¬Ù„ Ø¯ÙŠÙ† ÙÙ‚Ø· Ù„Ùˆ ÙÙŠÙ‡ Ù…ØªØ¨Ù‚ÙŠ ÙØ¹Ù„ÙŠ
+                // إنشاء سجل دين فقط لو فيه متبقي فعلي
                 if (parsedCustomerId) {
                     if (outstandingAmount > 0) {
                         await tx.customerTransaction.create({
@@ -2130,7 +2130,7 @@ const dbService = {
                                 referenceId: newSale.id,
                                 debit: outstandingAmount,
                                 credit: 0,
-                                notes: `ÙØ§ØªÙˆØ±Ø© #${newSale.id} - ${saleData.notes || 'Ø¨ÙŠØ¹'}`
+                                notes: `فاتورة #${newSale.id} - ${saleData.notes || 'بيع'}`
                             }
                         });
                     }
@@ -2152,27 +2152,27 @@ const dbService = {
                     });
 
                     if (customer) {
-                        // Ø­Ø³Ø§Ø¨ Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª
+                        // حساب إجمالي المشتريات
                         const totalPurchases = customer.sales.reduce((sum, sale) => sum + sale.total, 0);
 
-                        // Ø­Ø³Ø§Ø¨ Ø§Ù„ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ø°ÙƒÙŠ (0-5 Ù†Ø¬ÙˆÙ…)
+                        // حساب التقييم الذكي (0-5 نجوم)
                         let rating = 0;
 
-                        // Ù…Ø¹Ø§ÙŠÙŠØ± Ø§Ù„ØªÙ‚ÙŠÙŠÙ…:
-                        // 1. Ø­Ø¬Ù… Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª (40%)
+                        // معايير التقييم:
+                        // 1. حجم المشتريات (40%)
                         if (totalPurchases >= 50000) rating += 2;
                         else if (totalPurchases >= 20000) rating += 1.5;
                         else if (totalPurchases >= 10000) rating += 1;
                         else if (totalPurchases >= 5000) rating += 0.5;
 
-                        // 2. Ø¹Ø¯Ø¯ Ø§Ù„Ù…Ø¹Ø§Ù…Ù„Ø§Øª (20%)
+                        // 2. عدد المعاملات (20%)
                         const salesCount = customer.sales.length;
                         if (salesCount >= 50) rating += 1;
                         else if (salesCount >= 20) rating += 0.7;
                         else if (salesCount >= 10) rating += 0.5;
                         else if (salesCount >= 5) rating += 0.3;
 
-                        // 3. Ø§Ù†ØªØ¸Ø§Ù… Ø§Ù„Ø³Ø¯Ø§Ø¯ (40%) - Ù…Ù† Ø§Ù„Ø±ØµÙŠØ¯ Ø§Ù„Ù…Ù„Ø®Øµ
+                        // 3. انتظام السداد (40%) - من الرصيد الملخص
                         const currentBalance = customer.balance || 0;
                         const debtRatio = currentBalance / Math.max(totalPurchases, 1);
 
@@ -2181,19 +2181,19 @@ const dbService = {
                         else if (debtRatio < 0.3) rating += 1;
                         else if (debtRatio < 0.5) rating += 0.5;
 
-                        rating = Math.min(5, rating); // Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ 5 Ù†Ø¬ÙˆÙ…
+                        rating = Math.min(5, rating); // الحد الأقصى 5 نجوم
 
-                        // ØªØµÙ†ÙŠÙ ØªÙ„Ù‚Ø§Ø¦ÙŠ Ù„Ù„Ø¹Ù…ÙŠÙ„
-                        let customerType = 'Ø¹Ø§Ø¯ÙŠ';
+                        // تصنيف تلقائي للعميل
+                        let customerType = 'عادي';
                         if (totalPurchases >= 50000 && rating >= 4) {
                             customerType = 'VIP';
                         } else if (totalPurchases >= 30000 && salesCount >= 10) {
-                            customerType = 'ØªØ§Ø¬Ø± Ø¬Ù…Ù„Ø©';
+                            customerType = 'تاجر جملة';
                         } else if (totalPurchases >= 20000 || rating >= 3.5) {
                             customerType = 'VIP';
                         }
 
-                        // ØªØ­Ø¯ÙŠØ« Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„ (rating Ùˆ customerType ÙÙ‚Ø·)
+                        // تحديث بيانات العميل (rating و customerType فقط)
                         await tx.customer.update({
                             where: { id: parsedCustomerId },
                             data: {
@@ -2301,7 +2301,7 @@ const dbService = {
 
         try {
             const result = await prisma.$transaction(async (tx) => {
-                // Ø§Ù„Ø­ØµÙˆÙ„ Ø¹Ù„Ù‰ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ÙØ§ØªÙˆØ±Ø©
+                // الحصول على بيانات الفاتورة
                 const sale = await tx.sale.findUnique({
                     where: { id: parseInt(saleId) },
                     include: {
@@ -2328,7 +2328,7 @@ const dbService = {
                     sum + (toNumber(trx.debit) - toNumber(trx.credit))
                 ), 0);
 
-                // Ø§Ø³ØªØ±Ø¬Ø§Ø¹ Ø§Ù„ÙƒÙ…ÙŠØ§Øª Ù„Ù„Ù…Ù†ØªØ¬Ø§Øª
+                // استرجاع الكميات للمنتجات
                 for (const item of sale.items) {
                     await tx.variant.update({
                         where: { id: item.variantId },
@@ -2345,12 +2345,12 @@ const dbService = {
                 const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'SALE', parseInt(saleId));
                 throwIfResultError(rollbackResult, 'Failed to rollback sale treasury entries');
 
-                // Ø­Ø°Ù Ø¨Ù†ÙˆØ¯ Ø§Ù„ÙØ§ØªÙˆØ±Ø©
+                // حذف بنود الفاتورة
                 await tx.saleItem.deleteMany({
                     where: { saleId: parseInt(saleId) }
                 });
 
-                // Ø­Ø°Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©
+                // حذف الفاتورة
                 const deletedSale = await tx.sale.delete({
                     where: { id: parseInt(saleId) }
                 });
@@ -2689,17 +2689,17 @@ const dbService = {
                         }
                     });
 
-                    // Ø²ÙŠØ§Ø¯Ø© Ø§Ù„Ù…Ø®Ø²ÙˆÙ†
+                    // زيادة المخزون
                     await tx.variant.update({
                         where: { id: variantId },
                         data: {
                             quantity: { increment: quantity },
-                            cost // ØªØ­Ø¯ÙŠØ« Ø³Ø¹Ø± Ø§Ù„ØªÙƒÙ„ÙØ©
+                            cost // تحديث سعر التكلفة
                         }
                     });
                 }
 
-                // ØªØ­Ø¯ÙŠØ« Ø±ØµÙŠØ¯ Ø§Ù„Ù…ÙˆØ±Ø¯
+                // تحديث رصيد المورد
                 if (parsedSupplierId) {
                     const remaining = Math.max(0, safeTotal - safePaid);
                     await tx.supplier.update({
@@ -2761,7 +2761,7 @@ const dbService = {
         }
     },
 
-    // ==================== RETURNS (Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø§Øª) ====================
+    // ==================== RETURNS (المرتجعات) ====================
     async getReturns() {
         try {
             return await prisma.return.findMany({
@@ -3844,10 +3844,10 @@ const dbService = {
                 orderBy: { createdAt: 'asc' }
             });
 
-            console.log('ðŸ“‹ Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', methods);
+            console.log('📋 طرق الدفع:', methods);
             return methods;
         } catch (error) {
-            console.error('âŒ Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', error);
+            console.error('❌ خطأ في جلب طرق الدفع:', error);
             return [];
         }
     },
@@ -3869,7 +3869,7 @@ const dbService = {
                 count: method.payments.length
             }));
         } catch (error) {
-            console.error('âŒ Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª Ø·Ø±Ù‚ Ø§Ù„Ø¯ÙØ¹:', error);
+            console.error('❌ خطأ في جلب إحصائيات طرق الدفع:', error);
             return [];
         }
     },

@@ -105,6 +105,10 @@ export default function Returns() {
     const cart = sess?.cart || [];
     const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.returnQty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((s, i) => s + i.returnQty, 0), [cart]);
+    const hasSelectedCustomer = !!selCust;
+    const effectiveRefundMode = hasSelectedCustomer ? sess.refundMode : 'cashOut';
+    const previousBalance = toNumber(selCust?.balance);
+    const nextBalance = previousBalance - (effectiveRefundMode === 'creditNote' ? cartTotal : 0);
 
     const setSessionCustomer = useCallback((customer) => {
         const currentCustomerId = sess?.customerId ? String(sess.customerId) : '';
@@ -129,6 +133,11 @@ export default function Returns() {
         const exists = paymentMethods.some(pm => String(pm.id) === selected);
         if (!exists) upd({ paymentMethodId: String(paymentMethods[0].id) });
     }, [paymentMethods, sess?.paymentMethodId, upd]);
+    useEffect(() => {
+        if (!sess?.customerId && sess?.refundMode !== 'cashOut') {
+            upd({ refundMode: 'cashOut' });
+        }
+    }, [sess?.customerId, sess?.refundMode, upd]);
 
     // ─── Keys ───
     useEffect(() => { const h = (e) => { if (showConfirm) return; if (e.key === 'F1') { e.preventDefault(); handleCheckoutFlow(false); } else if (e.key === 'F2') { e.preventDefault(); handleCheckoutFlow(true); } else if (e.key === 'F4') { e.preventDefault(); searchRef.current?.focus(); } else if (e.key === 'F5') { e.preventDefault(); const ci = document.querySelector('input[placeholder*="ابحث عن عميل"]'); if (ci) ci.focus(); } else if (e.key === 'Escape' && cart.length > 0) { e.preventDefault(); upd({ cart: [] }); showToast('تم إفراغ السلة', 'warning'); } }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h) }, [cart, showConfirm, upd]);
@@ -302,7 +311,7 @@ export default function Returns() {
     // ─── Checkout Flow (shows confirmation modal) ───
     const handleCheckoutFlow = (shouldPrint = false) => {
         if (cart.length === 0) { showToast('السلة فارغة!', 'warning'); return; }
-        const rm = sess.refundMode;
+        const rm = effectiveRefundMode;
         const pmId = sess.paymentMethodId;
         if ((!selCust || rm === 'cashOut') && !pmId) { showToast('اختر طريقة الدفع', 'error'); return; }
         setPrintOnConfirm(shouldPrint);
@@ -347,7 +356,7 @@ export default function Returns() {
             <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
             {loading && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="spinner"></div></div>}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={sess.refundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? '✅ تأكيد وحفظ وطباعة' : '✅ تأكيد وحفظ'} />}
+            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={effectiveRefundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? '✅ تأكيد وحفظ وطباعة' : '✅ تأكيد وحفظ'} />}
 
             {/* ═══ Tabs ═══ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
@@ -507,13 +516,13 @@ export default function Returns() {
                             <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>تاريخ المرتجع:</label>
                             <input type="date" value={sess.returnDate || todayLocalISO()} onChange={e => upd({ returnDate: e.target.value })} style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
                         </div>
-                        {selCust && <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                             <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>طريقة الرد:</label>
                             <div style={{ display: 'flex', gap: 5 }}>
-                                <button onClick={() => upd({ refundMode: 'creditNote' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'creditNote' ? '#fefce8' : '#fff', color: sess.refundMode === 'creditNote' ? '#92400e' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>📝 رصيد</button>
-                                <button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: sess.refundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button>
+                                <button onClick={() => upd({ refundMode: 'creditNote' })} disabled={!hasSelectedCustomer} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: !hasSelectedCustomer ? '#f3f4f6' : (effectiveRefundMode === 'creditNote' ? '#fefce8' : '#fff'), color: !hasSelectedCustomer ? '#9ca3af' : (effectiveRefundMode === 'creditNote' ? '#92400e' : '#374151'), fontWeight: 'bold', fontSize: 13, cursor: hasSelectedCustomer ? 'pointer' : 'not-allowed', transition: 'all .2s' }}>📝 رصيد</button>
+                                <button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: effectiveRefundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: effectiveRefundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button>
                             </div>
-                        </div>}
+                        </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 'auto' }}>
                         <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
@@ -566,23 +575,19 @@ export default function Returns() {
                         </div>
 
                         {/* Balances below the Total */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto', paddingTop: '8px', borderTop: selCust ? '1px dashed #e5e7eb' : 'none' }}>
-                            {selCust && (
-                                <>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                        <span style={{ fontSize: "13px", color: "#6b7280" }}>الرصيد السابق :</span>
-                                        <span style={{ fontSize: "13px", fontWeight: "bold", color: "#4b5563" }}>
-                                            {toNumber(selCust.balance).toFixed(2)}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "5px" }}>
-                                        <span style={{ fontSize: "13px", color: "#6b7280" }}>بعد المرتجع :</span>
-                                        <span style={{ fontSize: "13px", fontWeight: "bold", color: "#d97706" }}>
-                                            {(toNumber(selCust.balance) - (sess.refundMode === 'creditNote' ? cartTotal : 0)).toFixed(2)}
-                                        </span>
-                                    </div>
-                                </>
-                            )}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed #e5e7eb' }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span style={{ fontSize: "13px", color: "#6b7280" }}>الرصيد السابق :</span>
+                                <span style={{ fontSize: "13px", fontWeight: "bold", color: "#4b5563" }}>
+                                    {previousBalance.toFixed(2)}
+                                </span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "5px" }}>
+                                <span style={{ fontSize: "13px", color: "#6b7280" }}>بعد المرتجع :</span>
+                                <span style={{ fontSize: "13px", fontWeight: "bold", color: "#d97706" }}>
+                                    {nextBalance.toFixed(2)}
+                                </span>
+                            </div>
                         </div>
 
                     </div>

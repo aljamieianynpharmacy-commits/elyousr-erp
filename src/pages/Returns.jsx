@@ -497,26 +497,76 @@ export default function Returns() {
             </div>
 
             {/* ═══ Bottom Bar ═══ */}
+            {/* ═══ Bottom Bar (3 Sections layout: Right: Actions, Middle: Notes/Balances, Left: Total) ═══ */}
             <div style={{ display: 'flex', gap: 15, marginTop: 15, alignItems: 'stretch' }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+                {/* Section 1: Actions & Refund Mode (Right) - flex 3 to match Cart parent */}
+                <div style={{ flex: 2.15, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', gap: 10 }}>
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}><label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>ملاحظات:</label><input type="text" value={sess.returnNotes} onChange={e => upd({ returnNotes: e.target.value })} placeholder="ملاحظات..." style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} /></div>
-                        <div style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column' }}><label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>تاريخ المرتجع:</label><input type="date" value={sess.returnDate || todayLocalISO()} onChange={e => upd({ returnDate: e.target.value })} style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} /></div>
+                        <div style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column' }}>
+                            <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>تاريخ المرتجع:</label>
+                            <input type="date" value={sess.returnDate || todayLocalISO()} onChange={e => upd({ returnDate: e.target.value })} style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
+                        </div>
+                        {selCust && <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                            <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>طريقة الرد:</label>
+                            <div style={{ display: 'flex', gap: 5 }}>
+                                <button onClick={() => upd({ refundMode: 'creditNote' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'creditNote' ? '#fefce8' : '#fff', color: sess.refundMode === 'creditNote' ? '#92400e' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>📝 رصيد</button>
+                                <button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: sess.refundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button>
+                            </div>
+                        </div>}
                     </div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                        {selCust && <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}><label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>طريقة الرد:</label><div style={{ display: 'flex', gap: 5 }}><button onClick={() => upd({ refundMode: 'creditNote' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'creditNote' ? '#fefce8' : '#fff', color: sess.refundMode === 'creditNote' ? '#92400e' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>📝 رصيد</button><button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: sess.refundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button></div></div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 'auto' }}>
                         <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
                         <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد وطباعة (F2)</button>
                         <button onClick={() => { upd({ cart: [] }); showToast('تم الإفراغ', 'warning'); }} disabled={cart.length === 0} style={{ padding: '14px 20px', backgroundColor: cart.length === 0 ? '#9ca3af' : '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>إفراغ</button>
                     </div>
                 </div>
 
-                <div style={{ flex: '0 0 25%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ backgroundColor: 'white', padding: '15px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,.1)', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '8px' }}>
+                {/* Section 2: Middle Panel (Notes & Balances with summaries) */}
+                <div style={{ flex: 1.7, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Notes Input */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <label style={{ fontSize: "12px", color: "#6b7280", marginBottom: "4px" }}>ملاحظات:</label>
+                        <textarea
+                            value={sess.returnNotes}
+                            onChange={e => upd({ returnNotes: e.target.value })}
+                            style={{
+                                flex: 1,
+                                width: "100%",
+                                padding: "8px",
+                                borderRadius: "6px",
+                                border: "1px solid #d1d5db",
+                                fontSize: "13px",
+                                resize: "none",
+                                boxSizing: "border-box"
+                            }}
+                            placeholder="ملاحظات المرتجع..."
+                        />
+                    </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* Summaries Card */}
+                    <div style={{ flex: 1, backgroundColor: 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '5px', height: '80px', boxSizing: 'border-box' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '13px', color: '#6b7280', fontWeight: 'bold' }}>الملخص :</span>
+                            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>{cartCount} وحدة · {cart.length} صنف</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Section 3: Totals (Left) - matching width ratio of logic */}
+                <div style={{ flex: 1.3, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ backgroundColor: 'white', padding: '15px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,.1)', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px' }}>
+
+                        {/* Total Block at top */}
+                        <div style={{ display: "flex", justifyContent: "space-between", backgroundColor: "#fef2f2", padding: "10px", borderRadius: "6px", alignItems: "center", border: "1px solid #fecaca" }}>
+                            <span style={{ fontSize: "14px", fontWeight: "bold", color: "#991b1b" }}>الإجمالي:</span>
+                            <div style={{ textAlign: 'left' }}>
+                                <div style={{ fontSize: "24px", fontWeight: "bold", color: "#dc2626" }}>{cartTotal.toFixed(2)}</div>
+                            </div>
+                        </div>
+
+                        {/* Balances below the Total */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto', paddingTop: '8px', borderTop: selCust ? '1px dashed #e5e7eb' : 'none' }}>
                             {selCust && (
                                 <>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -525,7 +575,7 @@ export default function Returns() {
                                             {toNumber(selCust.balance).toFixed(2)}
                                         </span>
                                     </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "5px", borderTop: "1px dashed #e5e7eb" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "5px" }}>
                                         <span style={{ fontSize: "13px", color: "#6b7280" }}>بعد المرتجع :</span>
                                         <span style={{ fontSize: "13px", fontWeight: "bold", color: "#d97706" }}>
                                             {(toNumber(selCust.balance) - (sess.refundMode === 'creditNote' ? cartTotal : 0)).toFixed(2)}
@@ -535,15 +585,9 @@ export default function Returns() {
                             )}
                         </div>
 
-                        <div style={{ marginTop: 'auto', display: "flex", justifyContent: "space-between", backgroundColor: "#fef2f2", padding: "10px", borderRadius: "6px", alignItems: "center", border: "1px solid #fecaca" }}>
-                            <span style={{ fontSize: "14px", fontWeight: "bold", color: "#991b1b" }}>الإجمالي:</span>
-                            <div style={{ textAlign: 'left' }}>
-                                <div style={{ fontSize: "18px", fontWeight: "bold", color: "#dc2626" }}>{cartTotal.toFixed(2)}</div>
-                                <div style={{ fontSize: "10px", color: "#dc2626", marginTop: "2px", textAlign: "right" }}>{cartCount} وحدة · {cart.length} صنف</div>
-                            </div>
-                        </div>
                     </div>
                 </div>
+
             </div>
         </div>
     );

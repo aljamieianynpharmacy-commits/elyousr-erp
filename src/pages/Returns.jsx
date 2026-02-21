@@ -89,6 +89,7 @@ export default function Returns() {
     const [printOnConfirm, setPrintOnConfirm] = useState(false);
     const [rightTab, setRightTab] = useState('search');
     const [prodSearch, setProdSearch] = useState('');
+    const [prodSearchMode, setProdSearchMode] = useState('name');
     const [allVariants, setAllVariants] = useState([]);
 
     const selCust = useMemo(() => sess?.customerId ? customers.find(c => c.id === sess.customerId) || null : null, [sess?.customerId, customers]);
@@ -131,7 +132,7 @@ export default function Returns() {
     useEffect(() => { const h = (e) => { if (custDDRef.current && !custDDRef.current.contains(e.target)) setShowCL(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, []);
     useEffect(() => { setCustIdx(-1) }, [custSearch]);
     useEffect(() => { if (custIdx >= 0 && custListRef.current) { const it = custListRef.current.querySelectorAll('[data-ci]'); if (it[custIdx]) it[custIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } }, [custIdx]);
-    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setProdSearch(''); }, [activeId]);
+    useEffect(() => { setSearch(''); setCustSearch(''); setShowCL(false); setSelSale(null); setSaleItems([]); setProdSearch(''); setProdSearchMode('name'); }, [activeId]);
 
     // ─── Filtered Customers ───
     const filtCust = useMemo(() => { if (!Array.isArray(customers)) return []; if (showCustList && !custSearch) return customers.slice(0, 50); if (!custSearch) return []; const t = custSearch.toLowerCase(); return customers.filter(c => c.name.toLowerCase().includes(t) || c.phone?.includes(t)).slice(0, 20); }, [customers, custSearch, showCustList]);
@@ -192,20 +193,20 @@ export default function Returns() {
     // ─── Filtered products for search tab ───
     const filteredProds = useMemo(() => {
         if (!prodSearch || prodSearch.trim() === '') return [];
-        const term = prodSearch.toLowerCase();
+        const term = prodSearch.trim().toLowerCase();
         const groups = {};
         for (const v of allVariants) {
             const nameMatch = v.product?.name?.toLowerCase().includes(term);
-            const barcodeMatch = v.barcode && String(v.barcode).includes(prodSearch);
-            const skuMatch = v.product?.sku && String(v.product.sku).toLowerCase().includes(term);
-            if (!nameMatch && !barcodeMatch && !skuMatch) continue;
+            const barcodeMatch = v.barcode && String(v.barcode).includes(prodSearch.trim());
+            const isMatch = prodSearchMode === 'barcode' ? barcodeMatch : nameMatch;
+            if (!isMatch) continue;
             const pid = v.productId;
             if (!groups[pid]) groups[pid] = { id: pid, name: v.product?.name || '', basePrice: v.price, variants: [], totalQuantity: 0 };
             groups[pid].variants.push(v);
             groups[pid].totalQuantity += v.quantity || 0;
         }
         return Object.values(groups).slice(0, 20);
-    }, [allVariants, prodSearch]);
+    }, [allVariants, prodSearch, prodSearchMode]);
 
     // ─── Return progress for invoice ───
     const getReturnProgress = (sale) => { if (!sale.items || !sale.returns) return 0; let total = 0, returned = 0; for (const it of sale.items) total += it.quantity; if (sale.returns) for (const r of sale.returns) if (r.items) for (const ri of r.items) returned += ri.quantity; return total > 0 ? Math.round((returned / total) * 100) : 0; };
@@ -362,9 +363,15 @@ export default function Returns() {
 
                     {rightTab === 'search' ? (<>
                         {/* Product Search */}
-                        <div style={{ marginBottom: 12, position: 'relative' }}>
-                            <input type="text" placeholder="🔍 ابحث بالاسم أو الباركود..." value={prodSearch} onChange={e => setProdSearch(e.target.value)} style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, boxSizing: 'border-box' }} autoFocus />
-                            {prodSearch && <button onClick={() => setProdSearch('')} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 18 }}>×</button>}
+                        <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <div style={{ flex: 1, position: 'relative' }}>
+                                <input type="text" placeholder={prodSearchMode === 'barcode' ? '🔍 ابحث بالباركود...' : '🔍 ابحث بالاسم...'} value={prodSearch} onChange={e => setProdSearch(e.target.value)} style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, boxSizing: 'border-box' }} autoFocus />
+                                {prodSearch && <button onClick={() => setProdSearch('')} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 18 }}>×</button>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 4, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
+                                <button onClick={() => setProdSearchMode('name')} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: prodSearchMode === 'name' ? '#fff' : 'transparent', color: prodSearchMode === 'name' ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: prodSearchMode === 'name' ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📝 اسم</button>
+                                <button onClick={() => setProdSearchMode('barcode')} style={{ padding: '8px 12px', borderRadius: 6, border: 'none', backgroundColor: prodSearchMode === 'barcode' ? '#fff' : 'transparent', color: prodSearchMode === 'barcode' ? '#dc2626' : '#6b7280', cursor: 'pointer', fontWeight: 'bold', boxShadow: prodSearchMode === 'barcode' ? '0 1px 2px rgba(0,0,0,.1)' : 'none', transition: 'all .2s', fontSize: 13 }}>📦 باركود</button>
+                            </div>
                         </div>
                         {/* Product Cards Grid */}
                         <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto' }}>

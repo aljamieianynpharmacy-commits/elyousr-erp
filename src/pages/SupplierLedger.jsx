@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 
 const toNumber = (value, fallback = 0) => {
     const parsed = parseFloat(value);
@@ -36,7 +36,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
 
         const load = async () => {
             if (!supplierId) {
-                setError("المورد غير محدد");
+                setError("Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…Ø­Ø¯Ø¯");
                 setLoading(false);
                 return;
             }
@@ -75,7 +75,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
                 setPayments(paymentsList);
             } catch (err) {
                 if (!active) return;
-                setError(err?.message || "فشل تحميل كشف حساب المورد");
+                setError(err?.message || "ÙØ´Ù„ ØªØ­Ù…ÙŠÙ„ ÙƒØ´Ù Ø­Ø³Ø§Ø¨ Ø§Ù„Ù…ÙˆØ±Ø¯");
             } finally {
                 if (active) setLoading(false);
             }
@@ -89,12 +89,18 @@ export default function SupplierLedger({ supplierId, onClose }) {
 
     const summary = useMemo(() => {
         const totalPurchases = purchases.reduce((sum, item) => sum + toNumber(item.total), 0);
+        const purchaseReturns = purchases.reduce((sum, item) => (
+            sum + (Array.isArray(item.returns)
+                ? item.returns.reduce((retSum, ret) => retSum + toNumber(ret.total), 0)
+                : 0)
+        ), 0);
         const paidInPurchases = purchases.reduce((sum, item) => sum + toNumber(item.paid), 0);
         const directPayments = payments.reduce((sum, item) => sum + toNumber(item.amount), 0);
-        const outstanding = Math.max(0, totalPurchases - paidInPurchases - directPayments);
+        const outstanding = Math.max(0, totalPurchases - purchaseReturns - paidInPurchases - directPayments);
 
         return {
             totalPurchases,
+            purchaseReturns,
             paidInPurchases,
             directPayments,
             outstanding,
@@ -106,20 +112,40 @@ export default function SupplierLedger({ supplierId, onClose }) {
 
         for (const purchase of purchases) {
             const total = toNumber(purchase.total);
+            const returnAmount = Array.isArray(purchase.returns)
+                ? purchase.returns.reduce((sum, ret) => sum + toNumber(ret.total), 0)
+                : 0;
             const paid = toNumber(purchase.paid);
-            const remaining = Math.max(0, total - paid);
+            const remaining = Math.max(0, total - returnAmount - paid);
 
             rows.push({
                 id: `purchase-${purchase.id}`,
                 type: "purchase",
                 date: purchase.createdAt,
-                label: `فاتورة مشتريات #${purchase.id}`,
+                label: `ÙØ§ØªÙˆØ±Ø© Ù…Ø´ØªØ±ÙŠØ§Øª #${purchase.id}`,
                 note: purchase.notes || "",
                 total,
                 paid,
                 remaining,
                 effect: -remaining,
             });
+
+            if (Array.isArray(purchase.returns)) {
+                for (const ret of purchase.returns) {
+                    const amount = toNumber(ret.total);
+                    rows.push({
+                        id: `purchase-return-${ret.id}`,
+                        type: "return",
+                        date: ret.createdAt,
+                        label: `Ù…Ø±ØªØ¬Ø¹ Ù…Ø´ØªØ±ÙŠØ§Øª #${ret.id}`,
+                        note: ret.notes || "",
+                        total: 0,
+                        paid: amount,
+                        remaining: 0,
+                        effect: amount,
+                    });
+                }
+            }
         }
 
         for (const payment of payments) {
@@ -128,7 +154,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
                 id: `payment-${payment.id}`,
                 type: "payment",
                 date: payment.createdAt,
-                label: `سداد مورد #${payment.id}`,
+                label: `Ø³Ø¯Ø§Ø¯ Ù…ÙˆØ±Ø¯ #${payment.id}`,
                 note: payment.notes || "",
                 total: 0,
                 paid: amount,
@@ -198,9 +224,9 @@ export default function SupplierLedger({ supplierId, onClose }) {
                     }}
                 >
                     <div>
-                        <h3 style={{ margin: 0, color: "#0f172a" }}>كشف حساب المورد</h3>
+                        <h3 style={{ margin: 0, color: "#0f172a" }}>ÙƒØ´Ù Ø­Ø³Ø§Ø¨ Ø§Ù„Ù…ÙˆØ±Ø¯</h3>
                         <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                            {supplier?.name || "مورد غير معروف"}
+                            {supplier?.name || "Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…Ø¹Ø±ÙˆÙ"}
                         </div>
                     </div>
                     <div style={{ display: "flex", gap: "8px" }}>
@@ -216,7 +242,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
                                 fontWeight: "bold",
                             }}
                         >
-                            طباعة
+                            Ø·Ø¨Ø§Ø¹Ø©
                         </button>
                         <button
                             onClick={onClose}
@@ -229,14 +255,14 @@ export default function SupplierLedger({ supplierId, onClose }) {
                                 cursor: "pointer",
                             }}
                         >
-                            إغلاق
+                            Ø¥ØºÙ„Ø§Ù‚
                         </button>
                     </div>
                 </div>
 
                 {loading ? (
                     <div style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
-                        جاري تحميل كشف الحساب...
+                        Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ ÙƒØ´Ù Ø§Ù„Ø­Ø³Ø§Ø¨...
                     </div>
                 ) : error ? (
                     <div
@@ -261,31 +287,37 @@ export default function SupplierLedger({ supplierId, onClose }) {
                             }}
                         >
                             <div style={cardStyle}>
-                                <div style={{ fontSize: "12px", color: "#64748b" }}>إجمالي المشتريات</div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª</div>
                                 <div style={{ fontWeight: "bold", color: "#0f172a", marginTop: "4px" }}>
                                     {formatMoney(summary.totalPurchases)}
                                 </div>
                             </div>
                             <div style={cardStyle}>
-                                <div style={{ fontSize: "12px", color: "#64748b" }}>المدفوع داخل الفواتير</div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>مرتجع مشتريات</div>
+                                <div style={{ fontWeight: "bold", color: "#0f766e", marginTop: "4px" }}>
+                                    {formatMoney(summary.purchaseReturns)}
+                                </div>
+                            </div>
+                            <div style={cardStyle}>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ø¯Ø§Ø®Ù„ Ø§Ù„ÙÙˆØ§ØªÙŠØ±</div>
                                 <div style={{ fontWeight: "bold", color: "#166534", marginTop: "4px" }}>
                                     {formatMoney(summary.paidInPurchases)}
                                 </div>
                             </div>
                             <div style={cardStyle}>
-                                <div style={{ fontSize: "12px", color: "#64748b" }}>سداد منفصل</div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>Ø³Ø¯Ø§Ø¯ Ù…Ù†ÙØµÙ„</div>
                                 <div style={{ fontWeight: "bold", color: "#166534", marginTop: "4px" }}>
                                     {formatMoney(summary.directPayments)}
                                 </div>
                             </div>
                             <div style={cardStyle}>
-                                <div style={{ fontSize: "12px", color: "#64748b" }}>متبقي تقديري</div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>Ù…ØªØ¨Ù‚ÙŠ ØªÙ‚Ø¯ÙŠØ±ÙŠ</div>
                                 <div style={{ fontWeight: "bold", color: "#b91c1c", marginTop: "4px" }}>
                                     {formatMoney(summary.outstanding)}
                                 </div>
                             </div>
                             <div style={cardStyle}>
-                                <div style={{ fontSize: "12px", color: "#64748b" }}>رصيد المورد الحالي</div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>Ø±ØµÙŠØ¯ Ø§Ù„Ù…ÙˆØ±Ø¯ Ø§Ù„Ø­Ø§Ù„ÙŠ</div>
                                 <div
                                     style={{
                                         fontWeight: "bold",
@@ -308,14 +340,14 @@ export default function SupplierLedger({ supplierId, onClose }) {
                             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "900px" }}>
                                 <thead style={{ background: "#f8fafc" }}>
                                     <tr>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>التاريخ</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>النوع</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>البيان</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>الإجمالي</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>المدفوع</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>المتبقي</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>تأثير الحركة</th>
-                                        <th style={{ padding: "10px", textAlign: "right" }}>الرصيد التراكمي</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„ØªØ§Ø±ÙŠØ®</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ù†ÙˆØ¹</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ø¨ÙŠØ§Ù†</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ø¥Ø¬Ù…Ø§Ù„ÙŠ</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ù…Ø¯ÙÙˆØ¹</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ù…ØªØ¨Ù‚ÙŠ</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>ØªØ£Ø«ÙŠØ± Ø§Ù„Ø­Ø±ÙƒØ©</th>
+                                        <th style={{ padding: "10px", textAlign: "right" }}>Ø§Ù„Ø±ØµÙŠØ¯ Ø§Ù„ØªØ±Ø§ÙƒÙ…ÙŠ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -329,7 +361,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
                                                     color: "#64748b",
                                                 }}
                                             >
-                                                لا توجد حركات لهذا المورد
+                                                Ù„Ø§ ØªÙˆØ¬Ø¯ Ø­Ø±ÙƒØ§Øª Ù„Ù‡Ø°Ø§ Ø§Ù„Ù…ÙˆØ±Ø¯
                                             </td>
                                         </tr>
                                     ) : (
@@ -337,7 +369,7 @@ export default function SupplierLedger({ supplierId, onClose }) {
                                             <tr key={row.id} style={{ borderTop: "1px solid #e2e8f0" }}>
                                                 <td style={{ padding: "10px" }}>{formatDateTime(row.date)}</td>
                                                 <td style={{ padding: "10px" }}>
-                                                    {row.type === "purchase" ? "مشتريات" : "سداد"}
+                                                    {row.type === "purchase" ? "Ù…Ø´ØªØ±ÙŠØ§Øª" : "Ø³Ø¯Ø§Ø¯"}
                                                 </td>
                                                 <td style={{ padding: "10px" }}>
                                                     <div style={{ fontWeight: 600, color: "#0f172a" }}>{row.label}</div>

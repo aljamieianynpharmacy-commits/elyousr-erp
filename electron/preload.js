@@ -42,7 +42,8 @@ contextBridge.exposeInMainWorld('api', {
     updateSale: (saleId, saleData) => ipcRenderer.invoke('db:updateSale', saleId, saleData),
 
     // Purchases
-    getPurchases: () => ipcRenderer.invoke('db:getPurchases'),
+    getPurchases: (options) => ipcRenderer.invoke('db:getPurchases', options),
+    getPurchaseById: (purchaseId) => ipcRenderer.invoke('db:getPurchaseById', purchaseId),
     createPurchase: (purchaseData) => ipcRenderer.invoke('db:createPurchase', purchaseData),
 
     // Returns
@@ -50,6 +51,8 @@ contextBridge.exposeInMainWorld('api', {
     // Returns
     getReturns: () => ipcRenderer.invoke('db:getReturns'),
     createReturn: (returnData) => ipcRenderer.invoke('db:createReturn', returnData),
+    getPurchaseReturns: () => ipcRenderer.invoke('db:getPurchaseReturns'),
+    createPurchaseReturn: (returnData) => ipcRenderer.invoke('db:createPurchaseReturn', returnData),
 
     // Customers
     getCustomers: (params) => ipcRenderer.invoke('db:getCustomers', params),

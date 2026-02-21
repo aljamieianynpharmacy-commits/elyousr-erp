@@ -487,8 +487,11 @@ ipcMain.handle('db:deleteUser', async (event, id) => {
 });
 
 // Purchases
-ipcMain.handle('db:getPurchases', async () => {
-    return await dbService.getPurchases();
+ipcMain.handle('db:getPurchases', async (event, options) => {
+    return await dbService.getPurchases(options || {});
+});
+ipcMain.handle('db:getPurchaseById', async (event, purchaseId) => {
+    return await dbService.getPurchaseById(purchaseId);
 });
 ipcMain.handle('db:createPurchase', async (event, purchaseData) => {
     return await dbService.createPurchase(purchaseData);
@@ -500,6 +503,12 @@ ipcMain.handle('db:getReturns', async () => {
 });
 ipcMain.handle('db:createReturn', async (event, returnData) => {
     return await dbService.createReturn(returnData);
+});
+ipcMain.handle('db:getPurchaseReturns', async () => {
+    return await dbService.getPurchaseReturns();
+});
+ipcMain.handle('db:createPurchaseReturn', async (event, returnData) => {
+    return await dbService.createPurchaseReturn(returnData);
 });
 
 // Customer Payments

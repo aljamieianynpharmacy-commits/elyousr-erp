@@ -111,6 +111,7 @@ model Variant {
   saleItems     SaleItem[]
   purchaseItems PurchaseItem[]
   returnItems   ReturnItem[]
+  purchaseReturnItems PurchaseReturnItem[]
 
   @@unique([productId, productSize, color])
   @@index([productId])
@@ -329,8 +330,9 @@ model Supplier {
   balance   Float    @default(0)
   createdAt DateTime @default(now())
 
-  purchases Purchase[]
-  payments  SupplierPayment[]
+  purchases       Purchase[]
+  purchaseReturns PurchaseReturn[]
+  payments        SupplierPayment[]
 }
 
 model Purchase {
@@ -341,8 +343,9 @@ model Purchase {
   notes      String?
   createdAt  DateTime @default(now())
 
-  supplier Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplier Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   items    PurchaseItem[]
+  returns  PurchaseReturn[]
 }
 
 model PurchaseItem {
@@ -356,6 +359,35 @@ model PurchaseItem {
   variant  Variant  @relation(fields: [variantId], references: [id])
 
   @@id([id, purchaseId])
+}
+
+model PurchaseReturn {
+  id         Int      @id @default(autoincrement())
+  purchaseId Int?
+  supplierId Int?
+  total      Float
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  purchase Purchase?          @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  supplier Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items    PurchaseReturnItem[]
+
+  @@index([purchaseId])
+  @@index([supplierId])
+}
+
+model PurchaseReturnItem {
+  id               Int
+  purchaseReturnId Int
+  variantId        Int
+  quantity         Int
+  price            Float
+
+  purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  variant        Variant        @relation(fields: [variantId], references: [id])
+
+  @@id([id, purchaseReturnId])
 }
 
 model SupplierPayment {

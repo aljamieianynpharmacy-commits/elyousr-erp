@@ -2666,9 +2666,17 @@ const dbService = {
     },
 
     // ==================== PURCHASES (فواتير المشتريات) ====================
-    async getPurchases() {
+    async getPurchases(options = {}) {
         try {
-            return await prisma.purchase.findMany({
+            const parsedSupplierId = parsePositiveInt(options?.supplierId);
+            const requestedLimit = parseInt(options?.limit, 10);
+            const safeLimit = Number.isFinite(requestedLimit)
+                ? Math.max(1, Math.min(500, requestedLimit))
+                : null;
+            const where = parsedSupplierId ? { supplierId: parsedSupplierId } : undefined;
+
+            const purchases = await prisma.purchase.findMany({
+                where,
                 include: {
                     supplier: true,
                     items: {
@@ -2677,10 +2685,67 @@ const dbService = {
                                 include: { product: true }
                             }
                         }
+                    },
+                    returns: {
+                        include: {
+                            items: true
+                        },
+                        orderBy: { createdAt: 'desc' }
                     }
                 },
+                ...(safeLimit ? { take: safeLimit } : {}),
                 orderBy: { createdAt: 'desc' }
             });
+
+            return purchases.map((purchase) => ({
+                ...purchase,
+                items: Array.isArray(purchase.items)
+                    ? purchase.items.map((item) => ({
+                        ...item,
+                        price: toNumber(item.cost, 0)
+                    }))
+                    : []
+            }));
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getPurchaseById(purchaseId) {
+        try {
+            const parsedPurchaseId = parsePositiveInt(purchaseId);
+            if (!parsedPurchaseId) return { error: 'Invalid purchase id' };
+
+            const purchase = await prisma.purchase.findUnique({
+                where: { id: parsedPurchaseId },
+                include: {
+                    supplier: true,
+                    items: {
+                        include: {
+                            variant: {
+                                include: { product: true }
+                            }
+                        }
+                    },
+                    returns: {
+                        include: {
+                            items: true
+                        },
+                        orderBy: { createdAt: 'desc' }
+                    }
+                }
+            });
+
+            if (!purchase) return { error: 'Purchase not found' };
+            return {
+                ...purchase,
+                items: Array.isArray(purchase.items)
+                    ? purchase.items.map((item) => ({
+                        ...item,
+                        price: toNumber(item.cost, 0)
+                    }))
+                    : []
+            };
         } catch (error) {
             return { error: error.message };
         }
@@ -2952,6 +3017,228 @@ const dbService = {
                 }
 
                 return newReturn;
+            });
+
+            perf({ rows: 1 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async getPurchaseReturns() {
+        try {
+            return await prisma.purchaseReturn.findMany({
+                include: {
+                    purchase: true,
+                    supplier: true,
+                    items: {
+                        include: {
+                            variant: {
+                                include: { product: true }
+                            }
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async createPurchaseReturn(returnData) {
+        const perf = startPerfTimer('db:createPurchaseReturn', {
+            hasSupplier: Boolean(returnData?.supplierId),
+            itemCount: Array.isArray(returnData?.items) ? returnData.items.length : 0
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                if (!Array.isArray(returnData?.items) || returnData.items.length === 0) {
+                    throw new Error('Purchase return items are required');
+                }
+
+                const returnDate = parseDateOrDefault(returnData?.returnDate, new Date());
+                const parsedPurchaseId = parsePositiveInt(returnData?.purchaseId);
+                let effectiveSupplierId = parsePositiveInt(returnData?.supplierId);
+                const requestedTotal = Math.max(0, toNumber(returnData?.total, 0));
+                const purchasedQtyByVariant = new Map();
+                const returnedQtyByVariant = new Map();
+
+                if (parsedPurchaseId) {
+                    const sourcePurchase = await tx.purchase.findUnique({
+                        where: { id: parsedPurchaseId },
+                        include: {
+                            items: true,
+                            returns: {
+                                include: {
+                                    items: true
+                                }
+                            }
+                        }
+                    });
+                    if (!sourcePurchase) {
+                        throw new Error('Purchase not found for purchase return');
+                    }
+
+                    if (sourcePurchase.supplierId && effectiveSupplierId && sourcePurchase.supplierId !== effectiveSupplierId) {
+                        throw new Error('Supplier does not match selected purchase');
+                    }
+                    if (!effectiveSupplierId && sourcePurchase.supplierId) {
+                        effectiveSupplierId = sourcePurchase.supplierId;
+                    }
+
+                    for (const purchaseItem of sourcePurchase.items || []) {
+                        const variantId = parsePositiveInt(purchaseItem?.variantId);
+                        if (!variantId) continue;
+                        const qty = Math.max(0, toInteger(purchaseItem?.quantity, 0));
+                        purchasedQtyByVariant.set(variantId, (purchasedQtyByVariant.get(variantId) || 0) + qty);
+                    }
+                    for (const prevReturn of sourcePurchase.returns || []) {
+                        for (const prevItem of prevReturn.items || []) {
+                            const variantId = parsePositiveInt(prevItem?.variantId);
+                            if (!variantId) continue;
+                            const qty = Math.max(0, toInteger(prevItem?.quantity, 0));
+                            returnedQtyByVariant.set(variantId, (returnedQtyByVariant.get(variantId) || 0) + qty);
+                        }
+                    }
+                }
+
+                const newPurchaseReturn = await tx.purchaseReturn.create({
+                    data: {
+                        purchaseId: parsedPurchaseId || null,
+                        supplierId: effectiveSupplierId || null,
+                        total: requestedTotal,
+                        notes: returnData?.notes || null,
+                        createdAt: returnDate
+                    }
+                });
+
+                let computedTotal = 0;
+                for (let i = 0; i < returnData.items.length; i++) {
+                    const item = returnData.items[i];
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(1, toInteger(item?.quantity, 1));
+                    const price = Math.max(0, toNumber(item?.price, 0));
+                    if (!variantId) {
+                        throw new Error('Invalid variantId in purchase return items');
+                    }
+
+                    if (parsedPurchaseId) {
+                        const purchasedQty = Math.max(0, purchasedQtyByVariant.get(variantId) || 0);
+                        const alreadyReturnedQty = Math.max(0, returnedQtyByVariant.get(variantId) || 0);
+                        const remainingQty = Math.max(0, purchasedQty - alreadyReturnedQty);
+                        if (purchasedQty <= 0) {
+                            throw new Error('Variant does not exist in selected purchase');
+                        }
+                        if (quantity > remainingQty) {
+                            throw new Error('Requested return quantity exceeds purchase remaining quantity');
+                        }
+                        returnedQtyByVariant.set(variantId, alreadyReturnedQty + quantity);
+                    }
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, quantity: true }
+                    });
+                    if (!variant) {
+                        throw new Error('Variant not found in purchase return items');
+                    }
+
+                    if (toNumber(variant.quantity, 0) < quantity) {
+                        throw new Error('Insufficient stock quantity for purchase return');
+                    }
+
+                    await tx.purchaseReturnItem.create({
+                        data: {
+                            id: i + 1,
+                            purchaseReturnId: newPurchaseReturn.id,
+                            variantId,
+                            quantity,
+                            price
+                        }
+                    });
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+
+                    computedTotal += price * quantity;
+                }
+
+                const finalTotal = Math.max(0, toNumber(
+                    requestedTotal > 0 ? requestedTotal : computedTotal
+                ));
+                if (Math.abs(finalTotal - requestedTotal) > 0.009) {
+                    await tx.purchaseReturn.update({
+                        where: { id: newPurchaseReturn.id },
+                        data: { total: finalTotal }
+                    });
+                }
+
+                if (effectiveSupplierId) {
+                    await tx.supplier.update({
+                        where: { id: effectiveSupplierId },
+                        data: {
+                            balance: { increment: finalTotal }
+                        }
+                    });
+                }
+
+                const refundAmount = Math.max(0, toNumber(
+                    returnData?.refundAmount !== undefined ? returnData.refundAmount : finalTotal
+                ));
+                if (refundAmount > 0) {
+                    const returnTreasuryId = await resolveTreasuryId(tx, returnData?.treasuryId);
+                    const refundMode = String(returnData?.refundMode || REFUND_MODE.SAME_METHOD)
+                        .trim()
+                        .toUpperCase();
+
+                    let resolvedPaymentMethodId;
+                    if (refundMode === REFUND_MODE.CASH_ONLY) {
+                        resolvedPaymentMethodId = await resolveCashPaymentMethodId(tx, 1);
+                    } else {
+                        const sameMethodCandidate = returnData?.paymentMethodId ?? returnData?.paymentMethod;
+                        resolvedPaymentMethodId = await resolvePaymentMethodId(
+                            tx,
+                            sameMethodCandidate,
+                            1
+                        );
+                    }
+
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: returnTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.RETURN_REFUND,
+                        direction: TREASURY_DIRECTION.IN,
+                        amount: refundAmount,
+                        notes: `Purchase Return #${newPurchaseReturn.id}${returnData?.notes ? ` - ${returnData.notes}` : ''}`,
+                        referenceType: 'PURCHASE_RETURN',
+                        referenceId: newPurchaseReturn.id,
+                        paymentMethodId: resolvedPaymentMethodId,
+                        entryDate: returnDate,
+                        idempotencyKey: generateIdempotencyKey('PURCHASE_RETURN_REFUND', [
+                            newPurchaseReturn.id,
+                            resolvedPaymentMethodId,
+                            normalizeAmountForKey(refundAmount),
+                            refundMode
+                        ]),
+                        createdByUserId: parsePositiveInt(returnData?.createdByUserId ?? returnData?.userId),
+                        meta: {
+                            refundMode
+                        }
+                    });
+                    throwIfResultError(treasuryEntryResult);
+                }
+
+                return {
+                    ...newPurchaseReturn,
+                    total: finalTotal
+                };
             });
 
             perf({ rows: 1 });

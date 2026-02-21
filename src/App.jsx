@@ -6,6 +6,7 @@ import EnhancedPOS from './pages/EnhancedPOS';
 import Sales from './pages/Sales';
 import Purchases from './pages/Purchases';
 import Returns from './pages/Returns';
+import PurchaseReturns from './pages/PurchaseReturns';
 import Customers from './pages/Customers';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
@@ -33,6 +34,7 @@ function App() {
       'dashboard',
       'sales',
       'purchases',
+      'purchaseReturns',
       'returns',
       'products',
       'customers',
@@ -82,6 +84,8 @@ function App() {
         return <Purchases />;
       case 'returns':
         return <Returns />;
+      case 'purchaseReturns':
+        return <PurchaseReturns />;
       case 'products':
         return <Products />;
       case 'customers':
@@ -152,7 +156,8 @@ function App() {
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchases" icon="📥" label="المشتريات" />
-            <NavItem page="returns" icon="↩️" label="المرتجعات" />
+            <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
+            <NavItem page="returns" icon="↩️" label="مرتجع المبيعات" />
             <NavItem page="products" icon="📦" label="المنتجات" />
             <NavItem page="customers" icon="👥" label="العملاء" />
             <NavItem page="suppliers" icon="🚚" label="الموردين" />

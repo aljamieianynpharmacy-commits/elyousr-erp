@@ -109,6 +109,8 @@ export default function Returns() {
     const effectiveRefundMode = hasSelectedCustomer ? sess.refundMode : 'cashOut';
     const previousBalance = toNumber(selCust?.balance);
     const nextBalance = previousBalance - (effectiveRefundMode === 'creditNote' ? cartTotal : 0);
+    const notesPanelHeight = 80;
+    const summaryCardHeight = 60;
 
     const setSessionCustomer = useCallback((customer) => {
         const currentCustomerId = sess?.customerId ? String(sess.customerId) : '';
@@ -496,7 +498,15 @@ export default function Returns() {
                                             <td style={{ padding: 12, textAlign: 'center' }}><input type="number" step="0.5" min="0" value={item.price || ''} onChange={e => updPrice(item.itemId, e.target.value)} disabled={!!item.saleId} style={{ width: 80, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, textAlign: 'center', backgroundColor: item.saleId ? '#f9fafb' : '#fff' }} onFocus={e => e.target.select()} /></td>
                                             <td style={{ padding: 12, textAlign: 'center' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}><button onClick={() => updQty(item.itemId, item.returnQty - 1, item.maxQuantity)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d1d5db', backgroundColor: '#f9fafb', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>-</button><input type="number" min="1" value={item.returnQty || ''} onChange={e => updQty(item.itemId, e.target.value, item.maxQuantity)} style={{ width: 50, padding: 6, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, textAlign: 'center', fontWeight: 'bold' }} onFocus={e => e.target.select()} /><button onClick={() => updQty(item.itemId, item.returnQty + 1, item.maxQuantity)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d1d5db', backgroundColor: '#f9fafb', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button></div>{item.maxQuantity !== Infinity && <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3 }}>أقصى: {item.maxQuantity}</div>}</td>
                                             <td style={{ padding: 12, textAlign: 'center' }}><span style={{ color: '#059669', fontWeight: 'bold' }}>{(item.price * item.returnQty).toFixed(2)}</span></td>
-                                            <td style={{ padding: 12, textAlign: 'center' }}><button onClick={() => rmCart(item.itemId)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>×</button></td>
+                                            <td style={{ padding: 12, textAlign: 'center' }}>
+                                                <button
+                                                    onClick={() => rmCart(item.itemId)}
+                                                    title="حذف من السلة"
+                                                    style={{ width: 30, height: 30, borderRadius: 8, border: 'none', backgroundColor: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,.15)' }}
+                                                >
+                                                    🗑️
+                                                </button>
+                                            </td>
                                         </tr>)}
                                 </tbody>
                             </table>
@@ -511,30 +521,30 @@ export default function Returns() {
 
                 {/* Section 1: Actions & Refund Mode (Right) - flex 3 to match Cart parent */}
                 <div style={{ flex: 2.15, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                        <div style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', gap: 10, minHeight: notesPanelHeight }}>
+                        <div style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column', height: '100%' }}>
                             <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>تاريخ المرتجع:</label>
                             <input type="date" value={sess.returnDate || todayLocalISO()} onChange={e => upd({ returnDate: e.target.value })} style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
                         </div>
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
                             <label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>طريقة الرد:</label>
-                            <div style={{ display: 'flex', gap: 5 }}>
-                                <button onClick={() => upd({ refundMode: 'creditNote' })} disabled={!hasSelectedCustomer} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: !hasSelectedCustomer ? '#f3f4f6' : (effectiveRefundMode === 'creditNote' ? '#fefce8' : '#fff'), color: !hasSelectedCustomer ? '#9ca3af' : (effectiveRefundMode === 'creditNote' ? '#92400e' : '#374151'), fontWeight: 'bold', fontSize: 13, cursor: hasSelectedCustomer ? 'pointer' : 'not-allowed', transition: 'all .2s' }}>📝 رصيد</button>
-                                <button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: effectiveRefundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: effectiveRefundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button>
+                            <div style={{ display: 'flex', gap: 5, flex: 1 }}>
+                                <button onClick={() => upd({ refundMode: 'creditNote' })} disabled={!hasSelectedCustomer} style={{ flex: 1, height: '100%', padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: !hasSelectedCustomer ? '#f3f4f6' : (effectiveRefundMode === 'creditNote' ? '#fefce8' : '#fff'), color: !hasSelectedCustomer ? '#9ca3af' : (effectiveRefundMode === 'creditNote' ? '#92400e' : '#374151'), fontWeight: 'bold', fontSize: 13, cursor: hasSelectedCustomer ? 'pointer' : 'not-allowed', transition: 'all .2s' }}>📝 رصيد</button>
+                                <button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, height: '100%', padding: 11, borderRadius: 6, border: `2px solid ${effectiveRefundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: effectiveRefundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: effectiveRefundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button>
                             </div>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 'auto' }}>
-                        <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
-                        <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد وطباعة (F2)</button>
-                        <button onClick={() => { upd({ cart: [] }); showToast('تم الإفراغ', 'warning'); }} disabled={cart.length === 0} style={{ padding: '14px 20px', backgroundColor: cart.length === 0 ? '#9ca3af' : '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>إفراغ</button>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginTop: 'auto', minHeight: summaryCardHeight }}>
+                        <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
+                        <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد وطباعة (F2)</button>
+                        <button onClick={() => { upd({ cart: [] }); showToast('تم الإفراغ', 'warning'); }} disabled={cart.length === 0} style={{ height: '100%', padding: '14px 20px', backgroundColor: cart.length === 0 ? '#9ca3af' : '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>إفراغ</button>
                     </div>
                 </div>
 
                 {/* Section 2: Middle Panel (Notes & Balances with summaries) */}
                 <div style={{ flex: 1.7, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {/* Notes Input */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: notesPanelHeight }}>
                         <label style={{ fontSize: "12px", color: "#6b7280", marginBottom: "4px" }}>ملاحظات:</label>
                         <textarea
                             value={sess.returnNotes}
@@ -554,7 +564,7 @@ export default function Returns() {
                     </div>
 
                     {/* Summaries Card */}
-                    <div style={{ flex: 1, backgroundColor: 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '5px', height: '80px', boxSizing: 'border-box' }}>
+                    <div style={{ flex: 1, backgroundColor: 'white', padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '5px', minHeight: summaryCardHeight, boxSizing: 'border-box' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontSize: '13px', color: '#6b7280', fontWeight: 'bold' }}>الملخص :</span>
                             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>{cartCount} وحدة · {cart.length} صنف</span>

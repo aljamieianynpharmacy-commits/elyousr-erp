@@ -12,7 +12,7 @@ const isCashMethod = (method) => {
     return n.includes('cash') || n.includes('نقد');
 };
 
-const emptySession = () => ({ id: genId(), cart: [], customerId: null, customerName: '', selectedSaleId: null, returnNotes: '', refundMode: 'cashOut', paymentMethodId: '', autoPrint: false });
+const emptySession = () => ({ id: genId(), cart: [], customerId: null, customerName: '', selectedSaleId: null, returnNotes: '', refundMode: 'cashOut', paymentMethodId: '' });
 
 // ─── Toast ───
 function Toast({ message, type = 'info', onClose }) {
@@ -24,7 +24,7 @@ function Toast({ message, type = 'info', onClose }) {
 
 // ─── Tab ───
 const ReturnTab = ({ session, isActive, onSelect, onClose, canClose }) => {
-    const label = session.customerName ? `مرتجع: ${session.customerName}` : `مرتجع ${session.id.slice(-4)}`;
+    const label = session.customerName ? `مرتجع: ${session.customerName}` : 'فاتوره مرتجع';
     const n = session.cart?.length || 0;
     return <div onClick={onSelect} style={{ padding: '8px 15px', backgroundColor: isActive ? '#dc2626' : '#e5e7eb', color: isActive ? '#fff' : '#374151', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, minWidth: 120, justifyContent: 'space-between', boxShadow: isActive ? '0 4px 6px -1px rgba(220,38,38,.3)' : 'none', transition: 'all .2s' }}>
         <span style={{ fontSize: 13 }}>{label}{n > 0 && <span style={{ marginRight: 5, fontSize: 11, opacity: .8 }}>({n})</span>}</span>
@@ -36,7 +36,7 @@ const ReturnTab = ({ session, isActive, onSelect, onClose, canClose }) => {
 function hl(text, term) { if (!term || !text) return text; const i = text.toLowerCase().indexOf(term.toLowerCase()); if (i === -1) return text; return <>{text.slice(0, i)}<span style={{ backgroundColor: '#fef08a', fontWeight: 'bold' }}>{text.slice(i, i + term.length)}</span>{text.slice(i + term.length)}</>; }
 
 // ─── Confirmation Modal ───
-function ConfirmModal({ cart, cartTotal, customer, refundMode, onConfirm, onCancel }) {
+function ConfirmModal({ cart, cartTotal, customer, refundMode, onConfirm, onCancel, confirmLabel = '✅ تأكيد وحفظ' }) {
     return <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ backgroundColor: '#fff', borderRadius: 12, padding: 25, width: 500, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.3)' }}>
             <h3 style={{ margin: '0 0 15px', color: '#1f2937', fontSize: 18 }}>📋 ملخص المرتجع</h3>
@@ -53,7 +53,7 @@ function ConfirmModal({ cart, cartTotal, customer, refundMode, onConfirm, onCanc
                 <div style={{ fontSize: 28, fontWeight: 'bold', color: '#dc2626' }}>{cartTotal.toFixed(2)} ج.م</div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={onConfirm} style={{ flex: 1, padding: 14, backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>✅ تأكيد وحفظ</button>
+                <button onClick={onConfirm} style={{ flex: 1, padding: 14, backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>{confirmLabel}</button>
                 <button onClick={onCancel} style={{ flex: 1, padding: 14, backgroundColor: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 15, fontWeight: 'bold', cursor: 'pointer' }}>إلغاء</button>
             </div>
         </div>
@@ -86,6 +86,7 @@ export default function Returns() {
     const [showCustList, setShowCL] = useState(false);
     const [custIdx, setCustIdx] = useState(-1);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [printOnConfirm, setPrintOnConfirm] = useState(false);
     const [rightTab, setRightTab] = useState('search');
     const [prodSearch, setProdSearch] = useState('');
     const [allVariants, setAllVariants] = useState([]);
@@ -124,7 +125,7 @@ export default function Returns() {
     }, [paymentMethods, sess?.paymentMethodId, upd]);
 
     // ─── Keys ───
-    useEffect(() => { const h = (e) => { if (showConfirm) return; if (e.key === 'F1') { e.preventDefault(); handleCheckoutFlow(); } else if (e.key === 'F4') { e.preventDefault(); searchRef.current?.focus(); } else if (e.key === 'F5') { e.preventDefault(); const ci = document.querySelector('input[placeholder*="ابحث عن عميل"]'); if (ci) ci.focus(); } else if (e.key === 'Escape' && cart.length > 0) { e.preventDefault(); upd({ cart: [] }); showToast('تم إفراغ السلة', 'warning'); } }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h) }, [cart, showConfirm, upd]);
+    useEffect(() => { const h = (e) => { if (showConfirm) return; if (e.key === 'F1') { e.preventDefault(); handleCheckoutFlow(false); } else if (e.key === 'F2') { e.preventDefault(); handleCheckoutFlow(true); } else if (e.key === 'F4') { e.preventDefault(); searchRef.current?.focus(); } else if (e.key === 'F5') { e.preventDefault(); const ci = document.querySelector('input[placeholder*="ابحث عن عميل"]'); if (ci) ci.focus(); } else if (e.key === 'Escape' && cart.length > 0) { e.preventDefault(); upd({ cart: [] }); showToast('تم إفراغ السلة', 'warning'); } }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h) }, [cart, showConfirm, upd]);
 
     // ─── Click outside ───
     useEffect(() => { const h = (e) => { if (custDDRef.current && !custDDRef.current.contains(e.target)) setShowCL(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, []);
@@ -293,7 +294,14 @@ export default function Returns() {
     const returnAllItems = () => { if (!saleItems.length) return; let added = 0; const prev = [...(sess.cart || [])]; for (const item of saleItems) { if (item.maxQuantity <= 0) continue; const ex = prev.find(c => c.itemId === item.itemId); if (!ex) { prev.push({ ...item, returnQty: item.maxQuantity }); added++; } else if (ex.returnQty < item.maxQuantity) { ex.returnQty = item.maxQuantity; added++; } } upd({ cart: prev }); showToast(`تم إضافة ${added} صنف للسلة`, 'success'); };
 
     // ─── Checkout Flow (shows confirmation modal) ───
-    const handleCheckoutFlow = () => { if (cart.length === 0) { showToast('السلة فارغة!', 'warning'); return; } const rm = sess.refundMode; const pmId = sess.paymentMethodId; if ((!selCust || rm === 'cashOut') && !pmId) { showToast('اختر طريقة الدفع', 'error'); return; } setShowConfirm(true); };
+    const handleCheckoutFlow = (shouldPrint = false) => {
+        if (cart.length === 0) { showToast('السلة فارغة!', 'warning'); return; }
+        const rm = sess.refundMode;
+        const pmId = sess.paymentMethodId;
+        if ((!selCust || rm === 'cashOut') && !pmId) { showToast('اختر طريقة الدفع', 'error'); return; }
+        setPrintOnConfirm(shouldPrint);
+        setShowConfirm(true);
+    };
 
     const doCheckout = async () => {
         setShowConfirm(false); setLoading(true);
@@ -304,14 +312,23 @@ export default function Returns() {
         try {
             const res = await window.api.createReturn(rd);
             if (res?.error) { await safeAlert('خطأ: ' + res.error); } else {
-                try { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
-                catch (printErr) { console.error(printErr); showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning'); }
+                if (printOnConfirm) {
+                    try { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
+                    catch (printErr) { console.error(printErr); showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning'); }
+                }
                 showToast('✅ تم حفظ المرتجع', 'success'); playBeep(true);
-                upd({ cart: [], returnNotes: '', selectedSaleId: null }); setSelSale(null);
-                if (sess.customerId) { const s = await window.api.getSales({ customerId: sess.customerId, limit: 20 }); if (!s?.error) setCustSales(s); }
+                upd({ cart: [], returnNotes: '', selectedSaleId: null, customerId: null, customerName: '' });
+                setSelSale(null);
+                setSaleItems([]);
+                setCustSales([]);
+                setSearch('');
+                setCustSearch('');
+                setProdSearch('');
+                setShowCL(false);
+                setPrintOnConfirm(false);
             }
         } catch (er) { console.error(er); await safeAlert('تعذر الحفظ'); }
-        finally { setLoading(false); searchRef.current?.focus(); }
+        finally { setLoading(false); setPrintOnConfirm(false); searchRef.current?.focus(); }
     };
 
     const buildReceipt = (res) => `<html dir="rtl"><head><style>body{font-family:'Segoe UI',Tahoma,sans-serif;padding:20px;font-size:14px}.header{text-align:center;margin-bottom:20px;border-bottom:2px dashed #000;padding-bottom:15px}.title{font-size:20px;font-weight:bold}.info div{display:flex;justify-content:space-between;padding:3px 0}table{width:100%;border-collapse:collapse;margin:15px 0}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}th{background:#f8f9fa}.total{font-size:18px;font-weight:bold;text-align:left;border-top:2px dashed #000;padding-top:15px;margin-top:15px}.footer{text-align:center;margin-top:30px;font-size:12px;color:#555}</style></head><body><div class="header"><div class="title">إيصال مرتجع</div><div>رقم: ${res.data?.id || '-'}</div><div>${new Date().toLocaleString('ar-EG')}</div></div><div class="info"><div><span>العميل:</span><span>${selCust ? selCust.name : 'عميل عابر'}</span></div></div><table><thead><tr><th>الصنف</th><th style="text-align:center">كمية</th><th style="text-align:center">سعر</th><th style="text-align:left">إجمالي</th></tr></thead><tbody>${cart.map(i => `<tr><td>${i.productName} (${i.size})</td><td style="text-align:center">${i.returnQty}</td><td style="text-align:center">${parseFloat(i.price).toFixed(2)}</td><td style="text-align:left">${(i.returnQty * i.price).toFixed(2)}</td></tr>`).join('')}</tbody></table><div class="total">الإجمالي: ${cartTotal.toFixed(2)} ج.م</div><div class="footer">شكراً لثقتكم</div></body></html>`;
@@ -323,7 +340,7 @@ export default function Returns() {
             <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
             {loading && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="spinner"></div></div>}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={sess.refundMode} onConfirm={doCheckout} onCancel={() => setShowConfirm(false)} />}
+            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={sess.refundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? '✅ تأكيد وحفظ وطباعة' : '✅ تأكيد وحفظ'} />}
 
             {/* ═══ Tabs ═══ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
@@ -478,9 +495,9 @@ export default function Returns() {
                                 {selCust && <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}><label style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>طريقة الرد:</label><div style={{ display: 'flex', gap: 5 }}><button onClick={() => upd({ refundMode: 'creditNote' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'creditNote' ? '#f59e0b' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'creditNote' ? '#fefce8' : '#fff', color: sess.refundMode === 'creditNote' ? '#92400e' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>📝 رصيد</button><button onClick={() => upd({ refundMode: 'cashOut' })} style={{ flex: 1, padding: 11, borderRadius: 6, border: `2px solid ${sess.refundMode === 'cashOut' ? '#10b981' : '#e5e7eb'}`, backgroundColor: sess.refundMode === 'cashOut' ? '#ecfdf5' : '#fff', color: sess.refundMode === 'cashOut' ? '#047857' : '#374151', fontWeight: 'bold', fontSize: 13, cursor: 'pointer', transition: 'all .2s' }}>💵 نقدي</button></div></div>}
                             </div>
                             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                                <button id="btn-confirm-return" onClick={handleCheckoutFlow} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#ef4444', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
+                                <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#ef4444', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد المرتجع (F1)</button>
+                                <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد وطباعة (F2)</button>
                                 <button onClick={() => { upd({ cart: [] }); showToast('تم الإفراغ', 'warning'); }} disabled={cart.length === 0} style={{ padding: '14px 20px', backgroundColor: cart.length === 0 ? '#9ca3af' : '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>إفراغ</button>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}><input type="checkbox" checked={sess.autoPrint || false} onChange={e => upd({ autoPrint: e.target.checked })} style={{ width: 16, height: 16, accentColor: '#3b82f6' }} />طباعة تلقائية</label>
                             </div>
                         </div>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>

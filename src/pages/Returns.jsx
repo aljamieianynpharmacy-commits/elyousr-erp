@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { safeAlert, safeConfirm } from '../utils/safeAlert';
+import { safeAlert } from '../utils/safeAlert';
 import { filterPosPaymentMethods, normalizePaymentMethodCode } from '../utils/paymentMethodFilters';
 
 const toNumber = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
@@ -99,6 +99,21 @@ export default function Returns() {
     const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.returnQty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((s, i) => s + i.returnQty, 0), [cart]);
 
+    const setSessionCustomer = useCallback((customer) => {
+        const currentCustomerId = sess?.customerId ? String(sess.customerId) : '';
+        const nextCustomerId = customer?.id ? String(customer.id) : '';
+        const changed = currentCustomerId !== nextCustomerId;
+        const nextState = { customerId: customer?.id || null, customerName: customer?.name || '' };
+        if (changed) {
+            nextState.cart = [];
+            nextState.selectedSaleId = null;
+            setSelSale(null);
+            setSaleItems([]);
+            if ((sess?.cart || []).length > 0) showToast('تم تفريغ السلة عند تغيير العميل', 'warning');
+        }
+        upd(nextState);
+    }, [sess?.customerId, sess?.cart, showToast, upd]);
+
     // ─── Init ───
     useEffect(() => { (async () => { setLoading(true); try { const [c, m, v] = await Promise.all([window.api.getCustomers(), window.api.getPaymentMethods(), window.api.getVariants()]); if (!c?.error) setCustomers(Array.isArray(c) ? c : (c?.data || [])); if (!m?.error) setPM(filterPosPaymentMethods(m || []).filter(isCashMethod)); if (!v?.error) setAllVariants(Array.isArray(v) ? v : []); } catch (e) { console.error(e) } finally { setLoading(false) } })() }, []);
     useEffect(() => {
@@ -120,7 +135,29 @@ export default function Returns() {
     // ─── Filtered Customers ───
     const filtCust = useMemo(() => { if (!Array.isArray(customers)) return []; if (showCustList && !custSearch) return customers.slice(0, 50); if (!custSearch) return []; const t = custSearch.toLowerCase(); return customers.filter(c => c.name.toLowerCase().includes(t) || c.phone?.includes(t)).slice(0, 20); }, [customers, custSearch, showCustList]);
 
-    const handleCustKey = (e) => { if (!showCustList || filtCust.length === 0) return; if (e.key === 'ArrowDown') { e.preventDefault(); setCustIdx(p => p < filtCust.length - 1 ? p + 1 : p); } else if (e.key === 'ArrowUp') { e.preventDefault(); setCustIdx(p => p > 0 ? p - 1 : -1); } else if (e.key === 'Enter') { e.preventDefault(); if (custIdx >= 0 && filtCust[custIdx]) { const c = filtCust[custIdx]; upd({ customerId: c.id, customerName: c.name }); setCustSearch(''); setShowCL(false); setCustIdx(-1); } } else if (e.key === 'Escape') { e.preventDefault(); setShowCL(false); setCustIdx(-1); } };
+    const handleCustKey = (e) => {
+        if (!showCustList || filtCust.length === 0) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setCustIdx(p => p < filtCust.length - 1 ? p + 1 : p);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setCustIdx(p => p > 0 ? p - 1 : -1);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (custIdx >= 0 && filtCust[custIdx]) {
+                const c = filtCust[custIdx];
+                setSessionCustomer(c);
+                setCustSearch('');
+                setShowCL(false);
+                setCustIdx(-1);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            setShowCL(false);
+            setCustIdx(-1);
+        }
+    };
 
     // ─── Customer history ───
     useEffect(() => { (async () => { if (!sess?.customerId) { setCustSales([]); setSelSale(null); setSaleItems([]); return; } try { const s = await window.api.getSales({ customerId: sess.customerId, limit: 20 }); if (!s?.error) setCustSales(s); } catch (e) { console.error(e) } })() }, [sess?.customerId]);
@@ -197,7 +234,7 @@ export default function Returns() {
                     showToast('هذه الفاتورة ليست للعميل المحدد', 'error');
                     return;
                 }
-                if (!selCust && sale.customer) { upd({ customerId: sale.customer.id, customerName: sale.customer.name }); }
+                if (!selCust && sale.customer) { setSessionCustomer(sale.customer); }
                 setSelSale(sale);
                 setCustSales(prev => { const exists = prev.find(s => s.id === sale.id); return exists ? prev : [sale, ...prev]; });
             }
@@ -267,8 +304,8 @@ export default function Returns() {
         try {
             const res = await window.api.createReturn(rd);
             if (res?.error) { await safeAlert('خطأ: ' + res.error); } else {
-                if (sess.autoPrint) { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
-                else { const dp = await safeConfirm('تم الحفظ! طباعة؟', 'نجاح'); if (dp) await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
+                try { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
+                catch (printErr) { console.error(printErr); showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning'); }
                 showToast('✅ تم حفظ المرتجع', 'success'); playBeep(true);
                 upd({ cart: [], returnNotes: '', selectedSaleId: null }); setSelSale(null);
                 if (sess.customerId) { const s = await window.api.getSales({ customerId: sess.customerId, limit: 20 }); if (!s?.error) setCustSales(s); }
@@ -377,8 +414,8 @@ export default function Returns() {
                                         return <div key={sale.id} style={{ border: `2px solid ${isSel ? '#3b82f6' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden', cursor: 'pointer', transition: 'all .2s', borderLeft: isSel ? '4px solid #3b82f6' : undefined }}>
                                             <div onClick={() => { setSelSale(isSel ? null : sale); }} style={{ padding: '10px 14px', backgroundColor: isSel ? '#eff6ff' : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background .2s' }} onMouseEnter={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#f9fafb' }} onMouseLeave={e => { if (!isSel) e.currentTarget.style.backgroundColor = '#fff' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                                                    <span style={{ fontWeight: 'bold', color: isSel ? '#1e40af' : '#1f2937', fontSize: 13 }}>#{sale.id}</span>
-                                                    <span style={{ fontSize: 11, color: '#6b7280' }}>{new Date(sale.createdAt).toLocaleDateString('ar-EG')}</span>
+                                                    <span style={{ fontWeight: 'bold', color: isSel ? '#1e40af' : '#1f2937', fontSize: 13 }}>فاتورة رقم #{sale.id}</span>
+                                                    <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>{new Date(sale.createdAt).toLocaleDateString('ar-EG')}</span>
                                                     {old && <span style={{ fontSize: 10, backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: 4 }}>⚠️ {ag} يوم</span>}
                                                     {prog > 0 && <div style={{ flex: 1, maxWidth: 80, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden', marginRight: 5 }}><div style={{ width: `${prog}%`, height: '100%', backgroundColor: prog >= 100 ? '#10b981' : '#f59e0b', borderRadius: 3, transition: 'width .3s' }} /></div>}
                                                     {prog > 0 && <span style={{ fontSize: 10, color: prog >= 100 ? '#10b981' : '#f59e0b' }}>{prog}%</span>}
@@ -403,9 +440,9 @@ export default function Returns() {
                     {/* Customer */}
                     <div style={{ backgroundColor: '#fff', borderRadius: 12, padding: 15, boxShadow: '0 1px 3px rgba(0,0,0,.1)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {!selCust ? <div ref={custDDRef} style={{ display: 'flex', gap: 10, position: 'relative' }}><div style={{ flex: 1, position: 'relative' }}><div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}><input type="text" placeholder="👤 ابحث عن عميل (الاسم أو الهاتف)..." value={custSearch} onChange={e => { setCustSearch(e.target.value); setShowCL(true); setCustIdx(-1); }} onFocus={() => setShowCL(true)} onKeyDown={handleCustKey} style={{ flex: 1, padding: 10, borderRadius: 8, border: '1px solid #d1d5db', paddingLeft: 30 }} /><button onClick={() => { setShowCL(!showCustList); setCustSearch(''); }} style={{ position: 'absolute', left: 10, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}>▼</button></div>
-                            {showCustList && filtCust.length > 0 && <div ref={custListRef} style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 5, maxHeight: 200, overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,.1)' }}>{filtCust.map((c, i) => <div key={c.id} data-ci={i} onClick={() => { upd({ customerId: c.id, customerName: c.name }); setCustSearch(''); setShowCL(false); setCustIdx(-1); }} style={{ padding: 10, borderBottom: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', backgroundColor: custIdx === i ? '#fef08a' : '#fff', transition: 'background .2s' }} onMouseEnter={e => { setCustIdx(i); e.currentTarget.style.backgroundColor = '#fef08a' }} onMouseLeave={e => { setCustIdx(-1); e.currentTarget.style.backgroundColor = '#fff' }}><span style={{ fontWeight: 'bold' }}>{hl(c.name, custSearch)}</span><span style={{ color: '#6b7280', fontSize: 12 }}>{hl(c.phone || '', custSearch)}</span></div>)}</div>}
+                            {showCustList && filtCust.length > 0 && <div ref={custListRef} style={{ position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 5, maxHeight: 200, overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,.1)' }}>{filtCust.map((c, i) => <div key={c.id} data-ci={i} onClick={() => { setSessionCustomer(c); setCustSearch(''); setShowCL(false); setCustIdx(-1); }} style={{ padding: 10, borderBottom: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', backgroundColor: custIdx === i ? '#fef08a' : '#fff', transition: 'background .2s' }} onMouseEnter={e => { setCustIdx(i); e.currentTarget.style.backgroundColor = '#fef08a' }} onMouseLeave={e => { setCustIdx(-1); e.currentTarget.style.backgroundColor = '#fff' }}><span style={{ fontWeight: 'bold' }}>{hl(c.name, custSearch)}</span><span style={{ color: '#6b7280', fontSize: 12 }}>{hl(c.phone || '', custSearch)}</span></div>)}</div>}
                         </div></div>
-                            : <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#eff6ff', padding: 10, borderRadius: 8, border: '1px solid #bfdbfe' }}><div><span style={{ fontWeight: 'bold', color: '#1e40af' }}>{selCust.name}</span><span style={{ fontSize: 12, color: '#6b7280', marginRight: 10 }}>{selCust.phone}</span></div><div><span style={{ fontSize: 13, color: '#6b7280' }}>الرصيد: </span><span style={{ fontWeight: 'bold', color: (selCust.balance || 0) > 0 ? '#dc2626' : '#059669' }}>{(selCust.balance || 0).toFixed(2)}</span></div><button onClick={() => { upd({ customerId: null, customerName: '' }); setCustSearch(''); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 20 }}>×</button></div>}
+                            : <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#eff6ff', padding: 10, borderRadius: 8, border: '1px solid #bfdbfe' }}><div><span style={{ fontWeight: 'bold', color: '#1e40af' }}>{selCust.name}</span><span style={{ fontSize: 12, color: '#6b7280', marginRight: 10 }}>{selCust.phone}</span></div><div><span style={{ fontSize: 13, color: '#6b7280' }}>الرصيد: </span><span style={{ fontWeight: 'bold', color: (selCust.balance || 0) > 0 ? '#dc2626' : '#059669' }}>{(selCust.balance || 0).toFixed(2)}</span></div><button onClick={() => { setSessionCustomer(null); setCustSearch(''); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 20 }}>×</button></div>}
                     </div>
 
                     {/* Cart */}

@@ -2028,16 +2028,211 @@ const dbService = {
 
     // ==================== SALES ====================
     async getSales(options = {}) {
+        const perf = startPerfTimer('db:getSales', {
+            hasPagination: Boolean(options?.paginated || options?.page || options?.pageSize),
+            limit: options?.limit || null,
+            customerId: options?.customerId || null,
+            searchLength: String(options?.searchTerm || '').trim().length
+        });
+
         try {
-            const { customerId, limit } = options;
+            const {
+                customerId,
+                limit,
+                page,
+                pageSize,
+                paginated = false,
+                fromDate,
+                toDate,
+                searchTerm = '',
+                sortCol = 'invoiceDate',
+                sortDir = 'desc',
+                columnSearch = {},
+                lightweight = false
+            } = options || {};
+
+            const hasPagination = Boolean(
+                paginated
+                || Object.prototype.hasOwnProperty.call(options || {}, 'page')
+                || Object.prototype.hasOwnProperty.call(options || {}, 'pageSize')
+            );
+
             const whereClause = {};
-            if (customerId) {
-                whereClause.customerId = parseInt(customerId);
+            const parsedCustomerId = parsePositiveInt(customerId);
+            if (parsedCustomerId) {
+                whereClause.customerId = parsedCustomerId;
             }
 
-            const queryArgs = {
-                where: whereClause,
-                include: {
+            const parseOptionalFilterDate = (value, endOfDayValue = false) => {
+                if (!value) return null;
+                const parsedDate = parseDateOrDefault(value, null);
+                if (!parsedDate) return null;
+                if (endOfDayValue) {
+                    parsedDate.setHours(23, 59, 59, 999);
+                } else {
+                    parsedDate.setHours(0, 0, 0, 0);
+                }
+                return parsedDate;
+            };
+
+            const invoiceDateRange = {};
+            const parsedFromDate = parseOptionalFilterDate(fromDate, false);
+            const parsedToDate = parseOptionalFilterDate(toDate, true);
+            if (parsedFromDate) invoiceDateRange.gte = parsedFromDate;
+            if (parsedToDate) invoiceDateRange.lte = parsedToDate;
+            if (Object.keys(invoiceDateRange).length > 0) {
+                whereClause.invoiceDate = invoiceDateRange;
+            }
+
+            const andFilters = [];
+
+            const normalizedSearchTerm = String(searchTerm || '').trim();
+            if (normalizedSearchTerm) {
+                const searchOrFilters = [
+                    { notes: { contains: normalizedSearchTerm, mode: 'insensitive' } },
+                    { saleType: { contains: normalizedSearchTerm, mode: 'insensitive' } },
+                    { customer: { is: { name: { contains: normalizedSearchTerm, mode: 'insensitive' } } } },
+                    { paymentMethod: { is: { name: { contains: normalizedSearchTerm, mode: 'insensitive' } } } }
+                ];
+
+                const numericSearch = parsePositiveInt(normalizedSearchTerm);
+                if (numericSearch) {
+                    searchOrFilters.unshift({ id: numericSearch });
+                }
+
+                andFilters.push({ OR: searchOrFilters });
+            }
+
+            const normalizedColumnSearch = (
+                columnSearch && typeof columnSearch === 'object' && !Array.isArray(columnSearch)
+            )
+                ? columnSearch
+                : {};
+
+            const addContainsFilter = (value, builder) => {
+                const normalized = String(value || '').trim();
+                if (!normalized) return;
+                andFilters.push(builder(normalized));
+            };
+
+            const idColumnSearch = parsePositiveInt(normalizedColumnSearch.id);
+            if (idColumnSearch) {
+                andFilters.push({ id: idColumnSearch });
+            }
+
+            addContainsFilter(
+                normalizedColumnSearch.customer
+                || normalizedColumnSearch.customerName
+                || normalizedColumnSearch.name,
+                (value) => ({
+                    customer: {
+                        is: {
+                            name: { contains: value, mode: 'insensitive' }
+                        }
+                    }
+                })
+            );
+
+            addContainsFilter(
+                normalizedColumnSearch.paymentMethod
+                || normalizedColumnSearch.payment,
+                (value) => ({
+                    paymentMethod: {
+                        is: {
+                            name: { contains: value, mode: 'insensitive' }
+                        }
+                    }
+                })
+            );
+
+            addContainsFilter(normalizedColumnSearch.saleType, (value) => ({
+                saleType: { contains: value, mode: 'insensitive' }
+            }));
+
+            addContainsFilter(normalizedColumnSearch.notes, (value) => ({
+                notes: { contains: value, mode: 'insensitive' }
+            }));
+
+            addContainsFilter(normalizedColumnSearch.total, (value) => {
+                const numericValue = Number.parseFloat(value);
+                if (!Number.isFinite(numericValue)) {
+                    return { notes: { contains: value, mode: 'insensitive' } };
+                }
+                return {
+                    total: {
+                        gte: Math.max(0, numericValue - 0.01),
+                        lte: numericValue + 0.01
+                    }
+                };
+            });
+
+            addContainsFilter(normalizedColumnSearch.invoiceDate, (value) => {
+                const exactDate = parseOptionalFilterDate(value, false);
+                if (!exactDate) return {};
+                const exactDateEnd = new Date(exactDate);
+                exactDateEnd.setHours(23, 59, 59, 999);
+                return {
+                    invoiceDate: {
+                        gte: exactDate,
+                        lte: exactDateEnd
+                    }
+                };
+            });
+
+            const validAndFilters = andFilters.filter((entry) => Object.keys(entry || {}).length > 0);
+            if (validAndFilters.length > 0) {
+                whereClause.AND = [...(whereClause.AND || []), ...validAndFilters];
+            }
+
+            const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
+            const sortableColumns = new Set([
+                'id',
+                'invoiceDate',
+                'createdAt',
+                'total',
+                'saleType',
+                'customer',
+                'customerName',
+                'paymentMethod'
+            ]);
+            const safeSortCol = sortableColumns.has(sortCol) ? sortCol : 'invoiceDate';
+
+            let orderBy;
+            if (safeSortCol === 'customer' || safeSortCol === 'customerName') {
+                orderBy = [
+                    { customer: { name: safeSortDir } },
+                    { id: 'desc' }
+                ];
+            } else if (safeSortCol === 'paymentMethod') {
+                orderBy = [
+                    { paymentMethod: { name: safeSortDir } },
+                    { id: 'desc' }
+                ];
+            } else if (safeSortCol === 'invoiceDate' || safeSortCol === 'createdAt') {
+                orderBy = [
+                    { [safeSortCol]: safeSortDir },
+                    { id: 'desc' }
+                ];
+            } else {
+                orderBy = { [safeSortCol]: safeSortDir };
+            }
+
+            const includeClause = lightweight
+                ? {
+                    customer: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            address: true
+                        }
+                    },
+                    paymentMethod: true,
+                    _count: {
+                        select: { items: true }
+                    }
+                }
+                : {
                     customer: true,
                     paymentMethod: true,
                     items: {
@@ -2052,22 +2247,125 @@ const dbService = {
                             items: true
                         }
                     }
-                },
-                orderBy: { createdAt: 'desc' }
+                };
+
+            const mapSalesWithComputedFields = async (rawSales) => {
+                if (!Array.isArray(rawSales) || rawSales.length === 0) return [];
+
+                const saleIds = rawSales
+                    .map((sale) => sale?.id)
+                    .filter((id) => Number.isFinite(id));
+
+                const shouldFetchOutstanding = saleIds.length > 0 && saleIds.length <= 2000;
+                let outstandingBySaleId = new Map();
+                let itemCountBySaleId = new Map();
+
+                if (shouldFetchOutstanding) {
+                    const [saleTransactions, saleItemsAgg] = await Promise.all([
+                        prisma.customerTransaction.findMany({
+                            where: {
+                                referenceType: 'SALE',
+                                referenceId: { in: saleIds }
+                            },
+                            select: {
+                                referenceId: true,
+                                debit: true,
+                                credit: true
+                            }
+                        }),
+                        prisma.saleItem.groupBy({
+                            by: ['saleId'],
+                            where: { saleId: { in: saleIds } },
+                            _count: { _all: true }
+                        })
+                    ]);
+
+                    outstandingBySaleId = saleTransactions.reduce((map, transaction) => {
+                        const saleReferenceId = transaction.referenceId;
+                        if (!saleReferenceId) return map;
+                        const delta = toNumber(transaction.debit) - toNumber(transaction.credit);
+                        map.set(saleReferenceId, (map.get(saleReferenceId) || 0) + delta);
+                        return map;
+                    }, new Map());
+
+                    itemCountBySaleId = saleItemsAgg.reduce((map, row) => {
+                        map.set(row.saleId, Number(row?._count?._all || 0));
+                        return map;
+                    }, new Map());
+                }
+
+                return rawSales.map((sale) => {
+                    const total = Math.max(0, toNumber(sale.total));
+                    const fallbackOutstanding = isCreditSaleType(sale.saleType) ? total : 0;
+                    const remainingAmount = Math.max(
+                        0,
+                        toNumber(outstandingBySaleId.get(sale.id) ?? fallbackOutstanding)
+                    );
+                    const paidAmount = Math.max(0, total - remainingAmount);
+                    const itemsCount = typeof sale?._count?.items === 'number'
+                        ? sale._count.items
+                        : Number(
+                            itemCountBySaleId.get(sale.id)
+                            || (Array.isArray(sale?.items) ? sale.items.length : 0)
+                        );
+
+                    return {
+                        ...sale,
+                        payment: sale?.paymentMethod?.name || null,
+                        paymentMethodCode: sale?.paymentMethod?.code || null,
+                        paidAmount,
+                        remainingAmount,
+                        // Backward-compatible aliases.
+                        paid: paidAmount,
+                        remaining: remainingAmount,
+                        itemsCount
+                    };
+                });
             };
 
-            if (limit) {
-                queryArgs.take = parseInt(limit);
+            const buildFindManyArgs = () => ({
+                where: whereClause,
+                include: includeClause,
+                orderBy
+            });
+
+            if (hasPagination) {
+                const safePage = Math.max(1, parseInt(page, 10) || 1);
+                const safePageSize = Math.min(500, Math.max(10, parseInt(pageSize, 10) || 100));
+                const skip = (safePage - 1) * safePageSize;
+
+                const [rawSales, total] = await Promise.all([
+                    prisma.sale.findMany({
+                        ...buildFindManyArgs(),
+                        skip,
+                        take: safePageSize
+                    }),
+                    prisma.sale.count({ where: whereClause })
+                ]);
+
+                const data = await mapSalesWithComputedFields(rawSales);
+                perf({ rows: data.length });
+
+                return {
+                    data,
+                    total,
+                    page: safePage,
+                    pageSize: safePageSize,
+                    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+                };
             }
 
-            const sales = await prisma.sale.findMany(queryArgs);
+            const queryArgs = buildFindManyArgs();
+            if (limit) {
+                queryArgs.take = Math.max(1, parseInt(limit, 10) || 1);
+            }
 
-            return sales.map((sale) => ({
-                ...sale,
-                payment: sale?.paymentMethod?.name || null,
-                paymentMethodCode: sale?.paymentMethod?.code || null
-            }));
+            const rawSales = await prisma.sale.findMany(queryArgs);
+            const data = await mapSalesWithComputedFields(rawSales);
+            perf({ rows: data.length });
+            return data;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },

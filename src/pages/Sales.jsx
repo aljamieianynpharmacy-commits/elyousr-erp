@@ -1,205 +1,358 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { safeAlert } from '../utils/safeAlert';
+import { safeConfirm } from '../utils/safeConfirm';
+import { safePrint } from '../printing/safePrint';
+import { generateInvoiceHTML } from '../printing/invoiceTemplate';
+import { emitPosEditorRequest } from '../utils/posEditorBridge';
+import SaleActions from '../components/sales/SaleActions';
+import SaleDetailsModal from '../components/sales/SaleDetailsModal';
+import './Sales.css';
+
+const PAGE_SIZE = 100;
+
+const formatDateTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '-';
+    return date.toLocaleString('ar-EG', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+};
+
+const formatMoney = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
+const getSaleDate = (sale) => sale?.invoiceDate || sale?.createdAt;
+
+const toFiniteNumber = (value, fallback = 0) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const hasValue = (value) => value !== null && value !== undefined && value !== '';
+
+const isCreditSaleType = (saleType) => {
+    const normalized = String(saleType || '').trim().toLowerCase();
+    return (
+        normalized === 'آجل'
+        || normalized === 'اجل'
+        || normalized === 'Ã¸Â¢Ã¸Â¬Ã¹â€ž'
+        || normalized === 'credit'
+        || normalized === 'deferred'
+    );
+};
+
+const normalizeSaleRow = (sale) => {
+    const total = Math.max(0, toFiniteNumber(sale?.total, 0));
+    const paidFromApi = hasValue(sale?.paidAmount) ? toFiniteNumber(sale.paidAmount, 0) : null;
+    const remainingFromApi = hasValue(sale?.remainingAmount) ? toFiniteNumber(sale.remainingAmount, 0) : null;
+    const paidLegacy = hasValue(sale?.paid) ? toFiniteNumber(sale.paid, 0) : null;
+    const remainingLegacy = hasValue(sale?.remaining) ? toFiniteNumber(sale.remaining, 0) : null;
+
+    const paidKnown = paidFromApi ?? paidLegacy;
+    const remainingKnown = remainingFromApi ?? remainingLegacy;
+
+    let remainingAmount;
+    if (remainingKnown !== null) {
+        remainingAmount = Math.max(0, remainingKnown);
+    } else if (paidKnown !== null) {
+        remainingAmount = Math.max(0, total - paidKnown);
+    } else {
+        remainingAmount = isCreditSaleType(sale?.saleType) ? total : 0;
+    }
+
+    let paidAmount;
+    if (paidKnown !== null) {
+        paidAmount = Math.max(0, paidKnown);
+    } else {
+        paidAmount = Math.max(0, total - remainingAmount);
+    }
+
+    const itemsCount = Number.isFinite(Number(sale?.itemsCount))
+        ? Number(sale.itemsCount)
+        : Array.isArray(sale?.items)
+            ? sale.items.length
+            : 0;
+
+    return {
+        ...sale,
+        total,
+        paidAmount,
+        remainingAmount,
+        itemsCount
+    };
+};
+
+const normalizeSalesResponse = (result, fallbackPage) => {
+    if (Array.isArray(result)) {
+        return {
+            data: result,
+            total: result.length,
+            page: fallbackPage,
+            totalPages: Math.max(1, Math.ceil(result.length / PAGE_SIZE))
+        };
+    }
+
+    return {
+        data: Array.isArray(result?.data) ? result.data : [],
+        total: Number(result?.total || 0),
+        page: Number(result?.page || fallbackPage),
+        totalPages: Number(result?.totalPages || 1)
+    };
+};
 
 export default function Sales() {
     const [sales, setSales] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [busySaleId, setBusySaleId] = useState(null);
     const [selectedSale, setSelectedSale] = useState(null);
 
-    useEffect(() => {
-        loadSales();
-    }, []);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalItems, setTotalItems] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
 
-    const loadSales = async () => {
+    const loadSales = useCallback(async () => {
+        setLoading(true);
         try {
-            const data = await window.api.getSales();
-            if (!data.error) {
-                setSales(data);
+            const response = await window.api.getSales({
+                paginated: true,
+                page: currentPage,
+                pageSize: PAGE_SIZE,
+                sortCol: 'invoiceDate',
+                sortDir: 'desc',
+                lightweight: true
+            });
+
+            if (response?.error) {
+                await safeAlert('خطأ في تحميل المبيعات: ' + response.error);
+                setSales([]);
+                setTotalItems(0);
+                setTotalPages(1);
+                return;
             }
-        } catch (err) {
-            console.error('فشل تحميل المبيعات');
+
+            const normalized = normalizeSalesResponse(response, currentPage);
+            setSales((normalized.data || []).map(normalizeSaleRow));
+            setTotalItems(normalized.total);
+            setTotalPages(Math.max(1, normalized.totalPages));
+        } catch (error) {
+            console.error('Failed to load sales:', error);
+            await safeAlert('تعذر تحميل المبيعات');
+            setSales([]);
+            setTotalItems(0);
+            setTotalPages(1);
         } finally {
             setLoading(false);
         }
-    };
+    }, [currentPage]);
 
-    const formatDate = (dateString) => {
-        const date = new Date(dateString);
-        return date.toLocaleString('ar-EG', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    };
+    const fetchSaleDetails = useCallback(async (saleId) => {
+        const result = await window.api.getSaleById(saleId);
+        if (result?.error) {
+            await safeAlert('تعذر تحميل بيانات الفاتورة: ' + result.error);
+            return null;
+        }
+        return result;
+    }, []);
 
-    const getSaleDate = (sale) => sale.invoiceDate || sale.createdAt;
+    useEffect(() => {
+        loadSales();
+    }, [loadSales]);
 
-    if (loading) return <div>جاري التحميل...</div>;
+    const handleOpenSaleDetails = useCallback(async (sale) => {
+        setBusySaleId(sale.id);
+        try {
+            const fullSale = await fetchSaleDetails(sale.id);
+            if (!fullSale) return;
+            setSelectedSale(fullSale);
+        } finally {
+            setBusySaleId(null);
+        }
+    }, [fetchSaleDetails]);
+
+    const handlePrintSale = useCallback(async (sale) => {
+        setBusySaleId(sale.id);
+        try {
+            const fullSale = await fetchSaleDetails(sale.id);
+            if (!fullSale) return;
+
+            const html = generateInvoiceHTML(fullSale, fullSale.customer || sale.customer);
+            const result = await safePrint(html, {
+                title: `فاتورة رقم ${fullSale.id}`
+            });
+
+            if (result?.error) {
+                await safeAlert('خطأ في الطباعة: ' + result.error);
+            }
+        } finally {
+            setBusySaleId(null);
+        }
+    }, [fetchSaleDetails]);
+
+    const handleEditSale = useCallback(async (sale) => {
+        setBusySaleId(sale.id);
+        try {
+            const fullSale = await fetchSaleDetails(sale.id);
+            if (!fullSale) return;
+
+            emitPosEditorRequest({
+                type: 'sale',
+                sale: fullSale,
+                customer: fullSale.customer || sale.customer || null
+            });
+        } finally {
+            setBusySaleId(null);
+        }
+    }, [fetchSaleDetails]);
+
+    const handleDeleteSale = useCallback(async (sale) => {
+        const confirmed = await safeConfirm(
+            `هل أنت متأكد من حذف الفاتورة رقم ${sale.id}؟`,
+            { title: 'تأكيد الحذف', detail: 'لا يمكن التراجع عن هذه العملية.' }
+        );
+
+        if (!confirmed) return;
+
+        setBusySaleId(sale.id);
+        try {
+            const result = await window.api.deleteSale(sale.id);
+            if (result?.error) {
+                await safeAlert('فشل الحذف: ' + result.error);
+                return;
+            }
+
+            if (sales.length === 1 && currentPage > 1) {
+                setCurrentPage((prev) => Math.max(1, prev - 1));
+            } else {
+                await loadSales();
+            }
+        } catch (error) {
+            console.error('Failed to delete sale:', error);
+            await safeAlert('تعذر حذف الفاتورة');
+        } finally {
+            setBusySaleId(null);
+        }
+    }, [sales.length, currentPage, loadSales]);
+
+    const tableRows = useMemo(() => (
+        sales.map((sale) => {
+            const isBusy = busySaleId === sale.id;
+            const remainingAmount = Number(sale.remainingAmount || 0);
+            const paidAmount = Number(sale.paidAmount || 0);
+
+            return (
+                <tr key={sale.id}>
+                    <td>#{sale.id}</td>
+                    <td>{formatDateTime(getSaleDate(sale))}</td>
+                    <td>{sale.customer?.name || 'عميل نقدي'}</td>
+                    <td>
+                        <span className={`sales-sale-type ${remainingAmount > 0 ? 'is-credit' : 'is-cash'}`}>
+                            {sale.saleType || (remainingAmount > 0 ? 'آجل' : 'نقدي')}
+                        </span>
+                    </td>
+                    <td>{sale.payment || sale.paymentMethod?.name || '-'}</td>
+                    <td className="sales-money sales-total">{formatMoney(sale.total)}</td>
+                    <td className="sales-money sales-paid">{formatMoney(paidAmount)}</td>
+                    <td className={`sales-money ${remainingAmount > 0 ? 'sales-remaining' : 'sales-cleared'}`}>
+                        {formatMoney(remainingAmount)}
+                    </td>
+                    <td>{sale.itemsCount || 0}</td>
+                    <td className="sales-notes-cell" title={sale.notes || '-'}>
+                        {sale.notes || '-'}
+                    </td>
+                    <td>
+                        <SaleActions
+                            sale={sale}
+                            isBusy={isBusy}
+                            onView={handleOpenSaleDetails}
+                            onEdit={handleEditSale}
+                            onPrint={handlePrintSale}
+                            onDelete={handleDeleteSale}
+                        />
+                    </td>
+                </tr>
+            );
+        })
+    ), [
+        sales,
+        busySaleId,
+        handleOpenSaleDetails,
+        handleEditSale,
+        handlePrintSale,
+        handleDeleteSale
+    ]);
+
+    const pageStart = totalItems === 0 ? 0 : ((currentPage - 1) * PAGE_SIZE) + 1;
+    const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + sales.length - 1);
 
     return (
-        <div>
-            <h1 style={{ marginBottom: '20px' }}>📋 سجل المبيعات</h1>
-
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead style={{ backgroundColor: '#f9fafb' }}>
-                        <tr>
-                            <th style={{ padding: '15px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>رقم العملية</th>
-                            <th style={{ padding: '15px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>التاريخ</th>
-                            <th style={{ padding: '15px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>الإجمالي</th>
-                            <th style={{ padding: '15px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>طريقة الدفع</th>
-                            <th style={{ padding: '15px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>عدد المنتجات</th>
-                            <th style={{ padding: '15px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>تفاصيل</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sales.length === 0 ? (
+        <div className="sales-page">
+            <div className="sales-table-card card">
+                <div className="sales-table-scroll">
+                    <table className="sales-table">
+                        <thead>
                             <tr>
-                                <td colSpan="6" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af' }}>
-                                    لا توجد مبيعات بعد
-                                </td>
+                                <th># الفاتورة</th>
+                                <th>التاريخ</th>
+                                <th>العميل</th>
+                                <th>نوع البيع</th>
+                                <th>طريقة الدفع</th>
+                                <th>الإجمالي</th>
+                                <th>المدفوع</th>
+                                <th>المتبقي</th>
+                                <th>عدد الأصناف</th>
+                                <th>ملاحظات</th>
+                                <th>إجراءات</th>
                             </tr>
-                        ) : (
-                            sales.map((sale) => (
-                                <tr key={sale.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                    <td style={{ padding: '15px' }}>#{sale.id}</td>
-                                    <td style={{ padding: '15px' }}>{formatDate(getSaleDate(sale))}</td>
-                                    <td style={{ padding: '15px', fontWeight: 'bold', color: '#10b981' }}>
-                                        {sale.total.toFixed(2)} ج.م
-                                    </td>
-                                    <td style={{ padding: '15px' }}>
-                                        <span style={{
-                                            backgroundColor: sale.payment === 'نقدي' ? '#dbeafe' : sale.payment === 'فيزا' ? '#fef3c7' : '#fee2e2',
-                                            color: sale.payment === 'نقدي' ? '#1e40af' : sale.payment === 'فيزا' ? '#92400e' : '#991b1b',
-                                            padding: '4px 12px',
-                                            borderRadius: '12px',
-                                            fontSize: '13px'
-                                        }}>
-                                            {sale.payment}
-                                        </span>
-                                    </td>
-                                    <td style={{ padding: '15px' }}>{sale.items.length} منتجات</td>
-                                    <td style={{ padding: '15px', textAlign: 'center' }}>
-                                        <button
-                                            onClick={() => setSelectedSale(sale)}
-                                            style={{
-                                                backgroundColor: '#2563eb',
-                                                color: 'white',
-                                                border: 'none',
-                                                padding: '6px 16px',
-                                                borderRadius: '6px',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            عرض
-                                        </button>
+                        </thead>
+
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={11} className="sales-empty-state">
+                                        جاري تحميل المبيعات...
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                            ) : sales.length === 0 ? (
+                                <tr>
+                                    <td colSpan={11} className="sales-empty-state">
+                                        لا توجد مبيعات
+                                    </td>
+                                </tr>
+                            ) : tableRows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="sales-pagination">
+                    <button
+                        className="sales-btn sales-btn-light"
+                        disabled={currentPage <= 1 || loading}
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    >
+                        السابق
+                    </button>
+
+                    <span>
+                        {pageStart.toLocaleString('ar-EG')} - {pageEnd.toLocaleString('ar-EG')} من {totalItems.toLocaleString('ar-EG')}
+                    </span>
+
+                    <button
+                        className="sales-btn sales-btn-light"
+                        disabled={currentPage >= totalPages || loading}
+                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    >
+                        التالي
+                    </button>
+                </div>
             </div>
 
-            {/* Sale Details Modal */}
-            {selectedSale && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.5)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1000
-                }}
-                    onClick={() => setSelectedSale(null)}
-                >
-                    <div
-                        style={{
-                            backgroundColor: 'white',
-                            borderRadius: '12px',
-                            padding: '30px',
-                            maxWidth: '600px',
-                            width: '90%',
-                            maxHeight: '80vh',
-                            overflowY: 'auto'
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-                            <h2>تفاصيل الفاتورة #{selectedSale.id}</h2>
-                            <button
-                                onClick={() => setSelectedSale(null)}
-                                style={{
-                                    backgroundColor: 'transparent',
-                                    border: 'none',
-                                    fontSize: '24px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ×
-                            </button>
-                        </div>
-
-                        <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
-                            <div style={{ marginBottom: '10px' }}>
-                                <strong>التاريخ:</strong> {formatDate(getSaleDate(selectedSale))}
-                            </div>
-                            <div style={{ marginBottom: '10px' }}>
-                                <strong>طريقة الدفع:</strong> {selectedSale.payment}
-                            </div>
-                        </div>
-
-                        <h3 style={{ marginBottom: '15px' }}>المنتجات:</h3>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead style={{ backgroundColor: '#f9fafb' }}>
-                                <tr>
-                                    <th style={{ padding: '10px', textAlign: 'right' }}>المنتج</th>
-                                    <th style={{ padding: '10px', textAlign: 'center' }}>الكمية</th>
-                                    <th style={{ padding: '10px', textAlign: 'center' }}>السعر</th>
-                                    <th style={{ padding: '10px', textAlign: 'center' }}>الإجمالي</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {selectedSale.items.map((item) => (
-                                    <tr key={item.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                        <td style={{ padding: '10px' }}>
-                                            <div>{item.variant.product.name}</div>
-                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                {item.variant.productSize} - {item.variant.color}
-                                            </div>
-                                        </td>
-                                        <td style={{ padding: '10px', textAlign: 'center' }}>{item.quantity}</td>
-                                        <td style={{ padding: '10px', textAlign: 'center' }}>{item.price.toFixed(2)} ج.م</td>
-                                        <td style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
-                                            {(item.price * item.quantity).toFixed(2)} ج.م
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-
-                        <div style={{
-                            marginTop: '20px',
-                            padding: '15px',
-                            backgroundColor: '#10b981',
-                            color: 'white',
-                            borderRadius: '8px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            fontSize: '18px',
-                            fontWeight: 'bold'
-                        }}>
-                            <span>الإجمالي الكلي:</span>
-                            <span>{selectedSale.total.toFixed(2)} ج.م</span>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <SaleDetailsModal
+                sale={selectedSale}
+                onClose={() => setSelectedSale(null)}
+            />
         </div>
     );
 }

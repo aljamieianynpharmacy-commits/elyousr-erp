@@ -259,32 +259,48 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
 }
 
 .sales-action-btn {
+  width: 32px;
+  height: 32px;
   border: none;
-  background: #e2e8f0;
-  color: #0f172a;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  font-size: 16px;
+  background: #64748b;
+}
+
+.sales-action-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  filter: brightness(1.08);
+}
+
+.sales-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .sales-action-btn.is-edit {
-  background: #fef3c7;
-  color: #92400e;
+  background: #0f766e;
 }
 
 .sales-action-btn.is-print {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #3b82f6;
 }
 
 .sales-action-btn.is-delete {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #dc2626;
 }
 
 .sales-pagination {

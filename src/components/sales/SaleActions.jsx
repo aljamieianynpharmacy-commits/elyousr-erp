@@ -15,32 +15,36 @@ function SaleActions({
         onClick={() => onView(sale)}
         disabled={isBusy}
         title="عرض التفاصيل"
+        aria-label="عرض التفاصيل"
       >
-        عرض
+        👁️
       </button>
       <button
         className="sales-action-btn is-edit"
         onClick={() => onEdit(sale)}
         disabled={isBusy}
         title="تعديل الفاتورة"
+        aria-label="تعديل الفاتورة"
       >
-        تعديل
+        ✏️
       </button>
       <button
         className="sales-action-btn is-print"
         onClick={() => onPrint(sale)}
         disabled={isBusy}
         title="طباعة الفاتورة"
+        aria-label="طباعة الفاتورة"
       >
-        طباعة
+        🖨️
       </button>
       <button
         className="sales-action-btn is-delete"
         onClick={() => onDelete(sale)}
         disabled={isBusy}
         title="حذف الفاتورة"
+        aria-label="حذف الفاتورة"
       >
-        حذف
+        🗑️
       </button>
     </div>
   );

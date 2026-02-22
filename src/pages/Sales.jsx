@@ -23,7 +23,7 @@ const formatDateTime = (value) => {
     });
 };
 
-const formatMoney = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
+const formatMoney = (value) => `${Number(value || 0).toFixed(2)} `;
 const getSaleDate = (sale) => sale?.invoiceDate || sale?.createdAt;
 
 const toFiniteNumber = (value, fallback = 0) => {

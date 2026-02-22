@@ -40,7 +40,6 @@ import {
 const loadProductModal = () => import('../components/products/ProductModal');
 const ProductModal = lazy(loadProductModal);
 
-const PRODUCT_SEARCH_DEBOUNCE_MS = 200;
 const PRODUCTS_PAGE_SIZE = 50;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 
@@ -52,19 +51,6 @@ const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 
 
 
-
-
-
-const useDebouncedValue = (value, delayMs) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-
-  return debounced;
-};
 
 
 
@@ -218,7 +204,6 @@ export default function Products() {
   const [importing, setImporting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const debouncedSearchTerm = useDebouncedValue(searchTerm, PRODUCT_SEARCH_DEBOUNCE_MS);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [sortPreset, setSortPreset] = useState('latest');
@@ -230,7 +215,6 @@ export default function Products() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [columnSearches, setColumnSearches] = useState({});
-  const debouncedColumnSearches = useDebouncedValue(columnSearches, 80);
   const [gridHeight, setGridHeight] = useState(getGridHeight);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMN_KEYS;
@@ -296,11 +280,11 @@ export default function Products() {
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
   const normalizedColumnSearches = useMemo(() => {
-    const entries = Object.entries(debouncedColumnSearches || {})
+    const entries = Object.entries(columnSearches || {})
       .map(([key, value]) => [nText(key), nText(value)])
       .filter(([key, value]) => key && value);
     return Object.fromEntries(entries);
-  }, [debouncedColumnSearches]);
+  }, [columnSearches]);
   const importColumnSamples = useMemo(() => {
     if (!importSession) return new Map();
 
@@ -447,7 +431,7 @@ export default function Products() {
     const silent = typeof options === 'boolean' ? options : Boolean(options?.silent);
     const requestId = latestProductsRequestRef.current + 1;
     latestProductsRequestRef.current = requestId;
-    const term = nText(debouncedSearchTerm);
+    const term = nText(searchTerm);
     const hasColumnSearch = Object.keys(normalizedColumnSearches).length > 0;
 
     const shouldBlockUi = !hasLoadedProductsRef.current && !silent;
@@ -491,7 +475,7 @@ export default function Products() {
       setRefreshing(false);
       setSearchLoading(false);
     }
-  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, currentPage, debouncedSearchTerm, normalizedColumnSearches, stockFilter]);
+  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, currentPage, normalizedColumnSearches, searchTerm, stockFilter]);
 
   useEffect(() => {
     loadCategories();
@@ -500,10 +484,6 @@ export default function Products() {
   useEffect(() => {
     loadProducts();
   }, [loadProducts]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset, normalizedColumnSearches]);
 
   useEffect(() => {
     productsListRef.current?.scrollTo(0);
@@ -545,12 +525,33 @@ export default function Products() {
 
   const columnFilteredProducts = visibleProducts;
 
-  const handleColumnSearchChange = (columnKey, value) => {
+  const handleSearchChange = useCallback((value) => {
+    setCurrentPage(1);
+    setSearchTerm(value);
+  }, []);
+
+  const handleCategoryFilterChange = useCallback((value) => {
+    setCurrentPage(1);
+    setCategoryFilter(value);
+  }, []);
+
+  const handleStockFilterChange = useCallback((value) => {
+    setCurrentPage(1);
+    setStockFilter(value);
+  }, []);
+
+  const handleSortPresetChange = useCallback((value) => {
+    setCurrentPage(1);
+    setSortPreset(value);
+  }, []);
+
+  const handleColumnSearchChange = useCallback((columnKey, value) => {
+    setCurrentPage(1);
     setColumnSearches((prev) => ({
       ...prev,
       [columnKey]: value
     }));
-  };
+  }, []);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -1599,14 +1600,14 @@ export default function Products() {
 
       <ProductsFilters
         searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
+        onSearchChange={handleSearchChange}
         categoryFilter={categoryFilter}
-        onCategoryFilterChange={setCategoryFilter}
+        onCategoryFilterChange={handleCategoryFilterChange}
         categories={categories}
         stockFilter={stockFilter}
-        onStockFilterChange={setStockFilter}
+        onStockFilterChange={handleStockFilterChange}
         sortPreset={sortPreset}
-        onSortPresetChange={setSortPreset}
+        onSortPresetChange={handleSortPresetChange}
         onRefresh={handleRefresh}
         refreshing={refreshing}
         searchLoading={searchLoading}

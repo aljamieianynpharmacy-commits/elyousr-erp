@@ -19,6 +19,9 @@ const getSaleDate = (sale) => sale?.invoiceDate || sale?.createdAt;
 function SaleDetailsModal({ sale, onClose }) {
   if (!sale) return null;
 
+  const isLoadingDetails = Boolean(sale?.isLoadingDetails);
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+
   return (
     <div className="sales-modal-overlay" onClick={onClose}>
       <div className="sales-modal" onClick={(event) => event.stopPropagation()}>
@@ -49,16 +52,26 @@ function SaleDetailsModal({ sale, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {(sale.items || []).map((item) => (
-                <tr key={`${item.saleId || sale.id}-${item.id}-${item.variantId}`}>
-                  <td>{item.variant?.product?.name || 'منتج'}</td>
-                  <td>{item.variant?.productSize || '-'}</td>
-                  <td>{item.variant?.color || '-'}</td>
-                  <td>{item.quantity}</td>
-                  <td>{formatMoney(item.price)}</td>
-                  <td>{formatMoney((item.price || 0) * (item.quantity || 0))}</td>
+              {isLoadingDetails ? (
+                <tr>
+                  <td colSpan={6} className="sales-empty-state">جاري تحميل التفاصيل...</td>
                 </tr>
-              ))}
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="sales-empty-state">لا توجد أصناف في الفاتورة</td>
+                </tr>
+              ) : (
+                items.map((item) => (
+                  <tr key={`${item.saleId || sale.id}-${item.id}-${item.variantId}`}>
+                    <td>{item.variant?.product?.name || 'منتج'}</td>
+                    <td>{item.variant?.productSize || '-'}</td>
+                    <td>{item.variant?.color || '-'}</td>
+                    <td>{item.quantity}</td>
+                    <td>{formatMoney(item.price)}</td>
+                    <td>{formatMoney((item.price || 0) * (item.quantity || 0))}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

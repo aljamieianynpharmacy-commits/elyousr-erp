@@ -1,9 +1,9 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
 import { safePrint } from '../printing/safePrint';
 import { generateInvoiceHTML } from '../printing/invoiceTemplate';
-import { emitPosEditorRequest } from '../utils/posEditorBridge';
+import { APP_NAVIGATE_EVENT, emitPosEditorRequest } from '../utils/posEditorBridge';
 import SaleActions from '../components/sales/SaleActions';
 import SaleDetailsModal from '../components/sales/SaleDetailsModal';
 import './Sales.css';
@@ -23,7 +23,7 @@ const formatDateTime = (value) => {
     });
 };
 
-const formatMoney = (value) => `${Number(value || 0).toFixed(2)} `;
+const formatMoney = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
 const getSaleDate = (sale) => sale?.invoiceDate || sale?.createdAt;
 
 const toFiniteNumber = (value, fallback = 0) => {
@@ -106,12 +106,13 @@ const normalizeSalesResponse = (result, fallbackPage) => {
 export default function Sales() {
     const [sales, setSales] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [busySaleId, setBusySaleId] = useState(null);
     const [selectedSale, setSelectedSale] = useState(null);
 
     const [currentPage, setCurrentPage] = useState(1);
     const [totalItems, setTotalItems] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
+
+    const detailsRequestRef = useRef(0);
 
     const loadSales = useCallback(async () => {
         setLoading(true);
@@ -161,20 +162,46 @@ export default function Sales() {
         loadSales();
     }, [loadSales]);
 
+    const handleCloseDetailsModal = useCallback(() => {
+        detailsRequestRef.current += 1;
+        setSelectedSale(null);
+    }, []);
+
     const handleOpenSaleDetails = useCallback(async (sale) => {
-        setBusySaleId(sale.id);
-        try {
-            const fullSale = await fetchSaleDetails(sale.id);
-            if (!fullSale) return;
-            setSelectedSale(fullSale);
-        } finally {
-            setBusySaleId(null);
+        const requestId = detailsRequestRef.current + 1;
+        detailsRequestRef.current = requestId;
+
+        setSelectedSale({
+            ...sale,
+            items: Array.isArray(sale?.items) ? sale.items : [],
+            isLoadingDetails: true
+        });
+
+        const fullSale = await fetchSaleDetails(sale.id);
+
+        if (detailsRequestRef.current !== requestId) return;
+
+        if (!fullSale) {
+            setSelectedSale((prev) => (
+                prev && prev.id === sale.id
+                    ? { ...prev, isLoadingDetails: false }
+                    : prev
+            ));
+            return;
         }
+
+        setSelectedSale(fullSale);
     }, [fetchSaleDetails]);
 
     const handlePrintSale = useCallback(async (sale) => {
-        setBusySaleId(sale.id);
         try {
+            if (typeof window?.api?.printSale === 'function') {
+                const quickPrint = await window.api.printSale(sale.id);
+                if (quickPrint?.success && !quickPrint?.error) {
+                    return;
+                }
+            }
+
             const fullSale = await fetchSaleDetails(sale.id);
             if (!fullSale) return;
 
@@ -186,25 +213,27 @@ export default function Sales() {
             if (result?.error) {
                 await safeAlert('خطأ في الطباعة: ' + result.error);
             }
-        } finally {
-            setBusySaleId(null);
+        } catch (error) {
+            console.error('Print action failed:', error);
+            await safeAlert('تعذر تنفيذ الطباعة');
         }
     }, [fetchSaleDetails]);
 
     const handleEditSale = useCallback(async (sale) => {
-        setBusySaleId(sale.id);
-        try {
-            const fullSale = await fetchSaleDetails(sale.id);
-            if (!fullSale) return;
+        window.dispatchEvent(
+            new CustomEvent(APP_NAVIGATE_EVENT, {
+                detail: { page: 'pos', reason: 'open-editor' }
+            })
+        );
 
-            emitPosEditorRequest({
-                type: 'sale',
-                sale: fullSale,
-                customer: fullSale.customer || sale.customer || null
-            });
-        } finally {
-            setBusySaleId(null);
-        }
+        const fullSale = await fetchSaleDetails(sale.id);
+        if (!fullSale) return;
+
+        emitPosEditorRequest({
+            type: 'sale',
+            sale: fullSale,
+            customer: fullSale.customer || sale.customer || null
+        });
     }, [fetchSaleDetails]);
 
     const handleDeleteSale = useCallback(async (sale) => {
@@ -215,7 +244,6 @@ export default function Sales() {
 
         if (!confirmed) return;
 
-        setBusySaleId(sale.id);
         try {
             const result = await window.api.deleteSale(sale.id);
             if (result?.error) {
@@ -231,14 +259,11 @@ export default function Sales() {
         } catch (error) {
             console.error('Failed to delete sale:', error);
             await safeAlert('تعذر حذف الفاتورة');
-        } finally {
-            setBusySaleId(null);
         }
     }, [sales.length, currentPage, loadSales]);
 
     const tableRows = useMemo(() => (
         sales.map((sale) => {
-            const isBusy = busySaleId === sale.id;
             const remainingAmount = Number(sale.remainingAmount || 0);
             const paidAmount = Number(sale.paidAmount || 0);
 
@@ -265,7 +290,6 @@ export default function Sales() {
                     <td>
                         <SaleActions
                             sale={sale}
-                            isBusy={isBusy}
                             onView={handleOpenSaleDetails}
                             onEdit={handleEditSale}
                             onPrint={handlePrintSale}
@@ -277,7 +301,6 @@ export default function Sales() {
         })
     ), [
         sales,
-        busySaleId,
         handleOpenSaleDetails,
         handleEditSale,
         handlePrintSale,
@@ -351,7 +374,7 @@ export default function Sales() {
 
             <SaleDetailsModal
                 sale={selectedSale}
-                onClose={() => setSelectedSale(null)}
+                onClose={handleCloseDetailsModal}
             />
         </div>
     );

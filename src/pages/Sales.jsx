@@ -163,8 +163,7 @@ export const prefetchSalesPage = async ({ page = 1, pageSize = PAGE_SIZE } = {})
 
 export default function Sales() {
   const [sales, setSales] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -182,10 +181,6 @@ export default function Sales() {
       setSales(cached.data || []);
       setTotalItems(cached.totalItems || 0);
       setTotalPages(cached.totalPages || 1);
-      setLoading(false);
-      setRefreshing(true);
-    } else {
-      setLoading(true);
     }
 
     try {
@@ -232,8 +227,7 @@ export default function Sales() {
         setTotalPages(1);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setHasLoadedOnce(true);
     }
   }, [currentPage]);
 
@@ -392,6 +386,7 @@ export default function Sales() {
 
   const pageStart = totalItems === 0 ? 0 : ((currentPage - 1) * PAGE_SIZE) + 1;
   const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + sales.length - 1);
+  const isInitialLoading = !hasLoadedOnce && sales.length === 0;
 
   return (
     <div className="sales-page">
@@ -415,13 +410,7 @@ export default function Sales() {
             </thead>
 
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={11} className="sales-empty-state">
-                    جاري تحميل المبيعات...
-                  </td>
-                </tr>
-              ) : sales.length === 0 ? (
+              {sales.length === 0 && hasLoadedOnce ? (
                 <tr>
                   <td colSpan={11} className="sales-empty-state">
                     لا توجد مبيعات
@@ -435,7 +424,7 @@ export default function Sales() {
         <div className="sales-pagination">
           <button
             className="sales-btn sales-btn-light"
-            disabled={currentPage <= 1 || loading}
+            disabled={currentPage <= 1 || isInitialLoading}
             onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
           >
             السابق
@@ -443,12 +432,11 @@ export default function Sales() {
 
           <span>
             {pageStart.toLocaleString('ar-EG')} - {pageEnd.toLocaleString('ar-EG')} من {totalItems.toLocaleString('ar-EG')}
-            {refreshing ? <small className="sales-refresh-note"> (تحديث...)</small> : null}
           </span>
 
           <button
             className="sales-btn sales-btn-light"
-            disabled={currentPage >= totalPages || loading}
+            disabled={currentPage >= totalPages || isInitialLoading}
             onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
           >
             التالي

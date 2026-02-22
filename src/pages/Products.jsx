@@ -295,6 +295,12 @@ export default function Products() {
   const matrixBarcodeLoaderRef = useRef(null);
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
+  const normalizedColumnSearches = useMemo(() => {
+    const entries = Object.entries(debouncedColumnSearches || {})
+      .map(([key, value]) => [nText(key), nText(value)])
+      .filter(([key, value]) => key && value);
+    return Object.fromEntries(entries);
+  }, [debouncedColumnSearches]);
   const importColumnSamples = useMemo(() => {
     if (!importSession) return new Map();
 
@@ -442,17 +448,19 @@ export default function Products() {
     const requestId = latestProductsRequestRef.current + 1;
     latestProductsRequestRef.current = requestId;
     const term = nText(debouncedSearchTerm);
+    const hasColumnSearch = Object.keys(normalizedColumnSearches).length > 0;
 
     const shouldBlockUi = !hasLoadedProductsRef.current && !silent;
     if (shouldBlockUi) setLoading(true);
     else setRefreshing(true);
-    if (term && !silent) setSearchLoading(true);
+    if ((term || hasColumnSearch) && !silent) setSearchLoading(true);
 
     try {
       const res = await window.api.getProducts({
         page: currentPage,
         pageSize: PRODUCTS_PAGE_SIZE,
         searchTerm: term,
+        columnSearches: normalizedColumnSearches,
         categoryId: categoryFilter || null,
         stockFilter: stockFilter || 'all',
         sortCol: activeSort.sortCol,
@@ -483,7 +491,7 @@ export default function Products() {
       setRefreshing(false);
       setSearchLoading(false);
     }
-  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, currentPage, debouncedSearchTerm, stockFilter]);
+  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, currentPage, debouncedSearchTerm, normalizedColumnSearches, stockFilter]);
 
   useEffect(() => {
     loadCategories();
@@ -495,7 +503,7 @@ export default function Products() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset]);
+  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset, normalizedColumnSearches]);
 
   useEffect(() => {
     productsListRef.current?.scrollTo(0);
@@ -532,75 +540,10 @@ export default function Products() {
     return map;
   }, [preparedProducts]);
 
-  const filteredProductResult = useMemo(() => {
-    const out = [];
-    for (const entry of preparedProducts) {
-      if (stockFilter === 'available' && entry.status.key !== 'ok') continue;
-      if (stockFilter === 'low' && entry.status.key !== 'low') continue;
-      if (stockFilter === 'out' && entry.status.key !== 'out') continue;
-      out.push(entry.product);
-    }
-    return out;
-  }, [preparedProducts, stockFilter]);
-
-  const visibleProducts = filteredProductResult;
+  const visibleProducts = activeProducts;
   const tableLoading = loading || refreshing || searchLoading;
 
-  // بحث في الأعمدة
-  const columnFilteredProducts = useMemo(() => {
-    if (Object.keys(debouncedColumnSearches).length === 0) return visibleProducts;
-
-    return visibleProducts.filter((product) => {
-      for (const [columnKey, searchValue] of Object.entries(debouncedColumnSearches)) {
-        const trimmed = nText(searchValue);
-        if (!trimmed) continue;
-
-        let cellValue = '';
-        switch (columnKey) {
-          case 'name':
-            cellValue = nText(product.name);
-            break;
-          case 'code':
-            cellValue = nText(product.sku) || nText(product.barcode) || `#${product.id}`;
-            break;
-          case 'category':
-            cellValue = nText(categoryMap.get(product.categoryId)?.name);
-            break;
-          case 'warehouse':
-            cellValue = String(nInt(product?.inventory?.warehouseQty, 0));
-            break;
-          case 'unit':
-            cellValue = nText(mainUnitOf(product)?.unitName) || DEFAULT_UNIT;
-            break;
-          case 'quantity':
-            cellValue = String(productMetaMap.get(product.id)?.status?.total || 0);
-            break;
-          case 'salePrice':
-            cellValue = String(salePriceOf(product));
-            break;
-          case 'costPrice':
-            cellValue = String(costPriceOf(product));
-            break;
-          case 'wholesalePrice':
-            cellValue = String(wholesale(product));
-            break;
-          case 'brand':
-            cellValue = nText(product.brand);
-            break;
-          case 'barcode':
-            cellValue = nText(product.barcode);
-            break;
-          default:
-            cellValue = '';
-        }
-
-        if (!cellValue.toLowerCase().includes(trimmed.toLowerCase())) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [visibleProducts, debouncedColumnSearches, categoryMap, productMetaMap]);
+  const columnFilteredProducts = visibleProducts;
 
   const handleColumnSearchChange = (columnKey, value) => {
     setColumnSearches((prev) => ({
@@ -608,8 +551,6 @@ export default function Products() {
       [columnKey]: value
     }));
   };
-
-  const columnFilteredTotal = columnFilteredProducts.length;
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -1776,7 +1717,7 @@ export default function Products() {
           </button>
 
           <span>
-            {pageStart.toLocaleString('ar-EG')} - {pageEnd.toLocaleString('ar-EG')} من {columnFilteredTotal.toLocaleString('ar-EG')}
+            {pageStart.toLocaleString('ar-EG')} - {pageEnd.toLocaleString('ar-EG')} من {totalItems.toLocaleString('ar-EG')}
           </span>
 
           <button

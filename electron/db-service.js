@@ -1567,6 +1567,7 @@ const dbService = {
         page = 1,
         pageSize = 50,
         searchTerm = '',
+        columnSearches = {},
         categoryId = null,
         stockFilter = 'all',
         sortCol = 'id',
@@ -1583,18 +1584,44 @@ const dbService = {
             const safePage = Math.max(1, parseInt(page, 10) || 1);
             const safePageSize = Math.min(10000, Math.max(1, parseInt(pageSize, 10) || 50));
             const skip = (safePage - 1) * safePageSize;
-            const where = {};
+            const andConditions = [];
 
-            if (categoryId) where.categoryId = parseInt(categoryId, 10);
+            const parsedCategoryId = parsePositiveInt(categoryId);
+            if (parsedCategoryId) {
+                andConditions.push({ categoryId: parsedCategoryId });
+            }
 
             // Stock filter – server-side so frontend doesn't need to fetch all products
             const safeStockFilter = String(stockFilter || 'all').trim().toLowerCase();
             if (safeStockFilter === 'out') {
-                where.inventory = { totalQuantity: { lte: 0 } };
+                andConditions.push({ inventory: { is: { totalQuantity: { lte: 0 } } } });
             } else if (safeStockFilter === 'available') {
-                where.inventory = { totalQuantity: { gt: 0 } };
+                andConditions.push({ inventory: { is: { totalQuantity: { gt: 0 } } } });
+            } else if (safeStockFilter === 'low') {
+                const lowStockRows = await prisma.$queryRaw`
+                    SELECT "productId"
+                    FROM "Inventory"
+                    WHERE "totalQuantity" <= "minStock"
+                `;
+
+                const lowStockIds = Array.from(new Set(
+                    (Array.isArray(lowStockRows) ? lowStockRows : [])
+                        .map((row) => parsePositiveInt(row?.productId))
+                        .filter(Boolean)
+                ));
+
+                if (lowStockIds.length === 0) {
+                    return {
+                        data: [],
+                        total: includeTotal !== false ? 0 : null,
+                        page: safePage,
+                        totalPages: includeTotal !== false ? 1 : null,
+                        hasMore: false
+                    };
+                }
+
+                andConditions.push({ id: { in: lowStockIds } });
             }
-            // 'low' is handled client-side because Prisma can't compare totalQuantity <= minStock
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length > 0) {
@@ -1616,16 +1643,138 @@ const dbService = {
                     ...variantBarcodeRows.map((row) => row.productId)
                 ])).filter((id) => Number.isFinite(id) && id > 0);
 
-                where.OR = [
+                const globalSearchOr = [
                     { name: { contains: normalizedSearch, mode: 'insensitive' } },
                     { sku: { startsWith: normalizedSearch, mode: 'insensitive' } },
                     { barcode: { startsWith: normalizedSearch } }
                 ];
 
                 if (barcodeProductIds.length > 0) {
-                    where.OR.push({ id: { in: barcodeProductIds } });
+                    globalSearchOr.push({ id: { in: barcodeProductIds } });
+                }
+
+                andConditions.push({ OR: globalSearchOr });
+            }
+
+            const normalizedColumnSearches = Object.entries(
+                columnSearches && typeof columnSearches === 'object' ? columnSearches : {}
+            )
+                .map(([key, value]) => [String(key || '').trim(), String(value || '').trim()])
+                .filter(([key, value]) => key && value);
+
+            for (const [columnKey, value] of normalizedColumnSearches) {
+                switch (columnKey) {
+                    case 'name':
+                        andConditions.push({ name: { contains: value, mode: 'insensitive' } });
+                        break;
+
+                    case 'code': {
+                        const numericPart = parseInt(value.replace(/[^0-9-]/g, ''), 10);
+                        const codeOr = [
+                            { sku: { startsWith: value, mode: 'insensitive' } },
+                            { barcode: { startsWith: value } },
+                            { productUnits: { some: { barcode: { startsWith: value } } } },
+                            { variants: { some: { barcode: { startsWith: value } } } }
+                        ];
+                        if (Number.isFinite(numericPart) && numericPart > 0) {
+                            codeOr.push({ id: numericPart });
+                        }
+                        andConditions.push({ OR: codeOr });
+                        break;
+                    }
+
+                    case 'category':
+                        andConditions.push({ category: { is: { name: { contains: value, mode: 'insensitive' } } } });
+                        break;
+
+                    case 'brand':
+                        andConditions.push({ brand: { contains: value, mode: 'insensitive' } });
+                        break;
+
+                    case 'barcode':
+                        andConditions.push({
+                            OR: [
+                                { barcode: { startsWith: value } },
+                                { productUnits: { some: { barcode: { startsWith: value } } } },
+                                { variants: { some: { barcode: { startsWith: value } } } }
+                            ]
+                        });
+                        break;
+
+                    case 'unit':
+                        andConditions.push({ productUnits: { some: { unitName: { contains: value, mode: 'insensitive' } } } });
+                        break;
+
+                    case 'warehouse': {
+                        const parsed = Number.parseInt(value, 10);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({ inventory: { is: { warehouseQty: parsed } } });
+                        }
+                        break;
+                    }
+
+                    case 'quantity': {
+                        const parsed = Number.parseInt(value, 10);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({ inventory: { is: { totalQuantity: parsed } } });
+                        }
+                        break;
+                    }
+
+                    case 'saleLimit': {
+                        const parsed = Number.parseInt(value, 10);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({ inventory: { is: { minStock: parsed } } });
+                        }
+                        break;
+                    }
+
+                    case 'salePrice': {
+                        const parsed = Number.parseFloat(value);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({
+                                OR: [
+                                    { basePrice: parsed },
+                                    { productUnits: { some: { salePrice: parsed } } },
+                                    { variants: { some: { price: parsed } } }
+                                ]
+                            });
+                        }
+                        break;
+                    }
+
+                    case 'costPrice': {
+                        const parsed = Number.parseFloat(value);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({
+                                OR: [
+                                    { cost: parsed },
+                                    { productUnits: { some: { purchasePrice: parsed } } },
+                                    { variants: { some: { cost: parsed } } }
+                                ]
+                            });
+                        }
+                        break;
+                    }
+
+                    case 'wholesalePrice': {
+                        const parsed = Number.parseFloat(value);
+                        if (Number.isFinite(parsed)) {
+                            andConditions.push({ productUnits: { some: { wholesalePrice: parsed } } });
+                        }
+                        break;
+                    }
+
+                    case 'notes':
+                        andConditions.push({ inventory: { is: { notes: { contains: value, mode: 'insensitive' } } } });
+                        break;
+
+                    default:
+                        break;
                 }
             }
+
+            const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
             const validSortCols = ['id', 'name', 'basePrice', 'cost', 'createdAt', 'updatedAt'];
             const safeSortDir = sortDir === 'asc' ? 'asc' : 'desc';

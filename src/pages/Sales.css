@@ -324,11 +324,6 @@
   background: #f8fafc;
 }
 
-.sales-refresh-note {
-  color: #64748b;
-  font-size: 12px;
-}
-
 .sales-modal-overlay {
   position: fixed;
   inset: 0;

@@ -11,7 +11,10 @@ import './Sales.css';
 const PAGE_SIZE = 50;
 const SALES_CACHE_TTL_MS = 60 * 1000;
 const salesPageCache = new Map();
-const getSalesCacheKey = (page, pageSize = PAGE_SIZE) => `sales:p${page}:s${pageSize}`;
+const normalizeSearchToken = (value) => String(value ?? '').trim().toLowerCase();
+const getSalesCacheKey = (page, pageSize = PAGE_SIZE, searchTerm = '') => (
+  `sales:p${page}:s${pageSize}:q${encodeURIComponent(normalizeSearchToken(searchTerm))}`
+);
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -28,6 +31,22 @@ const formatDateTime = (value) => {
 
 const formatMoney = (value) => `${Number(value || 0).toFixed(2)} ج.م`;
 const getSaleDate = (sale) => sale?.invoiceDate || sale?.createdAt;
+const buildSaleSearchIndex = (sale) => ([
+  sale?.id,
+  sale?.invoiceDate,
+  sale?.createdAt,
+  sale?.customer?.name,
+  sale?.saleType,
+  sale?.payment,
+  sale?.paymentMethod?.name,
+  sale?.notes,
+  sale?.total,
+  sale?.paidAmount,
+  sale?.remainingAmount,
+  sale?.itemsCount
+]
+  .map((value) => String(value ?? '').toLowerCase())
+  .join(' '));
 
 const toFiniteNumber = (value, fallback = 0) => {
   const parsed = Number.parseFloat(value);
@@ -165,15 +184,21 @@ export default function Sales() {
   const [sales, setSales] = useState([]);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
   const detailsRequestRef = useRef(0);
+  const latestSalesRequestRef = useRef(0);
 
   const loadSales = useCallback(async () => {
-    const cacheKey = getSalesCacheKey(currentPage, PAGE_SIZE);
+    const requestId = latestSalesRequestRef.current + 1;
+    latestSalesRequestRef.current = requestId;
+
+    const normalizedSearchTerm = String(searchTerm || '').trim();
+    const cacheKey = getSalesCacheKey(currentPage, PAGE_SIZE, normalizedSearchTerm);
     const cached = getFreshSalesCache(cacheKey);
     const hasCache = Boolean(cached);
 
@@ -188,10 +213,13 @@ export default function Sales() {
         paginated: true,
         page: currentPage,
         pageSize: PAGE_SIZE,
+        searchTerm: normalizedSearchTerm,
         sortCol: 'invoiceDate',
         sortDir: 'desc',
         lightweight: true
       });
+
+      if (requestId !== latestSalesRequestRef.current) return;
 
       if (response?.error) {
         if (!hasCache) {
@@ -219,6 +247,7 @@ export default function Sales() {
         totalPages: nextTotalPages
       });
     } catch (error) {
+      if (requestId !== latestSalesRequestRef.current) return;
       console.error('Failed to load sales:', error);
       if (!hasCache) {
         await safeAlert('تعذر تحميل المبيعات');
@@ -227,9 +256,10 @@ export default function Sales() {
         setTotalPages(1);
       }
     } finally {
+      if (requestId !== latestSalesRequestRef.current) return;
       setHasLoadedOnce(true);
     }
-  }, [currentPage]);
+  }, [currentPage, searchTerm]);
 
   const fetchSaleDetails = useCallback(async (saleId) => {
     const result = await window.api.getSaleById(saleId);
@@ -345,8 +375,24 @@ export default function Sales() {
     }
   }, [sales.length, currentPage, loadSales]);
 
+  const handleSearchChange = useCallback((event) => {
+    setSearchTerm(event.target.value);
+    setCurrentPage(1);
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    setSearchTerm('');
+    setCurrentPage(1);
+  }, []);
+
+  const visibleSales = useMemo(() => {
+    const normalized = normalizeSearchToken(searchTerm);
+    if (!normalized) return sales;
+    return sales.filter((sale) => buildSaleSearchIndex(sale).includes(normalized));
+  }, [sales, searchTerm]);
+
   const tableRows = useMemo(() => (
-    sales.map((sale) => {
+    visibleSales.map((sale) => {
       const remainingAmount = Number(sale.remainingAmount || 0);
       const paidAmount = Number(sale.paidAmount || 0);
 
@@ -382,15 +428,34 @@ export default function Sales() {
         </tr>
       );
     })
-  ), [sales, handleOpenSaleDetails, handleEditSale, handlePrintSale, handleDeleteSale]);
+  ), [visibleSales, handleOpenSaleDetails, handleEditSale, handlePrintSale, handleDeleteSale]);
 
   const pageStart = totalItems === 0 ? 0 : ((currentPage - 1) * PAGE_SIZE) + 1;
-  const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + sales.length - 1);
+  const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + visibleSales.length - 1);
   const isInitialLoading = !hasLoadedOnce && sales.length === 0;
 
   return (
     <div className="sales-page">
       <div className="sales-table-card card">
+        <div className="sales-search-bar">
+          <input
+            type="text"
+            className="sales-search-input"
+            value={searchTerm}
+            onChange={handleSearchChange}
+            placeholder="بحث سريع: رقم الفاتورة / اسم العميل / ملاحظة"
+          />
+          {searchTerm ? (
+            <button
+              type="button"
+              className="sales-btn sales-btn-light"
+              onClick={clearSearch}
+            >
+              مسح
+            </button>
+          ) : null}
+        </div>
+
         <div className="sales-table-scroll">
           <table className="sales-table">
             <thead>
@@ -410,7 +475,7 @@ export default function Sales() {
             </thead>
 
             <tbody>
-              {sales.length === 0 && hasLoadedOnce ? (
+              {visibleSales.length === 0 && hasLoadedOnce ? (
                 <tr>
                   <td colSpan={11} className="sales-empty-state">
                     لا توجد مبيعات

@@ -145,6 +145,24 @@
   overflow: hidden;
 }
 
+.sales-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.sales-search-bar .sales-search-input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
 .sales-table-scroll {
   flex: 1;
   min-height: 0;

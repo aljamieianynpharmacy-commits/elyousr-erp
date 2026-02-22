@@ -173,6 +173,8 @@ export default function ProductModal({
   isOpen,
   onClose,
   onSave,
+  mode = 'create',
+  isLoadingProduct = false,
   initialData = null,
   categories = [],
   isSaving = false
@@ -182,15 +184,20 @@ export default function ProductModal({
   const [validationMessage, setValidationMessage] = useState('');
   const fileInputRef = useRef(null);
 
-  const isEditMode = Boolean(initialData?.id);
+  const isEditMode = mode === 'edit';
+  const isBusy = isSaving || (isEditMode && isLoadingProduct);
 
   useEffect(() => {
     if (!isOpen) return;
+    if (isEditMode) {
+      if (isLoadingProduct || !initialData) return;
+    }
+
     const nextState = buildInitialState(initialData);
     setFormData(nextState);
     setValidationMessage('');
     setActiveTab(TABS.BASIC);
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, isEditMode, isLoadingProduct]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -458,7 +465,7 @@ export default function ProductModal({
   };
 
   const pickImage = () => {
-    if (isSaving) return;
+    if (isBusy) return;
     fileInputRef.current?.click();
   };
 
@@ -510,6 +517,7 @@ export default function ProductModal({
   }, []);
 
   const handleSave = () => {
+    if (isEditMode && isLoadingProduct) return;
     setValidationMessage('');
     const name = nText(formData.name);
     if (!name) {
@@ -619,18 +627,25 @@ export default function ProductModal({
         </div>
 
         <div className="product-modal-tabs">
-          <button type="button" className={`tab-button ${activeTab === TABS.BASIC ? 'active' : ''}`} onClick={() => setActiveTab(TABS.BASIC)}>
+          <button type="button" className={`tab-button ${activeTab === TABS.BASIC ? 'active' : ''}`} onClick={() => setActiveTab(TABS.BASIC)} disabled={isBusy}>
             بيانات أساسية
           </button>
-          <button type="button" className={`tab-button ${activeTab === TABS.UNITS ? 'active' : ''}`} onClick={() => setActiveTab(TABS.UNITS)}>
+          <button type="button" className={`tab-button ${activeTab === TABS.UNITS ? 'active' : ''}`} onClick={() => setActiveTab(TABS.UNITS)} disabled={isBusy}>
             التسعير والوحدات
           </button>
-          <button type="button" className={`tab-button ${activeTab === TABS.STOCK ? 'active' : ''}`} onClick={() => setActiveTab(TABS.STOCK)}>
+          <button type="button" className={`tab-button ${activeTab === TABS.STOCK ? 'active' : ''}`} onClick={() => setActiveTab(TABS.STOCK)} disabled={isBusy}>
             المخزون
           </button>
         </div>
 
         <div className="product-modal-body">
+          {isEditMode && isLoadingProduct ? (
+            <div className="product-modal-loading">
+              <span className="product-modal-loading-spinner">🔄</span>
+              <span>جاري تحميل بيانات المنتج...</span>
+            </div>
+          ) : (
+            <>
           {validationMessage ? (
             <div className="modal-inline-alert">
               <AlertCircle size={16} />
@@ -657,7 +672,7 @@ export default function ProductModal({
                         }}
                         aria-label="حذف الصورة"
                         title="حذف الصورة"
-                        disabled={isSaving}
+                        disabled={isBusy}
                       >
                         <X size={14} />
                       </button>
@@ -1050,12 +1065,14 @@ export default function ProductModal({
               </div>
             </div>
           ) : null}
+            </>
+          )}
         </div>
 
         <div className="product-modal-footer">
           <button type="button" className="btn-cancel" onClick={onClose} disabled={isSaving}>إلغاء</button>
-          <button type="button" className="btn-save" onClick={handleSave} disabled={isSaving}>
-            {isSaving ? 'جاري الحفظ...' : <><Save size={16} /> حفظ المنتج</>}
+          <button type="button" className="btn-save" onClick={handleSave} disabled={isBusy}>
+            {isSaving ? 'جاري الحفظ...' : isEditMode && isLoadingProduct ? 'جاري تحميل البيانات...' : <><Save size={16} /> حفظ المنتج</>}
           </button>
         </div>
       </div>

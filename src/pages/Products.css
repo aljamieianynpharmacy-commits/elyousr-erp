@@ -458,6 +458,10 @@
   overflow: hidden;
 }
 
+.grid-name-cell.no-image {
+  display: block;
+}
+
 .product-avatar {
   width: 40px;
   height: 40px;
@@ -552,7 +556,15 @@
   font-size: 16px;
 }
 
-.icon-btn-solid:hover {
+.icon-btn-solid:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  filter: none;
+}
+
+.icon-btn-solid:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.15);
   filter: brightness(1.1);

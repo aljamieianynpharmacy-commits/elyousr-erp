@@ -11,6 +11,7 @@ import './Products.css';
 import ProductsMetrics from '../components/products/ProductsMetrics';
 import ProductsFilters from '../components/products/ProductsFilters';
 import ProductsTableTools from '../components/products/ProductsTableTools';
+import ProductRowActions from '../components/products/ProductRowActions';
 import CategoryModal from '../components/products/CategoryModal';
 import ImportModal from '../components/products/ImportModal';
 import BarcodeStudioModal from '../components/products/BarcodeStudioModal';
@@ -39,8 +40,6 @@ import {
 const loadProductModal = () => import('../components/products/ProductModal');
 const ProductModal = lazy(loadProductModal);
 
-const PRODUCT_FETCH_CHUNK = 10000;
-const PRODUCT_SEARCH_LIMIT = 120;
 const PRODUCT_SEARCH_DEBOUNCE_MS = 200;
 const PRODUCTS_PAGE_SIZE = 50;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
@@ -69,7 +68,7 @@ const useDebouncedValue = (value, delayMs) => {
 
 
 
-const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
+const ProductGridRow = React.memo(({ index, style, data }) => {
   const {
     visibleProducts,
     activeColumns,
@@ -86,7 +85,6 @@ const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
   } = data;
 
   const product = visibleProducts[index];
-  const [imageError, setImageError] = React.useState(false);
 
   if (!product) return null;
 
@@ -107,33 +105,12 @@ const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
         );
       case 'code':
         return <span className="grid-code">{productCode}</span>;
-      case 'name': {
-        const imageUrl = product.image ? (product.image.startsWith('http') || product.image.startsWith('data:') ? product.image : `file://${product.image}`) : null;
-        const showImage = Boolean(imageUrl && !imageError && !isScrolling);
+      case 'name':
         return (
-          <div className="grid-name-cell">
-            <div className="product-avatar">
-              {showImage ? (
-                <img
-                  src={imageUrl}
-                  alt={product.name}
-                  onError={() => setImageError(true)}
-                  title={product.name}
-                  loading="lazy"
-                  decoding="async"
-                />
-              ) : (
-                <div className="avatar-fallback">
-                  📦
-                </div>
-              )}
-            </div>
-            <div>
-              <strong>{product.name}</strong>
-            </div>
+          <div className="grid-name-cell no-image" title={product.name}>
+            <strong>{product.name}</strong>
           </div>
         );
-      }
       case 'warehouse':
         return <span>{nInt(product?.inventory?.warehouseQty, 0)}</span>;
       case 'unit':
@@ -182,12 +159,13 @@ const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
         return <span>{new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('ar-EG')}</span>;
       case 'actions':
         return (
-          <div className="row-actions">
-            <button type="button" className="icon-btn-solid edit" title="تعديل" onClick={() => openEdit(product)}>✏️</button>
-            <button type="button" className="icon-btn-solid orange" title="نسخ" onClick={() => duplicateProduct(product)}>📋</button>
-            <button type="button" className="icon-btn-solid blue" title="طباعة باركود" onClick={() => printBarcodes([product])}>🏷️</button>
-            <button type="button" className="icon-btn-solid danger" title="حذف" onClick={() => deleteProduct(product)}>🗑️</button>
-          </div>
+          <ProductRowActions
+            product={product}
+            onEdit={openEdit}
+            onDuplicate={duplicateProduct}
+            onPrint={printBarcodes}
+            onDelete={deleteProduct}
+          />
         );
       default:
         return '-';
@@ -208,8 +186,16 @@ const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
   );
 }, (prevProps, nextProps) => {
   if (prevProps.index !== nextProps.index) return false;
-  if (prevProps.style !== nextProps.style) return false;
-  if (prevProps.isScrolling !== nextProps.isScrolling) return false;
+  const prevStyle = prevProps.style || {};
+  const nextStyle = nextProps.style || {};
+  if (
+    prevStyle.top !== nextStyle.top
+    || prevStyle.left !== nextStyle.left
+    || prevStyle.height !== nextStyle.height
+    || prevStyle.width !== nextStyle.width
+  ) {
+    return false;
+  }
   if (prevProps.data.gridTemplateColumns !== nextProps.data.gridTemplateColumns) return false;
 
   const prevProductId = prevProps.data.visibleProducts[prevProps.index]?.id;
@@ -224,8 +210,6 @@ const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
 
 export default function Products() {
   const [products, setProducts] = useState([]);
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchResultsTotal, setSearchResultsTotal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -241,9 +225,9 @@ export default function Products() {
 
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showSearchRow, setShowSearchRow] = useState(false);
   const [columnSearches, setColumnSearches] = useState({});
   const debouncedColumnSearches = useDebouncedValue(columnSearches, 80);
@@ -265,6 +249,7 @@ export default function Products() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [editingProduct, setEditingProduct] = useState(null);
+  const [editingProductLoading, setEditingProductLoading] = useState(false);
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
 
@@ -301,13 +286,12 @@ export default function Products() {
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
   const importRef = useRef(null);
-  const columnsMenuRef = useRef(null);
   const gridViewportRef = useRef(null);
   const gridHeaderRef = useRef(null);
   const productsListRef = useRef(null);
   const hasLoadedProductsRef = useRef(false);
   const latestProductsRequestRef = useRef(0);
-  const latestSearchRequestRef = useRef(0);
+  const editProductRequestRef = useRef(0);
   const matrixBarcodeLoaderRef = useRef(null);
 
   const activeSort = useMemo(() => SORT_PRESETS.find((s) => s.id === sortPreset) || SORT_PRESETS[0], [sortPreset]);
@@ -448,18 +432,6 @@ export default function Products() {
     return () => observer.disconnect();
   }, [recalculateGridHeight]);
 
-  useEffect(() => {
-    const onClickOutside = (event) => {
-      if (!columnsMenuRef.current) return;
-      if (!columnsMenuRef.current.contains(event.target)) {
-        setShowColumnMenu(false);
-      }
-    };
-
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, []);
-
   const loadCategories = useCallback(async () => {
     const res = await window.api.getCategories();
     if (!res?.error) setCategories(Array.isArray(res) ? res : []);
@@ -469,161 +441,73 @@ export default function Products() {
     const silent = typeof options === 'boolean' ? options : Boolean(options?.silent);
     const requestId = latestProductsRequestRef.current + 1;
     latestProductsRequestRef.current = requestId;
+    const term = nText(debouncedSearchTerm);
 
     const shouldBlockUi = !hasLoadedProductsRef.current && !silent;
     if (shouldBlockUi) setLoading(true);
     else setRefreshing(true);
+    if (term && !silent) setSearchLoading(true);
 
     try {
-      const allRows = [];
-      let page = 1;
-      let totalPages = 1;
-
-      do {
-        const res = await window.api.getProducts({
-          page,
-          pageSize: PRODUCT_FETCH_CHUNK,
-          searchTerm: '',
-          categoryId: categoryFilter || null,
-          stockFilter: stockFilter || 'all',
-          sortCol: activeSort.sortCol,
-          sortDir: activeSort.sortDir,
-          includeImage: false
-        });
-
-        if (res?.error) throw new Error(res.error);
-        if (requestId !== latestProductsRequestRef.current) return;
-
-        const rows = Array.isArray(res?.data) ? res.data : [];
-        allRows.push(...rows);
-        totalPages = Math.max(1, nInt(res?.totalPages, 1));
-        page += 1;
-      } while (page <= totalPages);
-
-      setProducts(allRows);
-      setTotalItems(allRows.length);
-
-      setSelectedIds((prev) => {
-        const valid = new Set(allRows.map((p) => p.id));
-        const next = new Set();
-        prev.forEach((id) => {
-          if (valid.has(id)) next.add(id);
-        });
-        return next;
+      const res = await window.api.getProducts({
+        page: currentPage,
+        pageSize: PRODUCTS_PAGE_SIZE,
+        searchTerm: term,
+        categoryId: categoryFilter || null,
+        stockFilter: stockFilter || 'all',
+        sortCol: activeSort.sortCol,
+        sortDir: activeSort.sortDir,
+        includeImage: false
       });
+
+      if (res?.error) throw new Error(res.error);
+      if (requestId !== latestProductsRequestRef.current) return;
+
+      const rows = Array.isArray(res?.data) ? res.data : [];
+      const total = Math.max(0, nInt(res?.total, rows.length));
+      const nextTotalPages = Math.max(1, nInt(res?.totalPages, Math.ceil(total / PRODUCTS_PAGE_SIZE)));
+
+      setProducts(rows);
+      setTotalItems(total);
+      setTotalPages(nextTotalPages);
     } catch (err) {
       if (requestId !== latestProductsRequestRef.current) return;
       await safeAlert(err.message || 'فشل تحميل البيانات', null, { type: 'error', title: 'المنتجات' });
+      setProducts([]);
+      setTotalItems(0);
+      setTotalPages(1);
     } finally {
       if (requestId !== latestProductsRequestRef.current) return;
       hasLoadedProductsRef.current = true;
       setLoading(false);
       setRefreshing(false);
-    }
-  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, stockFilter]);
-
-  const loadSearchProducts = useCallback(async (rawTerm, options = false) => {
-    const term = nText(rawTerm);
-    const silent = typeof options === 'boolean' ? options : Boolean(options?.silent);
-    const requestId = latestSearchRequestRef.current + 1;
-    latestSearchRequestRef.current = requestId;
-
-    if (!term) {
-      // Don't clear results here - keep old results visible until new ones arrive
-      return;
-    }
-
-    if (!silent) setSearchLoading(true);
-
-    try {
-      const allRows = [];
-      let page = 1;
-      let totalPages = 1;
-      let total = 0;
-
-      do {
-        const res = await window.api.getProducts({
-          page,
-          pageSize: PRODUCT_SEARCH_LIMIT,
-          searchTerm: term,
-          categoryId: categoryFilter || null,
-          stockFilter: stockFilter || 'all',
-          sortCol: activeSort.sortCol,
-          sortDir: activeSort.sortDir,
-          includeImage: false
-        });
-
-        if (res?.error) throw new Error(res.error);
-        if (requestId !== latestSearchRequestRef.current) return;
-
-        const rows = Array.isArray(res?.data) ? res.data : [];
-        allRows.push(...rows);
-        total = nInt(res?.total, allRows.length);
-        totalPages = Math.max(1, nInt(res?.totalPages, 1));
-        page += 1;
-
-        if (allRows.length >= PRODUCT_SEARCH_LIMIT) break;
-      } while (page <= totalPages);
-
-      setSearchResults(allRows.slice(0, PRODUCT_SEARCH_LIMIT));
-      setSearchResultsTotal(total);
-    } catch (err) {
-      if (requestId !== latestSearchRequestRef.current) return;
-      notify(err.message || 'تعذر تنفيذ البحث', 'error');
-      setSearchResults([]);
-      setSearchResultsTotal(0);
-    } finally {
-      if (requestId !== latestSearchRequestRef.current) return;
       setSearchLoading(false);
     }
-  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, notify, stockFilter]);
+  }, [activeSort.sortCol, activeSort.sortDir, categoryFilter, currentPage, debouncedSearchTerm, stockFilter]);
 
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
 
   useEffect(() => {
-    if (nText(debouncedSearchTerm)) return;
     loadProducts();
-  }, [debouncedSearchTerm, loadProducts]);
-
-  useEffect(() => {
-    const term = nText(debouncedSearchTerm);
-    if (!term) {
-      latestSearchRequestRef.current += 1;
-      setSearchResults([]);
-      setSearchResultsTotal(0);
-      setSearchLoading(false);
-      return;
-    }
-    loadSearchProducts(term);
-  }, [debouncedSearchTerm, loadSearchProducts]);
+  }, [loadProducts]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset, debouncedColumnSearches]);
+  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset]);
 
   useEffect(() => {
     productsListRef.current?.scrollTo(0);
   }, [currentPage]);
 
   const refreshVisibleProducts = useCallback(async () => {
-    const term = nText(debouncedSearchTerm);
-    if (term) {
-      await Promise.all([loadProducts(true), loadSearchProducts(term, true)]);
-      return;
-    }
     await loadProducts(true);
-  }, [debouncedSearchTerm, loadProducts, loadSearchProducts]);
+  }, [loadProducts]);
 
   const handleRefresh = useCallback(() => {
-    const term = nText(debouncedSearchTerm);
-    if (term) {
-      loadSearchProducts(term);
-      return;
-    }
     loadProducts(true);
-  }, [debouncedSearchTerm, loadProducts, loadSearchProducts]);
+  }, [loadProducts]);
 
   const categoryMap = useMemo(() => {
     const map = new Map();
@@ -631,8 +515,7 @@ export default function Products() {
     return map;
   }, [categories]);
 
-  const isSearchMode = nText(debouncedSearchTerm).length > 0;
-  const activeProducts = isSearchMode ? searchResults : products;
+  const activeProducts = products;
 
   const preparedProducts = useMemo(() => (
     activeProducts.map((product) => ({
@@ -650,31 +533,18 @@ export default function Products() {
   }, [preparedProducts]);
 
   const filteredProductResult = useMemo(() => {
-    const usesServerLimitedSet = isSearchMode && stockFilter === 'all';
     const out = [];
-    let totalMatches = usesServerLimitedSet ? searchResultsTotal : 0;
-
     for (const entry of preparedProducts) {
       if (stockFilter === 'available' && entry.status.key !== 'ok') continue;
       if (stockFilter === 'low' && entry.status.key !== 'low') continue;
       if (stockFilter === 'out' && entry.status.key !== 'out') continue;
-      if (!usesServerLimitedSet) totalMatches += 1;
       out.push(entry.product);
     }
+    return out;
+  }, [preparedProducts, stockFilter]);
 
-    return {
-      rows: out,
-      totalMatches,
-      isLimited: usesServerLimitedSet && searchResultsTotal > out.length
-    };
-  }, [isSearchMode, preparedProducts, searchResultsTotal, stockFilter]);
-
-  const visibleProducts = filteredProductResult.rows;
-  const filteredTotal = filteredProductResult.totalMatches;
-  const isSearchLimited = filteredProductResult.isLimited;
-  const isSearchTyping = nText(searchTerm) !== nText(debouncedSearchTerm);
-  const isSearchBusy = isSearchMode && searchLoading;
-  const tableLoading = loading || isSearchBusy;
+  const visibleProducts = filteredProductResult;
+  const tableLoading = loading || refreshing || searchLoading;
 
   // بحث في الأعمدة
   const columnFilteredProducts = useMemo(() => {
@@ -740,19 +610,15 @@ export default function Products() {
   };
 
   const columnFilteredTotal = columnFilteredProducts.length;
-  const totalPages = Math.max(1, Math.ceil(columnFilteredTotal / PRODUCTS_PAGE_SIZE));
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
   }, [totalPages]);
 
-  const displayedProducts = useMemo(() => {
-    const start = (currentPage - 1) * PRODUCTS_PAGE_SIZE;
-    return columnFilteredProducts.slice(start, start + PRODUCTS_PAGE_SIZE);
-  }, [columnFilteredProducts, currentPage]);
+  const displayedProducts = columnFilteredProducts;
 
-  const pageStart = columnFilteredTotal === 0 ? 0 : ((currentPage - 1) * PRODUCTS_PAGE_SIZE) + 1;
-  const pageEnd = columnFilteredTotal === 0 ? 0 : Math.min(columnFilteredTotal, pageStart + displayedProducts.length - 1);
+  const pageStart = totalItems === 0 ? 0 : ((currentPage - 1) * PRODUCTS_PAGE_SIZE) + 1;
+  const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + products.length - 1);
 
   const metrics = useMemo(() => {
     let variantsCount = 0;
@@ -803,27 +669,46 @@ export default function Products() {
   }, []);
 
   const openCreate = useCallback(() => {
+    editProductRequestRef.current += 1;
     void loadProductModal();
     setModalMode('create');
     setEditingProduct(null);
+    setEditingProductLoading(false);
     setShowProductModal(true);
   }, []);
 
-  const openEdit = useCallback(async (product) => {
+  const openEdit = useCallback((product) => {
+    const requestId = editProductRequestRef.current + 1;
+    editProductRequestRef.current = requestId;
+
     void loadProductModal();
-    try {
-      const detailedProduct = await fetchProductDetails(product.id);
-      setModalMode('edit');
-      setEditingProduct(detailedProduct);
-      setShowProductModal(true);
-    } catch (err) {
-      await safeAlert(err.message || 'تعذر تحميل بيانات المنتج', null, { type: 'error', title: 'تعديل منتج' });
-    }
+    setModalMode('edit');
+    setEditingProduct(null);
+    setEditingProductLoading(true);
+    setShowProductModal(true);
+
+    (async () => {
+      try {
+        const detailedProduct = await fetchProductDetails(product.id);
+        if (editProductRequestRef.current !== requestId) return;
+        setEditingProduct(detailedProduct);
+      } catch (err) {
+        if (editProductRequestRef.current !== requestId) return;
+        setShowProductModal(false);
+        setEditingProduct(null);
+        await safeAlert(err.message || 'تعذر تحميل بيانات المنتج', null, { type: 'error', title: 'تعديل منتج' });
+      } finally {
+        if (editProductRequestRef.current !== requestId) return;
+        setEditingProductLoading(false);
+      }
+    })();
   }, [fetchProductDetails]);
 
   const closeProductModal = useCallback(() => {
+    editProductRequestRef.current += 1;
     setShowProductModal(false);
     setEditingProduct(null);
+    setEditingProductLoading(false);
   }, []);
 
   const handleSaveProduct = async (productData) => {
@@ -1407,7 +1292,7 @@ export default function Products() {
   }, [openBarcodeStudio]);
 
   const printSelected = async () => {
-    const selected = visibleProducts.filter((p) => selectedIds.has(p.id));
+    const selected = displayedProducts.filter((p) => selectedIds.has(p.id));
     if (!selected.length) {
       await safeAlert('اختر منتجًا واحدًا على الأقل', null, { type: 'warning', title: 'طباعة باركود' });
       return;
@@ -1416,7 +1301,7 @@ export default function Products() {
   };
 
   const exportCsv = () => {
-    if (!visibleProducts.length) {
+    if (!displayedProducts.length) {
       notify('لا توجد بيانات للتصدير', 'warning');
       return;
     }
@@ -1428,7 +1313,7 @@ export default function Products() {
     ];
 
     const rows = [];
-    visibleProducts.forEach((p) => {
+    displayedProducts.forEach((p) => {
       const cat = categories.find((c) => c.id === p.categoryId)?.name || '';
       const variants = p.variants || [];
       if (!variants.length) {
@@ -1870,7 +1755,6 @@ export default function Products() {
                   itemSize={60}
                   itemData={itemData}
                   overscanCount={2}
-                  useIsScrolling
                   direction="rtl"
                   itemKey={(index) => displayedProducts[index]?.id || index}
                 >
@@ -1913,6 +1797,8 @@ export default function Products() {
               isOpen={showProductModal}
               onClose={closeProductModal}
               onSave={handleSaveProduct}
+              mode={modalMode}
+              isLoadingProduct={editingProductLoading}
               initialData={editingProduct}
               categories={categories}
               isSaving={saving}

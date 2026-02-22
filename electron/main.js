@@ -179,6 +179,35 @@ ipcMain.handle('db:updateInventory', async (event, productId, inventoryData) => 
     return await dbService.updateInventory(productId, inventoryData);
 });
 
+// Warehouses
+ipcMain.handle('db:getWarehouses', async () => {
+    return await dbService.getWarehouses();
+});
+ipcMain.handle('db:addWarehouse', async (event, warehouseData) => {
+    return await dbService.addWarehouse(warehouseData);
+});
+ipcMain.handle('db:updateWarehouse', async (event, id, warehouseData) => {
+    return await dbService.updateWarehouse(id, warehouseData);
+});
+ipcMain.handle('db:deleteWarehouse', async (event, id) => {
+    return await dbService.deleteWarehouse(id);
+});
+ipcMain.handle('db:getWarehouseStocks', async (event, productId) => {
+    return await dbService.getWarehouseStocks(productId);
+});
+ipcMain.handle('db:updateWarehouseStock', async (event, productId, warehouseId, quantity) => {
+    return await dbService.updateWarehouseStock(productId, warehouseId, quantity);
+});
+ipcMain.handle('db:updateMultipleWarehouseStocks', async (event, productId, stocks) => {
+    return await dbService.updateMultipleWarehouseStocks(productId, stocks);
+});
+ipcMain.handle('db:transferProductBetweenWarehouses', async (event, productId, fromWarehouseId, toWarehouseId, quantity, notes) => {
+    return await dbService.transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes);
+});
+ipcMain.handle('db:getWarehouseTransfers', async (event, productId, limit) => {
+    return await dbService.getWarehouseTransfers(productId, limit);
+});
+
 // Variants
 ipcMain.handle('db:getVariants', async () => {
     return await dbService.getVariants();

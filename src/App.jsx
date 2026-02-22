@@ -12,6 +12,7 @@ import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
 import DebtReminders from './pages/DebtReminders';
 import Treasury from './pages/Treasury';
+import Warehouses from './pages/Warehouses';
 import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge';
 import './index.css';
 
@@ -37,6 +38,7 @@ function App() {
       'purchaseReturns',
       'returns',
       'products',
+      'warehouses',
       'customers',
       'suppliers',
       'treasury',
@@ -112,6 +114,8 @@ function App() {
         return <PurchaseReturns />;
       case 'products':
         return <Products />;
+      case 'warehouses':
+        return <Warehouses />;
       case 'customers':
         return <Customers />;
       case 'suppliers':
@@ -182,6 +186,8 @@ function App() {
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
             <NavItem page="returns" icon="↩️" label="مرتجع المبيعات" />
+            <NavItem page="Warehouses" icon="↩️" label="المخازن" />
+            
             <NavItem page="products" icon="📦" label="المنتجات" />
             <NavItem page="customers" icon="👥" label="العملاء" />
             <NavItem page="suppliers" icon="🚚" label="الموردين" />

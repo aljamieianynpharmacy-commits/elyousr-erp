@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# Electron build artifacts (do not push Windows installer files)
+release-build/

@@ -153,9 +153,9 @@ function App() {
         <nav style={{ flex: 1 }}>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             <NavItem page="pos" icon="🛒" label="فاتورة البيع" />
+            <NavItem page="purchases" icon="📥" label="فاتوره المشتريات" />
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
-            <NavItem page="purchases" icon="📥" label="المشتريات" />
             <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
             <NavItem page="returns" icon="↩️" label="مرتجع المبيعات" />
             <NavItem page="products" icon="📦" label="المنتجات" />

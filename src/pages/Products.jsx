@@ -545,6 +545,12 @@ export default function Products() {
     return map;
   }, [categories]);
 
+  const warehouseMap = useMemo(() => {
+    const map = new Map();
+    warehouses.forEach((warehouse) => map.set(warehouse.id, warehouse));
+    return map;
+  }, [warehouses]);
+
   const activeProducts = products;
 
   const preparedProducts = useMemo(() => (

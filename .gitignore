@@ -6,3 +6,4 @@ node_modules
 
 # Electron build artifacts (do not push Windows installer files)
 release-build/
+release/

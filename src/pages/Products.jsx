@@ -42,6 +42,7 @@ const ProductModal = lazy(loadProductModal);
 const PRODUCT_FETCH_CHUNK = 10000;
 const PRODUCT_SEARCH_LIMIT = 120;
 const PRODUCT_SEARCH_DEBOUNCE_MS = 200;
+const PRODUCTS_PAGE_SIZE = 50;
 const COLUMN_STORAGE_KEY = 'products.visibleColumns.v1';
 
 
@@ -68,7 +69,7 @@ const useDebouncedValue = (value, delayMs) => {
 
 
 
-const ProductGridRow = React.memo(({ index, style, data }) => {
+const ProductGridRow = React.memo(({ index, style, data, isScrolling }) => {
   const {
     visibleProducts,
     activeColumns,
@@ -108,15 +109,18 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
         return <span className="grid-code">{productCode}</span>;
       case 'name': {
         const imageUrl = product.image ? (product.image.startsWith('http') || product.image.startsWith('data:') ? product.image : `file://${product.image}`) : null;
+        const showImage = Boolean(imageUrl && !imageError && !isScrolling);
         return (
           <div className="grid-name-cell">
             <div className="product-avatar">
-              {imageUrl && !imageError ? (
+              {showImage ? (
                 <img
                   src={imageUrl}
                   alt={product.name}
                   onError={() => setImageError(true)}
                   title={product.name}
+                  loading="lazy"
+                  decoding="async"
                 />
               ) : (
                 <div className="avatar-fallback">
@@ -205,6 +209,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
 }, (prevProps, nextProps) => {
   if (prevProps.index !== nextProps.index) return false;
   if (prevProps.style !== nextProps.style) return false;
+  if (prevProps.isScrolling !== nextProps.isScrolling) return false;
   if (prevProps.data.gridTemplateColumns !== nextProps.data.gridTemplateColumns) return false;
 
   const prevProductId = prevProps.data.visibleProducts[prevProps.index]?.id;
@@ -235,6 +240,7 @@ export default function Products() {
   const [sortPreset, setSortPreset] = useState('latest');
 
   const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showColumnMenu, setShowColumnMenu] = useState(false);
@@ -298,6 +304,7 @@ export default function Products() {
   const columnsMenuRef = useRef(null);
   const gridViewportRef = useRef(null);
   const gridHeaderRef = useRef(null);
+  const productsListRef = useRef(null);
   const hasLoadedProductsRef = useRef(false);
   const latestProductsRequestRef = useRef(0);
   const latestSearchRequestRef = useRef(0);
@@ -592,6 +599,14 @@ export default function Products() {
     loadSearchProducts(term);
   }, [debouncedSearchTerm, loadSearchProducts]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchTerm, categoryFilter, stockFilter, sortPreset, debouncedColumnSearches]);
+
+  useEffect(() => {
+    productsListRef.current?.scrollTo(0);
+  }, [currentPage]);
+
   const refreshVisibleProducts = useCallback(async () => {
     const term = nText(debouncedSearchTerm);
     if (term) {
@@ -724,7 +739,20 @@ export default function Products() {
     }));
   };
 
-  const displayedProducts = columnFilteredProducts;
+  const columnFilteredTotal = columnFilteredProducts.length;
+  const totalPages = Math.max(1, Math.ceil(columnFilteredTotal / PRODUCTS_PAGE_SIZE));
+
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
+
+  const displayedProducts = useMemo(() => {
+    const start = (currentPage - 1) * PRODUCTS_PAGE_SIZE;
+    return columnFilteredProducts.slice(start, start + PRODUCTS_PAGE_SIZE);
+  }, [columnFilteredProducts, currentPage]);
+
+  const pageStart = columnFilteredTotal === 0 ? 0 : ((currentPage - 1) * PRODUCTS_PAGE_SIZE) + 1;
+  const pageEnd = columnFilteredTotal === 0 ? 0 : Math.min(columnFilteredTotal, pageStart + displayedProducts.length - 1);
 
   const metrics = useMemo(() => {
     let variantsCount = 0;
@@ -1834,13 +1862,15 @@ export default function Products() {
                   </div>
                 ) : null}
                 <List
+                  ref={productsListRef}
                   className="products-grid-list"
                   width="100%"
                   height={gridHeight}
                   itemCount={displayedProducts.length}
                   itemSize={60}
                   itemData={itemData}
-                  overscanCount={5}
+                  overscanCount={2}
+                  useIsScrolling
                   direction="rtl"
                   itemKey={(index) => displayedProducts[index]?.id || index}
                 >
@@ -1849,6 +1879,30 @@ export default function Products() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="products-pagination">
+          <button
+            type="button"
+            className="products-btn products-btn-light"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1 || tableLoading}
+          >
+            السابق
+          </button>
+
+          <span>
+            {pageStart.toLocaleString('ar-EG')} - {pageEnd.toLocaleString('ar-EG')} من {columnFilteredTotal.toLocaleString('ar-EG')}
+          </span>
+
+          <button
+            type="button"
+            className="products-btn products-btn-light"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages || tableLoading}
+          >
+            التالي
+          </button>
         </div>
       </section >
 

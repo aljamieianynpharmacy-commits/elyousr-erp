@@ -229,7 +229,7 @@ function App() {
           flex: 1,
           padding: '30px 30px 10px 30px',
           backgroundColor: '#f9fafb',
-          overflowY: currentPage === 'sales' ? 'hidden' : 'auto'
+          overflowY: currentPage === 'sales' || currentPage === 'products' ? 'hidden' : 'auto'
         }}
       >
         {renderPage()}

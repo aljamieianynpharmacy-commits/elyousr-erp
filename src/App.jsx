@@ -3,7 +3,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import EnhancedPOS from './pages/EnhancedPOS';
-import Sales from './pages/Sales';
+import Sales, { prefetchSalesPage } from './pages/Sales';
 import Purchases from './pages/Purchases';
 import Returns from './pages/Returns';
 import PurchaseReturns from './pages/PurchaseReturns';
@@ -53,6 +53,30 @@ function App() {
     window.addEventListener(APP_NAVIGATE_EVENT, handleNavigate);
     return () => window.removeEventListener(APP_NAVIGATE_EVENT, handleNavigate);
   }, []);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    let cancelled = false;
+    const schedule = window.requestIdleCallback
+      ? window.requestIdleCallback
+      : (callback) => setTimeout(callback, 0);
+    const cancelSchedule = window.cancelIdleCallback
+      ? window.cancelIdleCallback
+      : clearTimeout;
+
+    const handle = schedule(() => {
+      if (cancelled) return;
+      prefetchSalesPage({ page: 1 }).catch((error) => {
+        console.error('Sales prefetch failed:', error);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelSchedule(handle);
+    };
+  }, [token]);
 
   const handleLogin = (newToken, userData) => {
     localStorage.setItem('token', newToken);
@@ -199,7 +223,15 @@ function App() {
         </div>
       </div>
 
-      <div className="main-content" style={{ flex: 1, padding: '30px 30px 10px 30px', backgroundColor: '#f9fafb', overflowY: 'auto' }}>
+      <div
+        className="main-content"
+        style={{
+          flex: 1,
+          padding: '30px 30px 10px 30px',
+          backgroundColor: '#f9fafb',
+          overflowY: currentPage === 'sales' ? 'hidden' : 'auto'
+        }}
+      >
         {renderPage()}
       </div>
     </div>

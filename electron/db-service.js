@@ -3463,6 +3463,11 @@ const dbService = {
                         }
                     });
 
+                    const variantRecord = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { productId: true }
+                    });
+
                     // زيادة المخزون
                     await tx.variant.update({
                         where: { id: variantId },
@@ -3471,6 +3476,24 @@ const dbService = {
                             cost // تحديث سعر التكلفة
                         }
                     });
+
+                    const parsedWarehouseId = parsePositiveInt(purchaseData?.warehouseId);
+                    if (parsedWarehouseId && variantRecord?.productId) {
+                        await tx.warehouseStock.upsert({
+                            where: {
+                                productId_warehouseId: {
+                                    productId: variantRecord.productId,
+                                    warehouseId: parsedWarehouseId
+                                }
+                            },
+                            update: { quantity: { increment: quantity } },
+                            create: {
+                                productId: variantRecord.productId,
+                                warehouseId: parsedWarehouseId,
+                                quantity: quantity
+                            }
+                        });
+                    }
                 }
 
                 // تحديث رصيد المورد

@@ -70,7 +70,8 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   } = data;
 
   const product = visibleProducts[index];
@@ -180,10 +181,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
             onDuplicate={duplicateProduct}
             onPrint={printBarcodes}
             onDelete={deleteProduct}
-            onTransfer={(p) => {
-              setTransferProduct(p);
-              setShowTransferModal(true);
-            }}
+            onTransfer={openTransfer}
           />
         );
       default:
@@ -1040,6 +1038,11 @@ export default function Products() {
     await safeAlert(`${lines.join('\n')}${overflowText}`, null, { title: `متغيرات: ${product.name}` });
   }, []);
 
+  const openTransfer = useCallback((product) => {
+    setTransferProduct(product);
+    setShowTransferModal(true);
+  }, []);
+
   const setBarcodeSetting = useCallback((key, value) => {
     setBarcodeStudioSettings((prev) => {
       const next = { ...prev, [key]: value };
@@ -1606,7 +1609,8 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   }), [
     displayedProducts,
     activeColumns,
@@ -1620,7 +1624,8 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   ]);
 
   return (

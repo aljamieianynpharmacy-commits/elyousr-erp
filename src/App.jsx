@@ -186,8 +186,8 @@ function App() {
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
             <NavItem page="returns" icon="↩️" label="مرتجع المبيعات" />
-            <NavItem page="Warehouses" icon="↩️" label="المخازن" />
-            
+            <NavItem page="warehouses" icon="🏭" label="المخازن" />
+
             <NavItem page="products" icon="📦" label="المنتجات" />
             <NavItem page="customers" icon="👥" label="العملاء" />
             <NavItem page="suppliers" icon="🚚" label="الموردين" />

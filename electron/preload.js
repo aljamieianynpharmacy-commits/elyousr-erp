@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Warehouses
     getWarehouses: () => ipcRenderer.invoke('db:getWarehouses'),
+    getWarehouseInventory: (warehouseId) => ipcRenderer.invoke('db:getWarehouseInventory', warehouseId),
     addWarehouse: (warehouseData) => ipcRenderer.invoke('db:addWarehouse', warehouseData),
     updateWarehouse: (id, warehouseData) => ipcRenderer.invoke('db:updateWarehouse', id, warehouseData),
     deleteWarehouse: (id) => ipcRenderer.invoke('db:deleteWarehouse', id),

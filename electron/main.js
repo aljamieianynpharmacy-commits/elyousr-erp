@@ -183,6 +183,9 @@ ipcMain.handle('db:updateInventory', async (event, productId, inventoryData) => 
 ipcMain.handle('db:getWarehouses', async () => {
     return await dbService.getWarehouses();
 });
+ipcMain.handle('db:getWarehouseInventory', async (event, warehouseId) => {
+    return await dbService.getWarehouseInventory(warehouseId);
+});
 ipcMain.handle('db:addWarehouse', async (event, warehouseData) => {
     return await dbService.addWarehouse(warehouseData);
 });

@@ -2142,6 +2142,24 @@ const dbService = {
         }
     },
 
+    async getWarehouseInventory(warehouseId) {
+        try {
+            return await prisma.warehouseStock.findMany({
+                where: { warehouseId: parseInt(warehouseId) },
+                include: { 
+                    product: {
+                        include: {
+                            variants: true
+                        }
+                    } 
+                },
+                orderBy: { product: { name: 'asc' } }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
     async updateWarehouseStock(productId, warehouseId, quantity) {
         try {
             const qty = Math.max(0, parseInt(quantity) || 0);

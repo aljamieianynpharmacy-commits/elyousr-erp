@@ -2330,7 +2330,13 @@ const dbService = {
             }
 
             return await prisma.variant.findMany({
-                include: { product: true },
+                include: { 
+                    product: {
+                        include: {
+                            warehouseStocks: true
+                        }
+                    }
+                },
                 orderBy: { id: 'desc' }
             });
         } catch (error) {
@@ -2348,7 +2354,13 @@ const dbService = {
                         { product: { barcode: { contains: query } } }
                     ]
                 },
-                include: { product: true },
+                include: { 
+                    product: {
+                        include: {
+                            warehouseStocks: true
+                        }
+                    }
+                },
                 take: 20
             });
         } catch (error) {

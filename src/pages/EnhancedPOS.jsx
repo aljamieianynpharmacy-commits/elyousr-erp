@@ -487,6 +487,7 @@ export default function EnhancedPOS() {
     const [variants, setVariants] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [paymentMethods, setPaymentMethods] = useState([]);
+    const [warehouses, setWarehouses] = useState([]);
     const [loading, setLoading] = useState(true);
 
     /**
@@ -577,6 +578,7 @@ export default function EnhancedPOS() {
      */
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
     const [searchMode, setSearchMode] = useState("name"); // 'name' أو 'barcode'
+    const [selectedWarehouseId, setSelectedWarehouseId] = useState("all");
 
     useEffect(() => {
         showPaymentEditModalRef.current = showPaymentEditModal;
@@ -692,8 +694,7 @@ export default function EnhancedPOS() {
 
     /**
      * تجميع المنتجات حسب الفئة
-     * مع فلترة حسب البحث
-     * يتم إظهار المنتجات فقط عند وجود بحث نشط
+     * مع فلترة حسب البحث والمخزن
      */
     const groupedProducts = useMemo(() => {
         // إذا لم يكن هناك بحث، لا نعرض المنتجات
@@ -710,14 +711,27 @@ export default function EnhancedPOS() {
                     basePrice: variant.price,
                     totalQuantity: 0,
                     variants: [],
+                    warehouseStocks: variant.product?.warehouseStocks || []
                 };
             }
             groups[variant.productId].variants.push(variant);
             groups[variant.productId].totalQuantity += variant.quantity;
         });
 
+        // التصفية النهائية وتطبيق الفلتر الخاص بالمخزن
+        let result = Object.values(groups);
+
+        if (selectedWarehouseId !== "all") {
+            const whId = parseInt(selectedWarehouseId, 10);
+            result = result.map(product => {
+                const stockRecord = product.warehouseStocks.find(s => s.warehouseId === whId);
+                const warehouseQty = stockRecord ? stockRecord.quantity : 0;
+                return { ...product, totalQuantity: warehouseQty };
+            }).filter(product => product.totalQuantity > 0);
+        }
+
         // تطبيق الفلترة حسب نوع البحث
-        return Object.values(groups).filter((product) => {
+        return result.filter((product) => {
             const searchLower = searchTerm.toLowerCase();
 
             if (searchMode === "barcode") {
@@ -728,7 +742,7 @@ export default function EnhancedPOS() {
                 return product.name.toLowerCase().includes(searchLower);
             }
         });
-    }, [variants, searchTerm, searchMode]);
+    }, [variants, searchTerm, searchMode, selectedWarehouseId]);
 
     /**
      * فلترة العملاء حسب البحث
@@ -950,10 +964,11 @@ export default function EnhancedPOS() {
     const loadData = async (isBackground = false) => {
         try {
             if (!isBackground) setLoading(true);
-            const [variantsData, customersData, paymentMethodsData] = await Promise.all([
+            const [variantsData, customersData, paymentMethodsData, warehousesData] = await Promise.all([
                 window.api.getVariants(),
                 window.api.getCustomers(),
                 window.api.getPaymentMethods(),
+                window.api.getWarehouses(),
             ]);
 
             if (!variantsData.error) setVariants(variantsData);
@@ -961,6 +976,7 @@ export default function EnhancedPOS() {
             if (Array.isArray(paymentMethodsData)) {
                 setPaymentMethods(filterPosPaymentMethods(paymentMethodsData));
             }
+            if (!warehousesData.error) setWarehouses(warehousesData || []);
         } catch (error) {
             console.error(error);
             if (!isBackground) showToast("فشل في تحميل البيانات", "error");
@@ -2234,232 +2250,265 @@ export default function EnhancedPOS() {
                                 />
                             </div>
                         </div>
-                        {!activeInvoice.customer ? (
-                            <div
-                                ref={customerDropdownRef}
-                                style={{ display: "flex", gap: "10px", position: "relative" }}
-                            >
-                                <div style={{ flex: 1, position: "relative" }}>
-                                    <div
-                                        style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            position: "relative",
-                                        }}
-                                    >
-                                        <input
-                                            type="text"
-                                            placeholder="👤 ابحث عن عميل (الاسم أو الهاتف)..."
-                                            value={customerSearchTerm}
-                                            onChange={(e) => {
-                                                setCustomerSearchTerm(e.target.value);
-                                                setShowCustomerList(true);
-                                                setSelectedCustomerIndex(-1);
-                                            }}
-                                            onFocus={() => setShowCustomerList(true)}
-                                            onKeyDown={handleCustomerKeyDown}
-                                            style={{
-                                                flex: 1,
-                                                padding: "10px",
-                                                borderRadius: "8px",
-                                                border: "1px solid #d1d5db",
-                                                paddingLeft: "30px",
-                                            }}
-                                        />
-                                        <button
-                                            onClick={() => {
-                                                if (showCustomerList) {
-                                                    setShowCustomerList(false);
-                                                    setCustomerSearchTerm("");
-                                                } else {
-                                                    setShowCustomerList(true);
-                                                }
-                                            }}
-                                            style={{
-                                                position: "absolute",
-                                                left: "10px",
-                                                background: "none",
-                                                border: "none",
-                                                color: "#6b7280",
-                                                cursor: "pointer",
-                                            }}
-                                        >
-                                            ▼
-                                        </button>
-                                    </div>
-
-                                    {showCustomerList && filteredCustomers.length > 0 && (
-                                        <div
-                                            ref={customerListRef}
-                                            style={{
-                                                position: "absolute",
-                                                top: "100%",
-                                                left: 0,
-                                                right: 0,
-                                                backgroundColor: "white",
-                                                border: "1px solid #e5e7eb",
-                                                borderRadius: "8px",
-                                                marginTop: "5px",
-                                                maxHeight: "200px",
-                                                overflowY: "auto",
-                                                zIndex: 100,
-                                                boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
-                                            }}
-                                        >
-                                            {filteredCustomers.map((customer, index) => (
-                                                <div
-                                                    key={customer.id}
-                                                    data-customer-index={index}
-                                                    onClick={() => {
-                                                        updateInvoice({ customer });
-                                                        setCustomerSearchTerm("");
-                                                        setShowCustomerList(false);
-                                                        setSelectedCustomerIndex(-1);
-                                                    }}
-                                                    style={{
-                                                        padding: "10px",
-                                                        borderBottom: "1px solid #f3f4f6",
-                                                        cursor: "pointer",
-                                                        display: "flex",
-                                                        justifyContent: "space-between",
-                                                        backgroundColor:
-                                                            selectedCustomerIndex === index
-                                                                ? "#fef08a"
-                                                                : "white",
-                                                        transition: "background-color 0.2s",
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                        setSelectedCustomerIndex(index);
-                                                        e.currentTarget.style.backgroundColor = "#fef08a";
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                        setSelectedCustomerIndex(-1);
-                                                        e.currentTarget.style.backgroundColor = "white";
-                                                    }}
-                                                >
-                                                    <span style={{ fontWeight: "bold" }}>
-                                                        {highlightMatch(customer.name, customerSearchTerm)}
-                                                    </span>
-                                                    <span style={{ color: "#6b7280", fontSize: "12px" }}>
-                                                        {highlightMatch(
-                                                            customer.phone || "",
-                                                            customerSearchTerm,
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setNewCustomer({
-                                            name: "",
-                                            phone: "",
-                                            phone2: "",
-                                            address: "",
-                                            city: "",
-                                            district: "",
-                                            notes: "",
-                                            creditLimit: 0,
-                                            customerType: "عادي",
-                                        });
-                                        setShowNewCustomerModal(true);
-                                    }}
-                                    style={{
-                                        padding: "10px 15px",
-                                        backgroundColor: "#e0e7ff",
-                                        color: "#4338ca",
-                                        border: "none",
-                                        borderRadius: "8px",
-                                        fontWeight: "bold",
-                                        cursor: "pointer",
-                                    }}
-                                >
-                                    جديد +
-                                </button>
-                            </div>
-                        ) : (
+                        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                            {/* Warehouse Selector */}
                             <div
                                 style={{
                                     display: "flex",
-                                    justifyContent: "space-between",
                                     alignItems: "center",
-                                    backgroundColor: "#eff6ff",
-                                    padding: "10px",
-                                    borderRadius: "8px",
-                                    border: "1px solid #bfdbfe",
+                                    backgroundColor: "white",
+                                    padding: "5px 10px",
+                                    borderRadius: "6px",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                 }}
                             >
-                                <div>
-                                    <span style={{ fontWeight: "bold", color: "#1e40af" }}>
-                                        {activeInvoice.customer.name}
-                                    </span>
-                                    <span
-                                        style={{
-                                            fontSize: "12px",
-                                            color: "#6b7280",
-                                            marginRight: "10px",
-                                        }}
-                                    >
-                                        {activeInvoice.customer.phone}
-                                    </span>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: "13px", color: "#6b7280" }}>
-                                        الرصيد السابق:{" "}
-                                    </span>
-                                    <span
-                                        style={{
-                                            fontWeight: "bold",
-                                            color:
-                                                (activeInvoice.customer.balance || 0) > 0
-                                                    ? "#dc2626"
-                                                    : "#059669",
-                                            direction: "ltr",
-                                            display: "inline-block",
-                                        }}
-                                    >
-                                        {(activeInvoice.customer.balance || 0).toFixed(2)}
-                                    </span>
-                                </div>
-                                <div style={{ display: "flex", gap: "5px" }}>
-                                    <button
-                                        onClick={() =>
-                                            setShowCustomerLedger(activeInvoice.customer.id)
-                                        }
-                                        style={{
-                                            background: "none",
-                                            border: "none",
-                                            color: "#3b82f6",
-                                            cursor: "pointer",
-                                            fontSize: "16px",
-                                            padding: "2px 6px",
-                                            borderRadius: "4px",
-                                            backgroundColor: "#e0f2fe",
-                                        }}
-                                        title="عرض كشف حساب العميل"
-                                    >
-                                        <i className="fas fa-info-circle" style={{ color: "#3b82f6", fontSize: "20px" }}></i>
-                                    </button>
+                                <select
+                                    value={selectedWarehouseId}
+                                    onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                                    style={{
+                                        border: "none",
+                                        outline: "none",
+                                        fontSize: "14px",
+                                        color: "#374151",
+                                        fontWeight: "500",
+                                        cursor: "pointer",
+                                        backgroundColor: "transparent",
+                                    }}
+                                >
+                                    <option value="all">🏢 كل المخازن</option>
+                                    {warehouses.filter(wh => wh.isActive !== false).map((wh) => (
+                                        <option key={wh.id} value={wh.id}>{wh.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {!activeInvoice.customer ? (
+                                <div
+                                    ref={customerDropdownRef}
+                                    style={{ display: "flex", gap: "10px", position: "relative", flex: 1 }}
+                                >
+                                    <div style={{ flex: 1, position: "relative" }}>
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                position: "relative",
+                                            }}
+                                        >
+                                            <input
+                                                type="text"
+                                                placeholder="👤 ابحث عن عميل (الاسم أو الهاتف)..."
+                                                value={customerSearchTerm}
+                                                onChange={(e) => {
+                                                    setCustomerSearchTerm(e.target.value);
+                                                    setShowCustomerList(true);
+                                                    setSelectedCustomerIndex(-1);
+                                                }}
+                                                onFocus={() => setShowCustomerList(true)}
+                                                onKeyDown={handleCustomerKeyDown}
+                                                style={{
+                                                    flex: 1,
+                                                    padding: "10px",
+                                                    borderRadius: "8px",
+                                                    border: "1px solid #d1d5db",
+                                                    paddingLeft: "30px",
+                                                }}
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    if (showCustomerList) {
+                                                        setShowCustomerList(false);
+                                                        setCustomerSearchTerm("");
+                                                    } else {
+                                                        setShowCustomerList(true);
+                                                    }
+                                                }}
+                                                style={{
+                                                    position: "absolute",
+                                                    left: "10px",
+                                                    background: "none",
+                                                    border: "none",
+                                                    color: "#6b7280",
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                ▼
+                                            </button>
+                                        </div>
+
+                                        {showCustomerList && filteredCustomers.length > 0 && (
+                                            <div
+                                                ref={customerListRef}
+                                                style={{
+                                                    position: "absolute",
+                                                    top: "100%",
+                                                    left: 0,
+                                                    right: 0,
+                                                    backgroundColor: "white",
+                                                    border: "1px solid #e5e7eb",
+                                                    borderRadius: "8px",
+                                                    marginTop: "5px",
+                                                    maxHeight: "200px",
+                                                    overflowY: "auto",
+                                                    zIndex: 100,
+                                                    boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
+                                                }}
+                                            >
+                                                {filteredCustomers.map((customer, index) => (
+                                                    <div
+                                                        key={customer.id}
+                                                        data-customer-index={index}
+                                                        onClick={() => {
+                                                            updateInvoice({ customer });
+                                                            setCustomerSearchTerm("");
+                                                            setShowCustomerList(false);
+                                                            setSelectedCustomerIndex(-1);
+                                                        }}
+                                                        style={{
+                                                            padding: "10px",
+                                                            borderBottom: "1px solid #f3f4f6",
+                                                            cursor: "pointer",
+                                                            display: "flex",
+                                                            justifyContent: "space-between",
+                                                            backgroundColor:
+                                                                selectedCustomerIndex === index
+                                                                    ? "#fef08a"
+                                                                    : "white",
+                                                            transition: "background-color 0.2s",
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            setSelectedCustomerIndex(index);
+                                                            e.currentTarget.style.backgroundColor = "#fef08a";
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            setSelectedCustomerIndex(-1);
+                                                            e.currentTarget.style.backgroundColor = "white";
+                                                        }}
+                                                    >
+                                                        <span style={{ fontWeight: "bold" }}>
+                                                            {highlightMatch(customer.name, customerSearchTerm)}
+                                                        </span>
+                                                        <span style={{ color: "#6b7280", fontSize: "12px" }}>
+                                                            {highlightMatch(
+                                                                customer.phone || "",
+                                                                customerSearchTerm,
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                     <button
                                         onClick={() => {
-                                            updateInvoice({ customer: null });
-                                            setCustomerSearchTerm("");
+                                            setNewCustomer({
+                                                name: "",
+                                                phone: "",
+                                                phone2: "",
+                                                address: "",
+                                                city: "",
+                                                district: "",
+                                                notes: "",
+                                                creditLimit: 0,
+                                                customerType: "عادي",
+                                            });
+                                            setShowNewCustomerModal(true);
                                         }}
                                         style={{
-                                            background: "none",
+                                            padding: "10px 15px",
+                                            backgroundColor: "#e0e7ff",
+                                            color: "#4338ca",
                                             border: "none",
-                                            color: "#ef4444",
+                                            borderRadius: "8px",
+                                            fontWeight: "bold",
                                             cursor: "pointer",
-                                            fontSize: "20px",
                                         }}
                                     >
-                                        ×
+                                        جديد +
                                     </button>
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        backgroundColor: "#eff6ff",
+                                        padding: "10px",
+                                        borderRadius: "8px",
+                                        border: "1px solid #bfdbfe",
+                                    }}
+                                >
+                                    <div>
+                                        <span style={{ fontWeight: "bold", color: "#1e40af" }}>
+                                            {activeInvoice.customer.name}
+                                        </span>
+                                        <span
+                                            style={{
+                                                fontSize: "12px",
+                                                color: "#6b7280",
+                                                marginRight: "10px",
+                                            }}
+                                        >
+                                            {activeInvoice.customer.phone}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: "13px", color: "#6b7280" }}>
+                                            الرصيد السابق:{" "}
+                                        </span>
+                                        <span
+                                            style={{
+                                                fontWeight: "bold",
+                                                color:
+                                                    (activeInvoice.customer.balance || 0) > 0
+                                                        ? "#dc2626"
+                                                        : "#059669",
+                                                direction: "ltr",
+                                                display: "inline-block",
+                                            }}
+                                        >
+                                            {(activeInvoice.customer.balance || 0).toFixed(2)}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: "flex", gap: "5px" }}>
+                                        <button
+                                            onClick={() =>
+                                                setShowCustomerLedger(activeInvoice.customer.id)
+                                            }
+                                            style={{
+                                                background: "none",
+                                                border: "none",
+                                                color: "#3b82f6",
+                                                cursor: "pointer",
+                                                fontSize: "16px",
+                                                padding: "2px 6px",
+                                                borderRadius: "4px",
+                                                backgroundColor: "#e0f2fe",
+                                            }}
+                                            title="عرض كشف حساب العميل"
+                                        >
+                                            <i className="fas fa-info-circle" style={{ color: "#3b82f6", fontSize: "20px" }}></i>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                updateInvoice({ customer: null });
+                                                setCustomerSearchTerm("");
+                                            }}
+                                            style={{
+                                                background: "none",
+                                                border: "none",
+                                                color: "#ef4444",
+                                                cursor: "pointer",
+                                                fontSize: "20px",
+                                            }}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* Section 2: Shopping Cart */}

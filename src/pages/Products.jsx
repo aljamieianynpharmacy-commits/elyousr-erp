@@ -15,12 +15,14 @@ import ProductRowActions from '../components/products/ProductRowActions';
 import CategoryModal from '../components/products/CategoryModal';
 import ImportModal from '../components/products/ImportModal';
 import BarcodeStudioModal from '../components/products/BarcodeStudioModal';
+import WarehouseTransferModal from '../components/products/WarehouseTransferModal';
 import {
   getGridHeight, nText, nKey, nInt, nNum, money, csv,
   stock, unitsOf, mainUnitOf, salePriceOf, costPriceOf, wholesale,
   DEFAULT_UNIT, DEFAULT_CATEGORY, GRID_COLUMNS, SORT_PRESETS,
   DEFAULT_VISIBLE_COLUMN_KEYS
 } from '../utils/productUtils';
+import { APP_NAVIGATE_EVENT } from '../utils/posEditorBridge';
 import {
   BARCODE_FORMAT_OPTIONS, BARCODE_CODE_SOURCE_OPTIONS, BARCODE_LABEL_PRESETS,
   BARCODE_STUDIO_TABS, DEFAULT_BARCODE_STUDIO,
@@ -60,6 +62,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     activeColumns,
     selectedIds,
     categoryMap,
+    warehouseMap,
     productMetaMap,
     toggleId,
     openEdit,
@@ -67,7 +70,8 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   } = data;
 
   const product = visibleProducts[index];
@@ -97,8 +101,34 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
             <strong>{product.name}</strong>
           </div>
         );
-      case 'warehouse':
-        return <span>{nInt(product?.inventory?.warehouseQty, 0)}</span>;
+      case 'warehouses': {
+        const stocks = product.warehouseStocks || [];
+        if (stocks.length === 0) return <span style={{ color: '#94a3b8' }}>-</span>;
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', fontSize: '0.85rem' }}>
+            {stocks.map((stock) => {
+              const wh = warehouseMap.get(stock.warehouseId);
+              if (!wh || !wh.isActive) return null;
+              return (
+                <span
+                  key={stock.warehouseId}
+                  style={{
+                    backgroundColor: `${wh.color || '#64748b'}1f`,
+                    color: wh.color || '#334155',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    border: `1px solid ${wh.color || '#64748b'}33`,
+                    fontSize: '0.8rem'
+                  }}
+                  title={`${wh.name}: ${stock.quantity}`}
+                >
+                  {wh.icon || '🏭'} {stock.quantity}
+                </span>
+              );
+            })}
+          </div>
+        );
+      }
       case 'unit':
         return <span>{nText(mainUnitOf(product)?.unitName) || DEFAULT_UNIT}</span>;
       case 'quantity':
@@ -151,6 +181,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
             onDuplicate={duplicateProduct}
             onPrint={printBarcodes}
             onDelete={deleteProduct}
+            onTransfer={openTransfer}
           />
         );
       default:
@@ -198,6 +229,7 @@ export default function Products() {
   const [products, setProducts] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -236,6 +268,8 @@ export default function Products() {
   const [editingProductLoading, setEditingProductLoading] = useState(false);
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferProduct, setTransferProduct] = useState(null);
 
   const [importSession, setImportSession] = useState(null);
   const [showBarcodeStudio, setShowBarcodeStudio] = useState(false);
@@ -427,6 +461,11 @@ export default function Products() {
     if (!res?.error) setCategories(Array.isArray(res) ? res : []);
   }, []);
 
+  const loadWarehouses = useCallback(async () => {
+    const res = await window.api.getWarehouses();
+    if (!res?.error) setWarehouses(Array.isArray(res) ? res : []);
+  }, []);
+
   const loadProducts = useCallback(async (options = false) => {
     const silent = typeof options === 'boolean' ? options : Boolean(options?.silent);
     const requestId = latestProductsRequestRef.current + 1;
@@ -479,7 +518,8 @@ export default function Products() {
 
   useEffect(() => {
     loadCategories();
-  }, [loadCategories]);
+    loadWarehouses();
+  }, [loadCategories, loadWarehouses]);
 
   useEffect(() => {
     loadProducts();
@@ -502,6 +542,12 @@ export default function Products() {
     categories.forEach((category) => map.set(category.id, category));
     return map;
   }, [categories]);
+
+  const warehouseMap = useMemo(() => {
+    const map = new Map();
+    warehouses.forEach((warehouse) => map.set(warehouse.id, warehouse));
+    return map;
+  }, [warehouses]);
 
   const activeProducts = products;
 
@@ -770,6 +816,11 @@ export default function Products() {
 
       const productId = modalMode === 'create' ? res?.id : editingProduct?.id;
       if (productId) {
+        // Save warehouse stocks
+        if (Array.isArray(productData.warehouseStocks) && productData.warehouseStocks.length > 0) {
+          const stocksRes = await window.api.updateMultipleWarehouseStocks(productId, productData.warehouseStocks);
+          if (stocksRes?.error) throw new Error(stocksRes.error);
+        }
         let finalVariants = [];
         if (payload.hasVariants) {
           if (modalMode === 'create') {
@@ -985,6 +1036,11 @@ export default function Products() {
     ));
     const overflowText = variants.length > 40 ? `\n... +${variants.length - 40} متغير إضافي` : '';
     await safeAlert(`${lines.join('\n')}${overflowText}`, null, { title: `متغيرات: ${product.name}` });
+  }, []);
+
+  const openTransfer = useCallback((product) => {
+    setTransferProduct(product);
+    setShowTransferModal(true);
   }, []);
 
   const setBarcodeSetting = useCallback((key, value) => {
@@ -1545,6 +1601,7 @@ export default function Products() {
     activeColumns,
     selectedIds,
     categoryMap,
+    warehouseMap,
     productMetaMap,
     toggleId,
     openEdit,
@@ -1552,12 +1609,14 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   }), [
     displayedProducts,
     activeColumns,
     selectedIds,
     categoryMap,
+    warehouseMap,
     productMetaMap,
     toggleId,
     openEdit,
@@ -1565,7 +1624,8 @@ export default function Products() {
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
-    gridTemplateColumns
+    gridTemplateColumns,
+    openTransfer
   ]);
 
   return (
@@ -1797,6 +1857,19 @@ export default function Products() {
         categories={categories}
         onSave={saveCategory}
         onDelete={deleteCategory}
+      />
+
+      <WarehouseTransferModal
+        isOpen={showTransferModal}
+        onClose={() => {
+          setShowTransferModal(false);
+          setTransferProduct(null);
+        }}
+        product={transferProduct}
+        warehouses={warehouses}
+        onTransferComplete={async () => {
+          await refreshVisibleProducts();
+        }}
       />
 
       {toast ? <div className={`products-toast ${toast.type || 'success'}`}>{toast.message}</div> : null}

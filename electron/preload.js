@@ -21,6 +21,18 @@ contextBridge.exposeInMainWorld('api', {
     updateCategory: (id, categoryData) => ipcRenderer.invoke('db:updateCategory', id, categoryData),
     deleteCategory: (id) => ipcRenderer.invoke('db:deleteCategory', id),
 
+    // Warehouses
+    getWarehouses: () => ipcRenderer.invoke('db:getWarehouses'),
+    getWarehouseInventory: (warehouseId) => ipcRenderer.invoke('db:getWarehouseInventory', warehouseId),
+    addWarehouse: (warehouseData) => ipcRenderer.invoke('db:addWarehouse', warehouseData),
+    updateWarehouse: (id, warehouseData) => ipcRenderer.invoke('db:updateWarehouse', id, warehouseData),
+    deleteWarehouse: (id) => ipcRenderer.invoke('db:deleteWarehouse', id),
+    getWarehouseStocks: (productId) => ipcRenderer.invoke('db:getWarehouseStocks', productId),
+    updateWarehouseStock: (productId, warehouseId, quantity) => ipcRenderer.invoke('db:updateWarehouseStock', productId, warehouseId, quantity),
+    updateMultipleWarehouseStocks: (productId, stocks) => ipcRenderer.invoke('db:updateMultipleWarehouseStocks', productId, stocks),
+    transferProductBetweenWarehouses: (productId, fromWarehouseId, toWarehouseId, quantity, notes) => ipcRenderer.invoke('db:transferProductBetweenWarehouses', productId, fromWarehouseId, toWarehouseId, quantity, notes),
+    getWarehouseTransfers: (productId, limit) => ipcRenderer.invoke('db:getWarehouseTransfers', productId, limit),
+
     // Inventory
     getInventory: (productId) => ipcRenderer.invoke('db:getInventory', productId),
     updateInventory: (productId, inventoryData) => ipcRenderer.invoke('db:updateInventory', productId, inventoryData),

@@ -179,6 +179,8 @@ export default function ProductModal({
   categories = [],
   isSaving = false
 }) {
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehouseStocks, setWarehouseStocks] = useState([]);
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
   const [formData, setFormData] = useState(() => buildInitialState(initialData));
   const [validationMessage, setValidationMessage] = useState('');
@@ -197,6 +199,23 @@ export default function ProductModal({
     setFormData(nextState);
     setValidationMessage('');
     setActiveTab(TABS.BASIC);
+
+    // Load warehouses and stocks
+    (async () => {
+      const whRes = await window.api.getWarehouses();
+      if (!whRes?.error) {
+        setWarehouses(Array.isArray(whRes) ? whRes.filter(w => w.isActive) : []);
+      }
+
+      if (initialData?.id) {
+        const stocksRes = await window.api.getWarehouseStocks(initialData.id);
+        if (!stocksRes?.error) {
+          setWarehouseStocks(Array.isArray(stocksRes) ? stocksRes : []);
+        }
+      } else {
+        setWarehouseStocks([]);
+      }
+    })();
   }, [isOpen, initialData, isEditMode, isLoadingProduct]);
 
   useEffect(() => {
@@ -587,6 +606,15 @@ export default function ProductModal({
     const maxStock = Math.max(minStock, toInt(formData.maxStock, 100));
     const firstUnit = normalizedUnits[0];
 
+    // Prepare warehouse stocks
+    const stocks = warehouses.map(wh => {
+      const existing = warehouseStocks.find(s => s.warehouseId === wh.id);
+      return {
+        warehouseId: wh.id,
+        quantity: existing ? Math.max(0, toInt(existing.quantity, 0)) : 0
+      };
+    }).filter(s => s.quantity > 0 || mode === 'edit'); // Include all in edit mode
+
     onSave({
       name,
       categoryId,
@@ -607,7 +635,8 @@ export default function ProductModal({
       hasVariants: Boolean(formData.hasVariants),
       variants: normalizedVariants,
       basePrice: money(firstUnit.salePrice),
-      cost: money(firstUnit.purchasePrice)
+      cost: money(firstUnit.purchasePrice),
+      warehouseStocks: stocks
     });
   };
 
@@ -1031,21 +1060,62 @@ export default function ProductModal({
                     </select>
                   </label>
                   <label className="form-group">
-                    <span>كمية المخزن</span>
-                    <input type="number" min="0" className="form-input" value={formData.openingQty} onChange={(event) => setField('openingQty', toInt(event.target.value, 0))} />
-                  </label>
-                  <label className="form-group">
-                    <span>كمية العرض</span>
-                    <input type="number" min="0" className="form-input" value={formData.displayQty} onChange={(event) => setField('displayQty', toInt(event.target.value, 0))} />
-                  </label>
-                  <label className="form-group">
                     <span>حد إعادة الطلب</span>
                     <input type="number" min="0" className="form-input" value={formData.minStock} onChange={(event) => setField('minStock', toInt(event.target.value, 5))} />
                   </label>
                 </div>
 
+                {warehouses.length > 0 && (
+                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <h3 style={{ marginBottom: '16px', fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>الكميات في المخازن</h3>
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      {warehouses.map((wh) => {
+                        const stock = warehouseStocks.find(s => s.warehouseId === wh.id);
+                        const qty = stock ? toInt(stock.quantity, 0) : 0;
+                        return (
+                          <label key={wh.id} className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
+                            <span style={{ minWidth: '150px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
+                              <span style={{ fontSize: '1.2rem' }}>{wh.icon || '🏭'}</span>
+                              <strong style={{ color: wh.color || '#334155' }}>{wh.name}</strong>
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              style={{ flex: 1, maxWidth: '200px' }}
+                              value={qty}
+                              onChange={(event) => {
+                                const newQty = toInt(event.target.value, 0);
+                                setWarehouseStocks((prev) => {
+                                  const filtered = prev.filter(s => s.warehouseId !== wh.id);
+                                  if (newQty > 0 || mode === 'edit') {
+                                    return [...filtered, { warehouseId: wh.id, quantity: newQty, warehouse: wh }];
+                                  }
+                                  return filtered;
+                                });
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#fff', borderRadius: '4px', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.9rem', color: '#64748b' }}>إجمالي الكمية: </span>
+                      <strong style={{ fontSize: '1.1rem', color: '#1e293b' }}>
+                        {warehouseStocks.reduce((sum, s) => sum + toInt(s.quantity, 0), 0)}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
+                {warehouses.length === 0 && (
+                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#fef3c7', borderRadius: '8px', border: '1px solid #fbbf24', textAlign: 'center' }}>
+                    <span style={{ color: '#92400e' }}>⚠️ لا توجد مخازن نشطة. يرجى إضافة مخازن من صفحة إدارة المخازن.</span>
+                  </div>
+                )}
+
                 <div className="stock-total-card">
-                  <span>إجمالي الرصيد الحالي</span>
+                  <span>إجمالي الرصيد الحالي (مخزن + عرض)</span>
                   <strong>{stockTotalPreview}</strong>
                 </div>
 

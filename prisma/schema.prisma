@@ -70,6 +70,8 @@ model Product {
   variants     Variant[]
   productUnits ProductUnit[]
   inventory    Inventory?
+  warehouseStocks WarehouseStock[]
+  warehouseTransfers WarehouseTransfer[]
 
   @@index([name])
   @@index([categoryId, updatedAt])
@@ -131,6 +133,65 @@ model Inventory {
   updatedAt     DateTime  @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * =========================
+ * WAREHOUSES
+ * =========================
+ */
+
+model Warehouse {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  icon        String?
+  color       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stocks     WarehouseStock[]
+  transfersFrom WarehouseTransfer[] @relation("TransferFrom")
+  transfersTo   WarehouseTransfer[] @relation("TransferTo")
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model WarehouseStock {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  warehouseId Int
+  quantity    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([warehouseId, productId])
+}
+
+model WarehouseTransfer {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  fromWarehouseId Int
+  toWarehouseId   Int
+  quantity      Int
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fromWarehouse Warehouse @relation("TransferFrom", fields: [fromWarehouseId], references: [id], onDelete: Cascade)
+  toWarehouse   Warehouse @relation("TransferTo", fields: [toWarehouseId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+  @@index([createdAt])
 }
 
 /**

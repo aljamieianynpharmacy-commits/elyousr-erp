@@ -175,6 +175,7 @@ const createEmptyInvoice = (overrides = {}) => ({
     sourceSaleId: null,
     sourcePaymentId: null,
     paymentEdit: null,
+    warehouseId: null, // Added warehouseId
     ...overrides,
 });
 
@@ -481,6 +482,7 @@ export default function Purchases() {
      */
     const [variants, setVariants] = useState([]);
     const [customers, setCustomers] = useState([]);
+    const [warehouses, setWarehouses] = useState([]); // Added warehouses state
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -960,10 +962,11 @@ export default function Purchases() {
     const loadData = async (isBackground = false) => {
         try {
             if (!isBackground) setLoading(true);
-            const [variantsData, customersData, paymentMethodsData] = await Promise.all([
+            const [variantsData, customersData, paymentMethodsData, warehousesData] = await Promise.all([
                 window.api.getVariants(),
                 window.api.getSuppliers(),
                 window.api.getPaymentMethods(),
+                window.api.getWarehouses?.() ?? Promise.resolve([]), // Added getWarehouses call
             ]);
 
             if (!variantsData.error) setVariants(variantsData);
@@ -975,6 +978,9 @@ export default function Purchases() {
             }
             if (Array.isArray(paymentMethodsData)) {
                 setPaymentMethods(filterPosPaymentMethods(paymentMethodsData));
+            }
+            if (Array.isArray(warehousesData)) { // Set warehouses state
+                setWarehouses(warehousesData);
             }
         } catch (error) {
             console.error(error);
@@ -1371,6 +1377,12 @@ export default function Purchases() {
 
             if (!currentInvoice || currentInvoice.cart.length === 0) return;
 
+            // إجبار المستخدم على اختيار مخزن
+            if (!currentInvoice.warehouseId) {
+                showToast("⚠️ يرجى اختيار مخزن لإضافة المشتريات إليه.", "warning");
+                return;
+            }
+
             playSound("save");
 
             // أعد حساب على أساس الفاتورة الحالية
@@ -1435,6 +1447,7 @@ export default function Purchases() {
                 purchaseType: finalSaleType,
                 discount: parseFloat(currentInvoice.discount || 0),
                 notes: currentInvoice.notes || "",
+                warehouseId: currentInvoice.warehouseId || null,
                 invoiceDate: (currentInvoice.invoiceDate === getTodayDate())
                     ? new Date().toISOString()
                     : (currentInvoice.invoiceDate || new Date().toISOString()),
@@ -2216,6 +2229,43 @@ export default function Purchases() {
                                     }}
                                 />
                             </div>
+
+                            {/* Warehouse Selection */}
+                            <div
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "5px",
+                                    backgroundColor: "white",
+                                    padding: "5px 10px",
+                                    borderRadius: "6px",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                    flex: 1,
+                                }}
+                            >
+                                <span style={{ fontSize: "14px", color: "#6b7280", fontWeight: "500" }}>
+                                    🏢
+                                </span>
+                                <select
+                                    value={activeInvoice.warehouseId || ""}
+                                    onChange={(e) => updateInvoice({ warehouseId: e.target.value })}
+                                    style={{
+                                        border: "none",
+                                        outline: "none",
+                                        fontSize: "14px",
+                                        color: "#374151",
+                                        fontWeight: "high",
+                                        cursor: "pointer",
+                                        backgroundColor: "transparent",
+                                        width: "100%",
+                                    }}
+                                >
+                                    <option value="">المخزن (اختياري)</option>
+                                    {warehouses.filter(wh => wh.isActive !== false).map(wh => (
+                                        <option key={wh.id} value={wh.id}>{wh.name}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                         {!activeInvoice.customer ? (
                             <div
@@ -2922,6 +2972,7 @@ export default function Purchases() {
             {/* === Modals === */}
             {/* Variant Selection Modal */}
             <VariantModal
+                allowZeroQuantity={true}
                 selectedProductForVariant={selectedProductForVariant}
                 selectedVariantIndex={selectedVariantIndex}
                 onClose={() => {

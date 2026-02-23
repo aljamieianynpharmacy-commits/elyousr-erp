@@ -141,13 +141,20 @@ const PRODUCT_VARIANT_SELECT = {
     updatedAt: true
 };
 
+const WAREHOUSE_STOCK_SELECT = {
+    id: true,
+    warehouseId: true,
+    quantity: true
+};
+
 const buildProductSelect = ({
     includeDescription = true,
     includeImage = true,
     includeCategory = true,
     includeInventory = true,
     includeProductUnits = true,
-    includeVariants = true
+    includeVariants = true,
+    includeWarehouseStocks = true
 } = {}) => ({
     id: true,
     name: true,
@@ -166,7 +173,8 @@ const buildProductSelect = ({
     ...(includeCategory ? { category: { select: PRODUCT_CATEGORY_SELECT } } : {}),
     ...(includeInventory ? { inventory: { select: PRODUCT_INVENTORY_SELECT } } : {}),
     ...(includeProductUnits ? { productUnits: { select: PRODUCT_UNIT_SELECT } } : {}),
-    ...(includeVariants ? { variants: { select: PRODUCT_VARIANT_SELECT } } : {})
+    ...(includeVariants ? { variants: { select: PRODUCT_VARIANT_SELECT } } : {}),
+    ...(includeWarehouseStocks ? { warehouseStocks: { select: WAREHOUSE_STOCK_SELECT } } : {})
 });
 
 const isPrismaDecimalLike = (value) => (
@@ -1791,7 +1799,8 @@ const dbService = {
                     includeCategory: includeCategory !== false,
                     includeInventory: includeInventory !== false,
                     includeProductUnits: includeProductUnits !== false,
-                    includeVariants: includeVariants !== false
+                    includeVariants: includeVariants !== false,
+                    includeWarehouseStocks: true
                 })
             };
 
@@ -2071,6 +2080,227 @@ const dbService = {
         }
     },
 
+    // ==================== WAREHOUSES ====================
+    async getWarehouses() {
+        try {
+            return await prisma.warehouse.findMany({
+                orderBy: { name: 'asc' }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async addWarehouse(warehouseData) {
+        try {
+            return await prisma.warehouse.create({
+                data: warehouseData
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateWarehouse(id, warehouseData) {
+        try {
+            return await prisma.warehouse.update({
+                where: { id: parseInt(id) },
+                data: warehouseData
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async deleteWarehouse(id) {
+        try {
+            // Check if warehouse has stocks
+            const stocks = await prisma.warehouseStock.findFirst({
+                where: { warehouseId: parseInt(id) }
+            });
+            if (stocks) {
+                return { error: 'لا يمكن حذف المخزن لأنه يحتوي على منتجات' };
+            }
+
+            return await prisma.warehouse.delete({
+                where: { id: parseInt(id) }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getWarehouseStocks(productId) {
+        try {
+            return await prisma.warehouseStock.findMany({
+                where: { productId: parseInt(productId) },
+                include: { warehouse: true },
+                orderBy: { warehouse: { name: 'asc' } }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getWarehouseInventory(warehouseId) {
+        try {
+            return await prisma.warehouseStock.findMany({
+                where: { warehouseId: parseInt(warehouseId) },
+                include: { 
+                    product: {
+                        include: {
+                            variants: true
+                        }
+                    } 
+                },
+                orderBy: { product: { name: 'asc' } }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateWarehouseStock(productId, warehouseId, quantity) {
+        try {
+            const qty = Math.max(0, parseInt(quantity) || 0);
+            return await prisma.warehouseStock.upsert({
+                where: {
+                    productId_warehouseId: {
+                        productId: parseInt(productId),
+                        warehouseId: parseInt(warehouseId)
+                    }
+                },
+                update: { quantity: qty },
+                create: {
+                    productId: parseInt(productId),
+                    warehouseId: parseInt(warehouseId),
+                    quantity: qty
+                }
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async updateMultipleWarehouseStocks(productId, stocks) {
+        try {
+            const productIdInt = parseInt(productId);
+            const results = [];
+
+            for (const stock of stocks) {
+                const qty = Math.max(0, parseInt(stock.quantity) || 0);
+                const result = await prisma.warehouseStock.upsert({
+                    where: {
+                        productId_warehouseId: {
+                            productId: productIdInt,
+                            warehouseId: parseInt(stock.warehouseId)
+                        }
+                    },
+                    update: { quantity: qty },
+                    create: {
+                        productId: productIdInt,
+                        warehouseId: parseInt(stock.warehouseId),
+                        quantity: qty
+                    }
+                });
+                results.push(result);
+            }
+
+            return results;
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes) {
+        try {
+            const productIdInt = parseInt(productId);
+            const fromId = parseInt(fromWarehouseId);
+            const toId = parseInt(toWarehouseId);
+            const qty = Math.max(1, parseInt(quantity) || 0);
+
+            if (fromId === toId) {
+                return { error: 'لا يمكن النقل لنفس المخزن' };
+            }
+
+            // Check source warehouse has enough stock
+            const fromStock = await prisma.warehouseStock.findUnique({
+                where: {
+                    productId_warehouseId: {
+                        productId: productIdInt,
+                        warehouseId: fromId
+                    }
+                }
+            });
+
+            if (!fromStock || fromStock.quantity < qty) {
+                return { error: 'الكمية المتاحة في المخزن المصدر غير كافية' };
+            }
+
+            // Perform transfer in transaction
+            const result = await prisma.$transaction(async (tx) => {
+                // Decrease from source
+                await tx.warehouseStock.update({
+                    where: {
+                        productId_warehouseId: {
+                            productId: productIdInt,
+                            warehouseId: fromId
+                        }
+                    },
+                    data: { quantity: { decrement: qty } }
+                });
+
+                // Increase in destination
+                await tx.warehouseStock.upsert({
+                    where: {
+                        productId_warehouseId: {
+                            productId: productIdInt,
+                            warehouseId: toId
+                        }
+                    },
+                    update: { quantity: { increment: qty } },
+                    create: {
+                        productId: productIdInt,
+                        warehouseId: toId,
+                        quantity: qty
+                    }
+                });
+
+                // Create transfer record
+                return await tx.warehouseTransfer.create({
+                    data: {
+                        productId: productIdInt,
+                        fromWarehouseId: fromId,
+                        toWarehouseId: toId,
+                        quantity: qty,
+                        notes: notes || null
+                    }
+                });
+            });
+
+            return result;
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    async getWarehouseTransfers(productId, limit = 50) {
+        try {
+            return await prisma.warehouseTransfer.findMany({
+                where: productId ? { productId: parseInt(productId) } : {},
+                include: {
+                    product: { select: { id: true, name: true, sku: true } },
+                    fromWarehouse: { select: { id: true, name: true } },
+                    toWarehouse: { select: { id: true, name: true } }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: parseInt(limit)
+            });
+        } catch (error) {
+            return { error: error.message };
+        }
+    },
+
     // ==================== VARIANTS ====================
     async getVariants() {
         try {
@@ -2100,7 +2330,13 @@ const dbService = {
             }
 
             return await prisma.variant.findMany({
-                include: { product: true },
+                include: { 
+                    product: {
+                        include: {
+                            warehouseStocks: true
+                        }
+                    }
+                },
                 orderBy: { id: 'desc' }
             });
         } catch (error) {
@@ -2118,7 +2354,13 @@ const dbService = {
                         { product: { barcode: { contains: query } } }
                     ]
                 },
-                include: { product: true },
+                include: { 
+                    product: {
+                        include: {
+                            warehouseStocks: true
+                        }
+                    }
+                },
                 take: 20
             });
         } catch (error) {
@@ -3251,6 +3493,11 @@ const dbService = {
                         }
                     });
 
+                    const variantRecord = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { productId: true }
+                    });
+
                     // زيادة المخزون
                     await tx.variant.update({
                         where: { id: variantId },
@@ -3259,6 +3506,24 @@ const dbService = {
                             cost // تحديث سعر التكلفة
                         }
                     });
+
+                    const parsedWarehouseId = parsePositiveInt(purchaseData?.warehouseId);
+                    if (parsedWarehouseId && variantRecord?.productId) {
+                        await tx.warehouseStock.upsert({
+                            where: {
+                                productId_warehouseId: {
+                                    productId: variantRecord.productId,
+                                    warehouseId: parsedWarehouseId
+                                }
+                            },
+                            update: { quantity: { increment: quantity } },
+                            create: {
+                                productId: variantRecord.productId,
+                                warehouseId: parsedWarehouseId,
+                                quantity: quantity
+                            }
+                        });
+                    }
                 }
 
                 // تحديث رصيد المورد

@@ -5,7 +5,8 @@ function ProductRowActions({
   onEdit,
   onDuplicate,
   onPrint,
-  onDelete
+  onDelete,
+  onTransfer
 }) {
   const [pendingAction, setPendingAction] = useState(null);
 
@@ -51,6 +52,17 @@ function ProductRowActions({
       >
         🏷️
       </button>
+      {onTransfer && (
+        <button
+          type="button"
+          className="icon-btn-solid green"
+          title="نقل بين المخازن"
+          onClick={() => runAction('transfer', onTransfer, product)}
+          disabled={isDisabled}
+        >
+          🔄
+        </button>
+      )}
       <button
         type="button"
         className="icon-btn-solid danger"

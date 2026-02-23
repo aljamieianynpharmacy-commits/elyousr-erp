@@ -176,128 +176,187 @@ export default function Warehouses() {
         </div>
       </header>
 
-      <section className="products-table-card">
-        <div className="form-grid two-cols" style={{ marginBottom: '24px', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
-          <label>
-            اسم المخزن *
-            <input
-              type="text"
-              value={warehouseForm.name}
-              onChange={(e) => setWarehouseForm((p) => ({ ...p, name: e.target.value }))}
-              placeholder="مثال: مخزن رئيسي"
-            />
-          </label>
-          <label>
-            الأيقونة
-            <input
-              type="text"
-              value={warehouseForm.icon}
-              onChange={(e) => setWarehouseForm((p) => ({ ...p, icon: e.target.value }))}
-              placeholder="🏭"
-            />
-          </label>
-          <label>
-            اللون
-            <input
-              type="color"
-              value={warehouseForm.color}
-              onChange={(e) => setWarehouseForm((p) => ({ ...p, color: e.target.value }))}
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input
-              type="checkbox"
-              checked={warehouseForm.isActive}
-              onChange={(e) => setWarehouseForm((p) => ({ ...p, isActive: e.target.checked }))}
-            />
-            <span>نشط</span>
-          </label>
-          <div style={{ display: 'flex', gap: '8px', gridColumn: '1 / -1' }}>
-            <button
-              type="button"
-              className="products-btn products-btn-primary"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? 'جاري الحفظ...' : editingId ? '💾 تحديث' : '➕ إضافة'}
-            </button>
+      {/* الإحصائيات السريعة */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ fontSize: '32px', color: '#0f766e' }}>🏭</div>
+          <div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b' }}>{warehouses.length}</div>
+            <div style={{ fontSize: '14px', color: '#64748b' }}>إجمالي المخازن</div>
+          </div>
+        </div>
+        <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ fontSize: '32px', color: '#10b981' }}>✅</div>
+          <div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b' }}>{warehouses.filter(w => w.isActive).length}</div>
+            <div style={{ fontSize: '14px', color: '#64748b' }}>مخازن نشطة</div>
+          </div>
+        </div>
+        <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ fontSize: '32px', color: '#ef4444' }}>❌</div>
+          <div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b' }}>{warehouses.filter(w => !w.isActive).length}</div>
+            <div style={{ fontSize: '14px', color: '#64748b' }}>مخازن معطلة</div>
+          </div>
+        </div>
+      </div>
+
+      <section className="products-table-card" style={{ padding: '0', backgroundColor: 'transparent', boxShadow: 'none' }}>
+
+        {/* نموذج الإضافة / التعديل */}
+        <div style={{ marginBottom: '24px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '16px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {editingId ? '✏️ تعديل بيانات المخزن' : '➕ مخزن جديد'}
+          </h3>
+          <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+            <label>
+              اسم المخزن *
+              <input
+                type="text"
+                value={warehouseForm.name}
+                onChange={(e) => setWarehouseForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="مثال: مخزن رئيسي"
+                style={{ width: '100%', padding: '10px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+              />
+            </label>
+            <label>
+              الأيقونة
+              <input
+                type="text"
+                value={warehouseForm.icon}
+                onChange={(e) => setWarehouseForm((p) => ({ ...p, icon: e.target.value }))}
+                placeholder="🏭"
+                style={{ width: '100%', padding: '10px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+              />
+            </label>
+            <label>
+              اللون المميز
+              <input
+                type="color"
+                value={warehouseForm.color}
+                onChange={(e) => setWarehouseForm((p) => ({ ...p, color: e.target.value }))}
+                style={{ width: '100%', height: '42px', padding: '2px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer' }}
+              />
+            </label>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '42px', padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: '6px', backgroundColor: '#f8fafc', cursor: 'pointer', flex: 1 }}>
+                <input
+                  type="checkbox"
+                  checked={warehouseForm.isActive}
+                  onChange={(e) => setWarehouseForm((p) => ({ ...p, isActive: e.target.checked }))}
+                  style={{ margin: 0, width: '18px', height: '18px' }}
+                />
+                <span style={{ fontWeight: 'bold', color: warehouseForm.isActive ? '#10b981' : '#64748b' }}>
+                  {warehouseForm.isActive ? 'مخزن نشط' : 'مخزن معطل'}
+                </span>
+              </label>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
             {editingId && (
               <button
                 type="button"
-                className="products-btn products-btn-light"
                 onClick={handleCancel}
+                style={{ padding: '10px 20px', backgroundColor: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 إلغاء
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              style={{ padding: '10px 24px', backgroundColor: '#0f766e', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', minWidth: '120px' }}
+            >
+              {saving ? 'جاري الحفظ...' : editingId ? '💾 تحديث البيانات' : '➕ إضافة المخزن'}
+            </button>
           </div>
         </div>
 
-        {loading ? (
-          <div className="products-loading">
-            <span className="spin">🔄</span>
-            <span>جاري تحميل المخازن...</span>
-          </div>
-        ) : warehouses.length === 0 ? (
-          <div className="products-empty">لا توجد مخازن</div>
-        ) : (
-          <div className="category-list">
-            {warehouses.map((w) => (
-              <article
-                key={w.id}
-                className="category-row"
-                style={{
-                  opacity: w.isActive ? 1 : 0.6,
-                  borderLeft: `4px solid ${w.color || '#0f766e'}`
-                }}
-              >
-                <div>
-                  <strong>
-                    {w.icon || '🏭'} {w.name}
-                  </strong>
-                  <small>
-                    {w.isActive ? '✅ نشط' : '❌ معطل'}
-                  </small>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => handleOpenInventory(w)}
-                    title="جرد المخزن"
-                    style={{ backgroundColor: '#f0fdf4', color: '#166534', borderColor: '#bbf7d0' }}
-                  >
-                    📦 محتويات المخزن / جرد
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => handleToggleActive(w)}
-                    title={w.isActive ? 'تعطيل' : 'تفعيل'}
-                  >
-                    {w.isActive ? '⏸️' : '▶️'}
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => handleEdit(w)}
-                    title="تعديل"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn danger"
-                    onClick={() => handleDelete(w.id, w.name)}
-                    title="حذف"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
+        {/* جدول المخازن */}
+        <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+          {loading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+              <span style={{ fontSize: '24px', display: 'inline-block', animation: 'spin 1s linear infinite' }}>🔄</span>
+              <p>جاري تحميل المخازن...</p>
+            </div>
+          ) : warehouses.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>لا توجد مخازن مضافة بعد.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
+                <thead style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                  <tr>
+                    <th style={{ padding: '16px', color: '#475569', fontWeight: 'bold' }}>الأيقونة</th>
+                    <th style={{ padding: '16px', color: '#475569', fontWeight: 'bold' }}>اسم المخزن</th>
+                    <th style={{ padding: '16px', color: '#475569', fontWeight: 'bold', textAlign: 'center' }}>اللون المميز</th>
+                    <th style={{ padding: '16px', color: '#475569', fontWeight: 'bold', textAlign: 'center' }}>الحالة</th>
+                    <th style={{ padding: '16px', color: '#475569', fontWeight: 'bold', textAlign: 'center' }}>الإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {warehouses.map((w) => (
+                    <tr key={w.id} style={{ borderBottom: '1px solid #f1f5f9', opacity: w.isActive ? 1 : 0.6, transition: 'background-color 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                      <td style={{ padding: '16px', fontSize: '24px' }}>{w.icon || '🏭'}</td>
+                      <td style={{ padding: '16px', fontWeight: 'bold', color: '#1e293b' }}>{w.name}</td>
+                      <td style={{ padding: '16px', textAlign: 'center' }}>
+                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: w.color || '#0f766e', margin: '0 auto', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} title={w.color}></div>
+                      </td>
+                      <td style={{ padding: '16px', textAlign: 'center' }}>
+                        <span style={{
+                          padding: '6px 12px',
+                          borderRadius: '20px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          backgroundColor: w.isActive ? '#dcfce7' : '#fee2e2',
+                          color: w.isActive ? '#166534' : '#991b1b'
+                        }}>
+                          {w.isActive ? '✅ نشط' : '❌ معطل'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenInventory(w)}
+                            title="جرد المخزن / محتويات"
+                            style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold' }}
+                          >
+                            📦 محتويات المخزن / جرد
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActive(w)}
+                            title={w.isActive ? 'تعطيل' : 'تفعيل'}
+                            style={{ background: '#f1f5f9', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '16px' }}
+                          >
+                            {w.isActive ? '⏸️' : '▶️'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(w)}
+                            title="تعديل"
+                            style={{ background: '#e0f2fe', color: '#0369a1', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '16px' }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(w.id, w.name)}
+                            title="حذف"
+                            style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '16px' }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Inventory Modal */}

@@ -18,6 +18,7 @@ function VariantModal({
     onClose,
     onSelectVariant,
     onVariantIndexChange,
+    allowZeroQuantity = false,
 }) {
     const [quantity, setQuantity] = useState(1);
     const modalRef = useRef(null);
@@ -62,8 +63,8 @@ function VariantModal({
                 // تغيير الكمية
                 case "ArrowRight":
                     e.preventDefault();
-                    setQuantity((prev) => 
-                        prev < currentVariant.quantity ? prev + 1 : prev
+                    setQuantity((prev) =>
+                        prev < (allowZeroQuantity ? 999999 : currentVariant.quantity) ? prev + 1 : prev
                     );
                     break;
                 case "ArrowLeft":
@@ -144,7 +145,7 @@ function VariantModal({
                     </div>
                     <div style={{ textAlign: "right" }}>
 
-                        <div style={{ fontSize: "28px", fontWeight: "bold", color: "#059669" , paddingLeft: "15px"}}>
+                        <div style={{ fontSize: "28px", fontWeight: "bold", color: "#059669", paddingLeft: "15px" }}>
                             {selectedProductForVariant.basePrice.toFixed(2)}
                         </div>
                     </div>
@@ -181,7 +182,7 @@ function VariantModal({
                 >
                     {selectedProductForVariant.variants.map((variant, index) => {
                         const isSelected = selectedVariantIndex === index;
-                        const isDisabled = variant.quantity <= 0;
+                        const isDisabled = !allowZeroQuantity && variant.quantity <= 0;
 
                         return (
                             <div
@@ -202,12 +203,12 @@ function VariantModal({
                                     padding: "12px 15px",
                                     borderRadius: "8px",
 
-                                    
- border: "1px solid #e5e7eb",       // ثابت
 
-boxShadow: selectedVariantIndex === index
-  ? '0 0 0 2px #3b82f6'
-  : 'none',
+                                    border: "1px solid #e5e7eb",       // ثابت
+
+                                    boxShadow: selectedVariantIndex === index
+                                        ? '0 0 0 2px #3b82f6'
+                                        : 'none',
 
                                     cursor: isDisabled ? "not-allowed" : "pointer",
                                     backgroundColor: isSelected ? "#eff6ff" : "white",
@@ -269,7 +270,7 @@ boxShadow: selectedVariantIndex === index
                                 <button
                                     onClick={() =>
                                         setQuantity((prev) =>
-                                            prev < currentVariant.quantity ? prev + 1 : prev,
+                                            prev < (allowZeroQuantity ? 999999 : currentVariant.quantity) ? prev + 1 : prev,
                                         )
                                     }
                                     style={{

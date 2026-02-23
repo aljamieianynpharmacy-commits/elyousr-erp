@@ -1377,6 +1377,12 @@ export default function Purchases() {
 
             if (!currentInvoice || currentInvoice.cart.length === 0) return;
 
+            // إجبار المستخدم على اختيار مخزن
+            if (!currentInvoice.warehouseId) {
+                showToast("⚠️ يرجى اختيار مخزن لإضافة المشتريات إليه.", "warning");
+                return;
+            }
+
             playSound("save");
 
             // أعد حساب على أساس الفاتورة الحالية
@@ -2255,7 +2261,7 @@ export default function Purchases() {
                                     }}
                                 >
                                     <option value="">المخزن (اختياري)</option>
-                                    {warehouses.map(wh => (
+                                    {warehouses.filter(wh => wh.isActive !== false).map(wh => (
                                         <option key={wh.id} value={wh.id}>{wh.name}</option>
                                     ))}
                                 </select>
@@ -2966,6 +2972,7 @@ export default function Purchases() {
             {/* === Modals === */}
             {/* Variant Selection Modal */}
             <VariantModal
+                allowZeroQuantity={true}
                 selectedProductForVariant={selectedProductForVariant}
                 selectedVariantIndex={selectedVariantIndex}
                 onClose={() => {

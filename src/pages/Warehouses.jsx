@@ -205,59 +205,60 @@ export default function Warehouses() {
 
         {/* نموذج الإضافة / التعديل */}
         <div style={{ marginBottom: '24px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '16px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {editingId ? '✏️ تعديل بيانات المخزن' : '➕ مخزن جديد'}
-          </h3>
-          <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            <label>
-              اسم المخزن *
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ margin: 0, color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {editingId ? '✏️ تعديل بيانات المخزن' : '➕ مخزن جديد'}
+            </h3>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-end', flexDirection: 'row', direction: 'rtl' }}>
+            <label style={{ flex: '1 1 200px' }}>
+              <span style={{ display: 'block', textAlign: 'right', marginBottom: '6px' }}>اسم المخزن *</span>
               <input
                 type="text"
                 value={warehouseForm.name}
                 onChange={(e) => setWarehouseForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="مثال: مخزن رئيسي"
-                style={{ width: '100%', padding: '10px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', textAlign: 'right' }}
               />
             </label>
-            <label>
-              الأيقونة
+            <label style={{ flex: '1 1 150px' }}>
+              <span style={{ display: 'block', textAlign: 'right', marginBottom: '6px' }}>الأيقونة</span>
               <input
                 type="text"
                 value={warehouseForm.icon}
                 onChange={(e) => setWarehouseForm((p) => ({ ...p, icon: e.target.value }))}
                 placeholder="🏭"
-                style={{ width: '100%', padding: '10px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', textAlign: 'right' }}
               />
             </label>
-            <label>
-              اللون المميز
+            <label style={{ flex: '1 1 150px' }}>
+              <span style={{ display: 'block', textAlign: 'right', marginBottom: '6px' }}>اللون المميز</span>
               <input
                 type="color"
                 value={warehouseForm.color}
                 onChange={(e) => setWarehouseForm((p) => ({ ...p, color: e.target.value }))}
-                style={{ width: '100%', height: '42px', padding: '2px', marginTop: '6px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer' }}
+                style={{ width: '100%', height: '42px', padding: '2px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer' }}
               />
             </label>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '42px', padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: '6px', backgroundColor: '#f8fafc', cursor: 'pointer', flex: 1 }}>
-                <input
-                  type="checkbox"
-                  checked={warehouseForm.isActive}
-                  onChange={(e) => setWarehouseForm((p) => ({ ...p, isActive: e.target.checked }))}
-                  style={{ margin: 0, width: '18px', height: '18px' }}
-                />
-                <span style={{ fontWeight: 'bold', color: warehouseForm.isActive ? '#10b981' : '#64748b' }}>
-                  {warehouseForm.isActive ? 'مخزن نشط' : 'مخزن معطل'}
-                </span>
-              </label>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+
+            <label style={{ flex: '1 1 150px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '42px', padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: '6px', backgroundColor: '#f8fafc', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={warehouseForm.isActive}
+                onChange={(e) => setWarehouseForm((p) => ({ ...p, isActive: e.target.checked }))}
+                style={{ margin: 0, width: '18px', height: '18px' }}
+              />
+              <span style={{ fontWeight: 'bold', color: warehouseForm.isActive ? '#10b981' : '#64748b' }}>
+                {warehouseForm.isActive ? 'مخزن نشط' : 'مخزن معطل'}
+              </span>
+            </label>
+
             {editingId && (
               <button
                 type="button"
                 onClick={handleCancel}
-                style={{ padding: '10px 20px', backgroundColor: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                style={{ padding: '10px 20px', height: '42px', backgroundColor: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', flex: '0 0 auto' }}
               >
                 إلغاء
               </button>

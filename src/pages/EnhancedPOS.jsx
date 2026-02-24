@@ -17,7 +17,8 @@ import {
     getDefaultSaleType,
     getDefaultWarehouseId,
     getDefaultSearchMode,
-    getDefaultProductDisplayMode
+    getDefaultProductDisplayMode,
+    getCompanyPrintSettings
 } from '../utils/appSettings';
 
 /**
@@ -1824,7 +1825,7 @@ export default function EnhancedPOS() {
                 const saleIdForPrint = isEditingSale
                     ? currentInvoice.sourceSaleId
                     : (result.id || result.saleId);
-                await window.api.printSale(saleIdForPrint);
+                await window.api.printSale(saleIdForPrint, getCompanyPrintSettings());
             }
 
             loadData(true);
@@ -3500,7 +3501,7 @@ export default function EnhancedPOS() {
                         onPrint={async () => {
                             try {
                                 if (window.api.printSale) {
-                                    await window.api.printSale(previewData.id);
+                                    await window.api.printSale(previewData.id, getCompanyPrintSettings());
                                 } else {
                                     window.print();
                                 }

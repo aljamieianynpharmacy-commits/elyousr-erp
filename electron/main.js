@@ -777,8 +777,18 @@ ipcMain.handle('print:exportPDF', async (event, options = {}) => {
     }
 });
 
+const normalizeCompanyPrintText = (value, maxLength = 250) => String(value ?? '')
+    .trim()
+    .slice(0, maxLength);
+
+const normalizeCompanyPrintInfo = (companyInfo = {}) => ({
+    name: normalizeCompanyPrintText(companyInfo?.name, 120),
+    contactNumbers: normalizeCompanyPrintText(companyInfo?.contactNumbers, 500),
+    address: normalizeCompanyPrintText(companyInfo?.address, 250)
+});
+
 // Legacy Printing Handler (kept for backward compatibility)
-ipcMain.handle('print:sale', async (event, saleId) => {
+ipcMain.handle('print:sale', async (event, saleId, companyInfo) => {
     try {
         const sale = await dbService.getSaleDetails(saleId);
         if (!sale || sale.error) return { error: 'Sale not found' };
@@ -796,7 +806,10 @@ ipcMain.handle('print:sale', async (event, saleId) => {
         const printPath = path.join(__dirname, 'print.html');
         await printWindow.loadFile(printPath);
 
-        printWindow.webContents.send('print-data', sale);
+        printWindow.webContents.send('print-data', {
+            sale,
+            company: normalizeCompanyPrintInfo(companyInfo)
+        });
 
         return { success: true };
     } catch (err) {

@@ -472,20 +472,31 @@
 
         function formatDateTime(date) {
             const d = new Date(date);
-            const dateStr = d.toLocaleDateString('ar-EG', { 
-                year: 'numeric', 
-                month: '2-digit', 
-                day: '2-digit' 
+            const dateStr = d.toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
             });
-            const timeStr = d.toLocaleTimeString('ar-EG', { 
-                hour: '2-digit', 
+            const timeStr = d.toLocaleTimeString('ar-EG', {
+                hour: '2-digit',
                 minute: '2-digit',
                 hour12: true
             });
             return { date: dateStr, time: timeStr, full: `${dateStr} ${timeStr}` };
         }
 
-        ipcRenderer.on('print-data', (event, sale) => {
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        ipcRenderer.on('print-data', (event, payload) => {
+            const sale = payload?.sale || payload;
+            const company = payload?.company || {};
             if (!sale) {
                 document.getElementById('content').innerHTML = `
                     <div class="center">
@@ -500,6 +511,11 @@
                 const customerName = sale.customer ? sale.customer.name : 'عميل نقدي';
                 const customerPhone = sale.customer?.phone || '';
                 const paymentType = sale.payment === 'Credit' ? 'آجل' : 'نقدي';
+                const storeName = escapeHtml(company?.name || 'ERP SYSTEM');
+                const storeContactNumbers = escapeHtml(company?.contactNumbers || '');
+                const storeAddress = escapeHtml(company?.address || '');
+                const safeCustomerName = escapeHtml(customerName);
+                const safeCustomerPhone = escapeHtml(customerPhone);
 
                 // Build items HTML
                 let itemsHtml = '';
@@ -508,7 +524,7 @@
                     const size = item.variant?.productSize || '';
                     const color = item.variant?.color || '';
                     const specs = [size, color].filter(s => s).join(' • ');
-                    
+
                     const itemSubtotal = item.quantity * item.price;
                     const itemDiscount = item.discount * item.quantity;
                     const itemTotal = itemSubtotal - itemDiscount;
@@ -542,9 +558,9 @@
                     <!-- Header -->
                     <div class="header">
                         <div class="store-logo">🏪</div>
-                        <div class="store-name">اسم المتجر</div>
-                        <div class="store-info">العنوان: [عنوان المتجر]</div>
-                        <div class="store-info">هاتف: [رقم الهاتف]</div>
+                        <div class="store-name">${storeName}</div>
+                        ${storeAddress ? `<div class="store-info">العنوان: ${storeAddress}</div>` : ''}
+                        ${storeContactNumbers ? `<div class="store-info">هاتف: ${storeContactNumbers}</div>` : ''}
                     </div>
 
                     <!-- Invoice Number & Date -->
@@ -567,8 +583,8 @@
 
                     <!-- Customer Info -->
                     <div class="customer-box">
-                        <div class="customer-name">${customerName}</div>
-                        ${customerPhone ? `<div class="small">هاتف: ${customerPhone}</div>` : ''}
+                        <div class="customer-name">${safeCustomerName}</div>
+                        ${safeCustomerPhone ? `<div class="small">هاتف: ${safeCustomerPhone}</div>` : ''}
                         ${sale.customer && sale.customer.balance !== 0 ? `
                             <div class="small">رصيد سابق: ${formatCurrency(Math.abs(sale.customer.balance))} ${sale.customer.balance > 0 ? '(مديون)' : '(دائن)'}</div>
                         ` : ''}

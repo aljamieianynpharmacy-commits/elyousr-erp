@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('api', {
     getSales: (options) => ipcRenderer.invoke('db:getSales', options),
     getSaleById: (saleId) => ipcRenderer.invoke('db:getSaleById', saleId),
     createSale: (saleData) => ipcRenderer.invoke('db:createSale', saleData),
-    printSale: (saleId) => ipcRenderer.invoke('print:sale', saleId),
+    printSale: (saleId, companyInfo) => ipcRenderer.invoke('print:sale', saleId, companyInfo),
     printHTML: (options) => ipcRenderer.invoke('print:printHTML', options),
     deleteSale: (saleId) => ipcRenderer.invoke('db:deleteSale', saleId),
     updateSale: (saleId, saleData) => ipcRenderer.invoke('db:updateSale', saleId, saleData),

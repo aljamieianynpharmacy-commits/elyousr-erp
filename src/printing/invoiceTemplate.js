@@ -3,7 +3,21 @@
  * Returns pure HTML string for printing
  */
 
+import { getCompanyPrintSettings } from '../utils/appSettings';
+
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 export const generateInvoiceHTML = (sale, customer) => {
+  const company = getCompanyPrintSettings();
+  const companyName = escapeHtml(company?.name || 'ERP SYSTEM');
+  const companyContactNumbers = escapeHtml(company?.contactNumbers || '');
+  const companyAddress = escapeHtml(company?.address || '');
+
   return `
 <!DOCTYPE html>
 <html dir="rtl">
@@ -86,7 +100,9 @@ export const generateInvoiceHTML = (sale, customer) => {
 </head>
 <body>
   <div class="header">
-    <h1>⚡ ERP SYSTEM</h1>
+    <h1>${companyName}</h1>
+    ${companyContactNumbers ? `<div style="margin-bottom: 4px; color: #374151;">هاتف: ${companyContactNumbers}</div>` : ''}
+    ${companyAddress ? `<div style="margin-bottom: 8px; color: #374151;">العنوان: ${companyAddress}</div>` : ''}
     <h2>فاتورة بيع</h2>
   </div>
   

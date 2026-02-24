@@ -17,7 +17,8 @@ import {
   normalizeSearchMode,
   normalizeProductDisplayMode,
   normalizeCompanyName,
-  normalizeCompanyContactNumbers
+  normalizeCompanyContactNumbers,
+  normalizeCompanyAddress
 } from '../utils/appSettings';
 import { emitOpenLicenseManagerRequest } from '../utils/posEditorBridge';
 import './Settings.css';
@@ -62,6 +63,9 @@ export default function Settings() {
   );
   const [companyContactNumbers, setCompanyContactNumbers] = useState(() =>
     normalizeCompanyContactNumbers(initialAppSettings.companyContactNumbers)
+  );
+  const [companyAddress, setCompanyAddress] = useState(() =>
+    normalizeCompanyAddress(initialAppSettings.companyAddress)
   );
   const [warehouses, setWarehouses] = useState([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
@@ -212,7 +216,8 @@ export default function Settings() {
         defaultSearchMode: normalizeSearchMode(defaultSearchMode),
         defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode),
         companyName: normalizeCompanyName(companyName),
-        companyContactNumbers: normalizeCompanyContactNumbers(companyContactNumbers)
+        companyContactNumbers: normalizeCompanyContactNumbers(companyContactNumbers),
+        companyAddress: normalizeCompanyAddress(companyAddress)
       });
       await safeAlert('تم حفظ الإعدادات الأساسية بنجاح', null, {
         type: 'success',
@@ -590,6 +595,22 @@ export default function Settings() {
                 <small className="settings-form-help">
                   يمكنك كتابة أكثر من رقم، وافصل بينها بفاصلة أو سطر جديد.
                 </small>
+              </div>
+
+              <div className="settings-form-group">
+                <label htmlFor="companyAddress" className="settings-form-label">
+                  عنوان الشركة
+                </label>
+                <textarea
+                  id="companyAddress"
+                  className="settings-textarea"
+                  value={companyAddress}
+                  onChange={(event) => setCompanyAddress(event.target.value)}
+                  placeholder="مثال: القاهرة - مدينة نصر - شارع ..."
+                  rows={2}
+                  maxLength={250}
+                  disabled={savingBasicSettings}
+                />
               </div>
 
               <div className="settings-actions">

@@ -13,7 +13,9 @@ import {
   getAppSettings,
   saveAppSettings,
   normalizeSaleType,
-  normalizeWarehouseId
+  normalizeWarehouseId,
+  normalizeSearchMode,
+  normalizeProductDisplayMode
 } from '../utils/appSettings';
 import './Settings.css';
 
@@ -42,6 +44,12 @@ export default function Settings() {
   const [defaultSaleType, setDefaultSaleType] = useState(() => normalizeSaleType(initialAppSettings.defaultSaleType));
   const [defaultWarehouseId, setDefaultWarehouseId] = useState(() =>
     normalizeWarehouseId(initialAppSettings.defaultWarehouseId)
+  );
+  const [defaultSearchMode, setDefaultSearchMode] = useState(() =>
+    normalizeSearchMode(initialAppSettings.defaultSearchMode)
+  );
+  const [defaultProductDisplayMode, setDefaultProductDisplayMode] = useState(() =>
+    normalizeProductDisplayMode(initialAppSettings.defaultProductDisplayMode)
   );
   const [warehouses, setWarehouses] = useState([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
@@ -184,7 +192,9 @@ export default function Settings() {
       setSavingBasicSettings(true);
       saveAppSettings({
         defaultSaleType: normalizeSaleType(defaultSaleType),
-        defaultWarehouseId: normalizeWarehouseId(defaultWarehouseId)
+        defaultWarehouseId: normalizeWarehouseId(defaultWarehouseId),
+        defaultSearchMode: normalizeSearchMode(defaultSearchMode),
+        defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode)
       });
       await safeAlert('تم حفظ الإعدادات الأساسية بنجاح', null, {
         type: 'success',
@@ -521,9 +531,10 @@ export default function Settings() {
         <section className="settings-card">
           <h2>إعدادات البيع الأساسية</h2>
           <p className="settings-hint">
-            نوع البيع والمخزن الافتراضيان يُطبّقان على الفواتير الجديدة في شاشة نقطة البيع.
+            الإعدادات التالية تُطبّق تلقائيًا عند فتح فاتورة جديدة في شاشة نقطة البيع.
           </p>
 
+          <h3>نوع البيع الافتراضي</h3>
           <div className="settings-sale-type-options">
             <label className="settings-sale-option">
               <input
@@ -545,6 +556,58 @@ export default function Settings() {
               />
               آجل
             </label>
+          </div>
+
+          <div className="settings-form-row">
+            <span className="settings-form-label">طريقة العرض الافتراضية للمنتجات</span>
+            <div className="settings-sale-type-options">
+              <label className="settings-sale-option">
+                <input
+                  type="radio"
+                  name="defaultProductDisplayMode"
+                  value="list"
+                  checked={defaultProductDisplayMode === 'list'}
+                  onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
+                />
+                قائمة
+              </label>
+              <label className="settings-sale-option">
+                <input
+                  type="radio"
+                  name="defaultProductDisplayMode"
+                  value="grid"
+                  checked={defaultProductDisplayMode === 'grid'}
+                  onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
+                />
+                شبكة
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-form-row">
+            <span className="settings-form-label">طريقة البحث الافتراضية</span>
+            <div className="settings-sale-type-options">
+              <label className="settings-sale-option">
+                <input
+                  type="radio"
+                  name="defaultSearchMode"
+                  value="name"
+                  checked={defaultSearchMode === 'name'}
+                  onChange={(event) => setDefaultSearchMode(event.target.value)}
+                />
+                بالاسم
+              </label>
+              <label className="settings-sale-option">
+                <input
+                  type="radio"
+                  name="defaultSearchMode"
+                  value="barcode"
+                  checked={defaultSearchMode === 'barcode'}
+                  onChange={(event) => setDefaultSearchMode(event.target.value)}
+                />
+                بالباركود
+              </label>
+            </div>
           </div>
 
           <div className="settings-form-row">

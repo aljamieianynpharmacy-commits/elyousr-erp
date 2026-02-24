@@ -13,7 +13,12 @@ import {
     filterPosPaymentMethods,
     normalizePaymentMethodCode
 } from "../utils/paymentMethodFilters";
-import { getDefaultSaleType, getDefaultWarehouseId } from '../utils/appSettings';
+import {
+    getDefaultSaleType,
+    getDefaultWarehouseId,
+    getDefaultSearchMode,
+    getDefaultProductDisplayMode
+} from '../utils/appSettings';
 
 /**
  * Toast Notification Component
@@ -578,7 +583,7 @@ export default function EnhancedPOS() {
         useState(null);
     const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
     const [selectedProductIndex, setSelectedProductIndex] = useState(-1);
-    const [productDisplayMode, setProductDisplayMode] = useState("list"); // 'grid' or 'list'
+    const [productDisplayMode, setProductDisplayMode] = useState(() => getDefaultProductDisplayMode()); // 'grid' or 'list'
     const [selectedVariantIndex, setSelectedVariantIndex] = useState(-1);
     const searchInputRef = useRef(null);
     const customerDropdownRef = useRef(null);
@@ -632,7 +637,7 @@ export default function EnhancedPOS() {
      * ========== حالات إضافية للواجهة ==========
      */
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
-    const [searchMode, setSearchMode] = useState("name"); // 'name' أو 'barcode'
+    const [searchMode, setSearchMode] = useState(() => getDefaultSearchMode()); // 'name' أو 'barcode'
 
     const productNeedsVariantSelection = useCallback((product) => {
         const productVariants = Array.isArray(product?.variants) ? product.variants : [];

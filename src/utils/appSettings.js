@@ -2,7 +2,9 @@ export const APP_SETTINGS_STORAGE_KEY = 'erp.appSettings.v1';
 
 const DEFAULT_APP_SETTINGS = {
   defaultSaleType: 'نقدي',
-  defaultWarehouseId: null
+  defaultWarehouseId: null,
+  defaultSearchMode: 'name',
+  defaultProductDisplayMode: 'list'
 };
 
 export const normalizeSaleType = (value) => {
@@ -16,6 +18,16 @@ export const normalizeSaleType = (value) => {
 export const normalizeWarehouseId = (value) => {
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+export const normalizeSearchMode = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'barcode' ? 'barcode' : 'name';
+};
+
+export const normalizeProductDisplayMode = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'grid' ? 'grid' : 'list';
 };
 
 export const getAppSettings = () => {
@@ -32,7 +44,9 @@ export const getAppSettings = () => {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
       defaultSaleType: normalizeSaleType(parsed?.defaultSaleType),
-      defaultWarehouseId: normalizeWarehouseId(parsed?.defaultWarehouseId)
+      defaultWarehouseId: normalizeWarehouseId(parsed?.defaultWarehouseId),
+      defaultSearchMode: normalizeSearchMode(parsed?.defaultSearchMode),
+      defaultProductDisplayMode: normalizeProductDisplayMode(parsed?.defaultProductDisplayMode)
     };
   } catch (error) {
     return { ...DEFAULT_APP_SETTINGS };
@@ -45,7 +59,11 @@ export const saveAppSettings = (partialSettings = {}) => {
     ...current,
     ...partialSettings,
     defaultSaleType: normalizeSaleType(partialSettings?.defaultSaleType ?? current.defaultSaleType),
-    defaultWarehouseId: normalizeWarehouseId(partialSettings?.defaultWarehouseId ?? current.defaultWarehouseId)
+    defaultWarehouseId: normalizeWarehouseId(partialSettings?.defaultWarehouseId ?? current.defaultWarehouseId),
+    defaultSearchMode: normalizeSearchMode(partialSettings?.defaultSearchMode ?? current.defaultSearchMode),
+    defaultProductDisplayMode: normalizeProductDisplayMode(
+      partialSettings?.defaultProductDisplayMode ?? current.defaultProductDisplayMode
+    )
   };
 
   if (typeof window !== 'undefined' && window.localStorage) {
@@ -57,3 +75,5 @@ export const saveAppSettings = (partialSettings = {}) => {
 
 export const getDefaultSaleType = () => getAppSettings().defaultSaleType;
 export const getDefaultWarehouseId = () => getAppSettings().defaultWarehouseId;
+export const getDefaultSearchMode = () => getAppSettings().defaultSearchMode;
+export const getDefaultProductDisplayMode = () => getAppSettings().defaultProductDisplayMode;

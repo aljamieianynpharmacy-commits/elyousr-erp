@@ -254,7 +254,7 @@ model CustomerTransaction {
   credit Float   @default(0)
   notes  String?
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@index([customerId, date])
   @@index([type])
@@ -292,7 +292,7 @@ model Sale {
   invoiceDate     DateTime @default(now())
   createdAt       DateTime @default(now())
 
-  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   paymentMethod      PaymentMethod?      @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   items              SaleItem[]
   returns            Return[]
@@ -332,7 +332,7 @@ model Return {
   createdAt  DateTime @default(now())
 
   sale     Sale?        @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  customer Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items    ReturnItem[]
 }
 
@@ -375,7 +375,7 @@ model CustomerPayment {
   notes           String?
   paymentDate     DateTime @default(now())
 
-  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
   paymentMethod      PaymentMethod       @relation(fields: [paymentMethodId], references: [id])
   paymentAllocations PaymentAllocation[]
 
@@ -609,7 +609,7 @@ model PaymentAllocation {
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
 
-  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: Restrict)
   sale            Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
   customerPayment CustomerPayment? @relation(fields: [customerPaymentId], references: [id], onDelete: Cascade)
   treasuryEntry   TreasuryEntry?   @relation("PaymentAllocationSourceEntry", fields: [treasuryEntryId], references: [id], onDelete: SetNull)

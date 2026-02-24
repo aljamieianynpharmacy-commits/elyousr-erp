@@ -295,6 +295,35 @@ const mapProductDeleteConstraintError = (error) => {
     return null;
 };
 
+const mapCustomerDeleteConstraintError = (error) => {
+    const text = normalizeErrorText(
+        `${error?.message || ''} ${error?.meta?.field_name || ''} ${error?.meta?.target || ''}`
+    );
+
+    if (text.includes('sale_customerid_fkey') || text.includes('"sale"') || text.includes('table "sale"')) {
+        return 'لا يمكن حذف العميل لارتباطه بفواتير بيع.';
+    }
+    if (text.includes('customerpayment_customerid_fkey') || text.includes('"customerpayment"') || text.includes('table "customerpayment"')) {
+        return 'لا يمكن حذف العميل لارتباطه بدفعات مسجلة.';
+    }
+    if (text.includes('return_customerid_fkey') || text.includes('"return"') || text.includes('table "return"')) {
+        return 'لا يمكن حذف العميل لارتباطه بمرتجعات بيع.';
+    }
+    if (text.includes('paymentallocation_customerid_fkey') || text.includes('"paymentallocation"') || text.includes('table "paymentallocation"')) {
+        return 'لا يمكن حذف العميل لارتباطه بتسويات مدفوعات.';
+    }
+    if (text.includes('customertransaction_customerid_fkey') || text.includes('"customertransaction"') || text.includes('table "customertransaction"')) {
+        return 'لا يمكن حذف العميل لوجود حركات مالية مرتبطة به.';
+    }
+    if (String(error?.code || '').trim() === 'P2003') {
+        return 'لا يمكن حذف العميل لوجود حركات مالية مرتبطة به.';
+    }
+    if (String(error?.code || '').trim() === 'P2025') {
+        return 'العميل غير موجود.';
+    }
+    return null;
+};
+
 const syncWarehouseStockTotalWithQuantity = async (dbClient, productId, targetTotalQuantity) => {
     const resolvedProductId = parsePositiveInt(productId);
     if (!resolvedProductId) return 0;
@@ -5398,10 +5427,66 @@ const dbService = {
 
     async deleteCustomer(id) {
         try {
+            const customerId = parsePositiveInt(id);
+            if (!customerId) {
+                return { error: 'معرف العميل غير صالح.' };
+            }
+
+            const customer = await prisma.customer.findUnique({
+                where: { id: customerId },
+                select: { id: true }
+            });
+            if (!customer) {
+                return { error: 'العميل غير موجود.' };
+            }
+
+            const [saleLink, paymentLink, returnLink, allocationLink, transactionLink] = await Promise.all([
+                prisma.sale.findFirst({
+                    where: { customerId },
+                    select: { id: true }
+                }),
+                prisma.customerPayment.findFirst({
+                    where: { customerId },
+                    select: { id: true }
+                }),
+                prisma.return.findFirst({
+                    where: { customerId },
+                    select: { id: true }
+                }),
+                prisma.paymentAllocation.findFirst({
+                    where: { customerId },
+                    select: { id: true }
+                }),
+                prisma.customerTransaction.findFirst({
+                    where: { customerId },
+                    select: { id: true }
+                })
+            ]);
+
+            if (saleLink) {
+                return { error: 'لا يمكن حذف العميل لارتباطه بفواتير بيع.' };
+            }
+            if (paymentLink) {
+                return { error: 'لا يمكن حذف العميل لارتباطه بدفعات مسجلة.' };
+            }
+            if (returnLink) {
+                return { error: 'لا يمكن حذف العميل لارتباطه بمرتجعات بيع.' };
+            }
+            if (allocationLink) {
+                return { error: 'لا يمكن حذف العميل لارتباطه بتسويات مدفوعات.' };
+            }
+            if (transactionLink) {
+                return { error: 'لا يمكن حذف العميل لوجود حركات مالية مرتبطة به.' };
+            }
+
             return await prisma.customer.delete({
-                where: { id: parseInt(id) }
+                where: { id: customerId }
             });
         } catch (error) {
+            const friendlyMessage = mapCustomerDeleteConstraintError(error);
+            if (friendlyMessage) {
+                return { error: friendlyMessage };
+            }
             return { error: error.message };
         }
     },

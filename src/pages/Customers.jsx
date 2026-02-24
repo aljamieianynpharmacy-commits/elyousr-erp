@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue, memo } from 'react';
 import { safeAlert } from '../utils/safeAlert';
+import { safeConfirm } from '../utils/safeConfirm';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
@@ -873,27 +874,28 @@ export default function Customers() {
   }, []);
 
   const handleDeleteCallback = useCallback(async (id) => {
-    console.log('🗑️ [FRONTEND] طلب حذف العميل رقم:', id);
+    const customer = allCustomers.find((row) => row.id === id);
+    const customerName = customer?.name || `#${id}`;
+    const confirmed = await safeConfirm(
+      `سيتم حذف العميل "${customerName}". هل تريد المتابعة؟`,
+      { title: 'حذف عميل' }
+    );
+    if (!confirmed) return;
 
-    if (confirm('هل أنت متأكد من الحذف؟')) {
-      try {
-        console.log('⚠️ [FRONTEND] المستخدم أكد الحذف - جاري التنفيذ');
-        const result = await window.api.deleteCustomer(id);
-        console.log('📦 [BACKEND] نتيجة الحذف:', result);
+    try {
+      const result = await window.api.deleteCustomer(id);
 
-        if (result.error) {
-          console.error('Error deleting customer:', result.error);
-          safeAlert('خطأ في الحذف');
-        } else {
-          await refreshCustomers();
-          safeAlert('تم الحذف بنجاح');
-        }
-      } catch (err) {
-        console.error('Exception deleting customer:', err);
-        safeAlert('خطأ في الحذف');
+      if (result?.error) {
+        await safeAlert(result.error, null, { type: 'error', title: 'تعذر الحذف' });
+        return;
       }
+
+      await refreshCustomers();
+      await safeAlert('تم حذف العميل بنجاح', null, { type: 'success', title: 'العملاء' });
+    } catch (err) {
+      await safeAlert(err?.message || 'تعذر حذف العميل', null, { type: 'error', title: 'تعذر الحذف' });
     }
-  }, [refreshCustomers]);
+  }, [allCustomers, refreshCustomers]);
 
   // البحث والفلترة
   const handleColumnSearchChange = useCallback((field, value) => {

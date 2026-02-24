@@ -345,11 +345,11 @@ const syncWarehouseStockTotalWithQuantity = async (dbClient, productId, targetTo
                 orderBy: { id: 'asc' }
             })
         ) || (
-            await dbClient.warehouse.findFirst({
-                select: { id: true },
-                orderBy: { id: 'asc' }
-            })
-        );
+                await dbClient.warehouse.findFirst({
+                    select: { id: true },
+                    orderBy: { id: 'asc' }
+                })
+            );
 
         if (!firstWarehouse?.id) return 0;
 
@@ -412,11 +412,11 @@ const syncVariantWarehouseStockTotalsWithVariantQuantities = async (dbClient, pr
             orderBy: { id: 'asc' }
         })
     ) || (
-        await dbClient.warehouse.findFirst({
-            select: { id: true },
-            orderBy: { id: 'asc' }
-        })
-    );
+            await dbClient.warehouse.findFirst({
+                select: { id: true },
+                orderBy: { id: 'asc' }
+            })
+        );
 
     for (const variant of variants) {
         const targetQuantity = Math.max(0, toInteger(variant.quantity, 0));
@@ -3484,7 +3484,13 @@ const dbService = {
                 return deletedVariant;
             });
         } catch (error) {
-            return { error: error.message };
+            let errorMessage = error.message;
+
+            if (String(error?.code || '').trim() === 'P2003') {
+                errorMessage = 'لا يمكن حذف المتغير لارتباطه بحركات مالية المبيعات والمشتريات.';
+            }
+
+            return { error: errorMessage };
         }
     },
 

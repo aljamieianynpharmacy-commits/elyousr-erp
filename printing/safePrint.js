@@ -4,14 +4,20 @@
  * In non-Electron environments, opens a preview window (manual print only)
  */
 
+import { getDefaultPrinterName, normalizeDefaultPrinterName } from '../src/utils/appSettings';
+
 export const safePrint = async (html, options = {}) => {
   try {
     // Check if Electron IPC print handler is available
     if (typeof window !== 'undefined' && window.api?.printHTML) {
+      const printerName = normalizeDefaultPrinterName(
+        options?.printerName ?? getDefaultPrinterName()
+      );
       const result = await window.api.printHTML({
         html,
         title: options.title || 'Print',
-        silent: options.silent || false
+        silent: options.silent || false,
+        printerName
       });
       
       if (result?.error) {

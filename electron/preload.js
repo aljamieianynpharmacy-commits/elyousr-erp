@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('api', {
     createSale: (saleData) => ipcRenderer.invoke('db:createSale', saleData),
     printSale: (saleId, companyInfo) => ipcRenderer.invoke('print:sale', saleId, companyInfo),
     printHTML: (options) => ipcRenderer.invoke('print:printHTML', options),
+    listPrinters: () => ipcRenderer.invoke('print:listPrinters'),
     deleteSale: (saleId) => ipcRenderer.invoke('db:deleteSale', saleId),
     updateSale: (saleId, saleData) => ipcRenderer.invoke('db:updateSale', saleId, saleData),
 

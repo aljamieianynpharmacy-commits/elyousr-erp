@@ -13,12 +13,13 @@ import {
     filterPosPaymentMethods,
     normalizePaymentMethodCode
 } from "../utils/paymentMethodFilters";
+import { safePrint } from "../../printing/safePrint";
+import { generateInvoiceHTML } from "../../printing/invoiceTemplate";
 import {
     getDefaultSaleType,
     getDefaultWarehouseId,
     getDefaultSearchMode,
-    getDefaultProductDisplayMode,
-    getCompanyPrintSettings
+    getDefaultProductDisplayMode
 } from '../utils/appSettings';
 
 /**
@@ -1659,6 +1660,39 @@ export default function EnhancedPOS() {
         });
     };
 
+    const printInvoiceFromSaleData = useCallback(async (saleData, fallbackCustomer = null) => {
+        if (!saleData) throw new Error("لا توجد بيانات فاتورة للطباعة");
+
+        const html = generateInvoiceHTML(
+            saleData,
+            saleData.customer || fallbackCustomer || null
+        );
+        const result = await safePrint(html, {
+            title: `فاتورة رقم ${saleData.id || "-"}`
+        });
+
+        if (result?.error) {
+            throw new Error(result.error);
+        }
+    }, []);
+
+    const printInvoiceBySaleId = useCallback(async (saleId, fallbackSale = null, fallbackCustomer = null) => {
+        let saleForPrint = fallbackSale || null;
+
+        if (saleId && typeof window?.api?.getSaleById === "function") {
+            const fullSale = await window.api.getSaleById(saleId);
+            if (!fullSale?.error && fullSale) {
+                saleForPrint = fullSale;
+            }
+        }
+
+        if (!saleForPrint) {
+            throw new Error("تعذر تحميل بيانات الفاتورة للطباعة");
+        }
+
+        await printInvoiceFromSaleData(saleForPrint, fallbackCustomer);
+    }, [printInvoiceFromSaleData]);
+
     /**
      * ========== عملية الدفع والحفظ ==========
      * معالجة الفواتير والتحقق والحفظ في قاعدة البيانات
@@ -1825,7 +1859,13 @@ export default function EnhancedPOS() {
                 const saleIdForPrint = isEditingSale
                     ? currentInvoice.sourceSaleId
                     : (result.id || result.saleId);
-                await window.api.printSale(saleIdForPrint, getCompanyPrintSettings());
+
+                try {
+                    await printInvoiceBySaleId(saleIdForPrint, null, currentInvoice.customer || null);
+                } catch (printError) {
+                    console.error(printError);
+                    showToast(`تم الحفظ ولكن تعذر الطباعة: ${printError.message}`, "warning");
+                }
             }
 
             loadData(true);
@@ -3500,11 +3540,11 @@ export default function EnhancedPOS() {
                         }}
                         onPrint={async () => {
                             try {
-                                if (window.api.printSale) {
-                                    await window.api.printSale(previewData.id, getCompanyPrintSettings());
-                                } else {
-                                    window.print();
-                                }
+                                await printInvoiceBySaleId(
+                                    previewData.id,
+                                    previewData,
+                                    previewData.customer || null
+                                );
 
                                 setShowInvoicePreview(false);
                                 setPreviewData(null);

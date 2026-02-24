@@ -5,6 +5,8 @@ const DEFAULT_APP_SETTINGS = {
   defaultWarehouseId: null,
   defaultSearchMode: 'name',
   defaultProductDisplayMode: 'list',
+  defaultInvoicePrintLayout: 'receipt80',
+  defaultPrinterName: '',
   companyName: '',
   companyContactNumbers: '',
   companyAddress: ''
@@ -38,6 +40,15 @@ export const normalizeProductDisplayMode = (value) => {
   return normalized === 'grid' ? 'grid' : 'list';
 };
 
+export const normalizeInvoicePrintLayout = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'a4' ? 'a4' : 'receipt80';
+};
+
+export const normalizeDefaultPrinterName = (value) => String(value ?? '')
+  .trim()
+  .slice(0, 255);
+
 export const normalizeCompanyName = (value) => String(value ?? '')
   .trim()
   .slice(0, 120);
@@ -67,6 +78,8 @@ export const getAppSettings = () => {
       defaultWarehouseId: normalizeWarehouseId(parsed?.defaultWarehouseId),
       defaultSearchMode: normalizeSearchMode(parsed?.defaultSearchMode),
       defaultProductDisplayMode: normalizeProductDisplayMode(parsed?.defaultProductDisplayMode),
+      defaultInvoicePrintLayout: normalizeInvoicePrintLayout(parsed?.defaultInvoicePrintLayout),
+      defaultPrinterName: normalizeDefaultPrinterName(parsed?.defaultPrinterName),
       companyName: normalizeCompanyName(parsed?.companyName),
       companyContactNumbers: normalizeCompanyContactNumbers(parsed?.companyContactNumbers),
       companyAddress: normalizeCompanyAddress(parsed?.companyAddress)
@@ -87,6 +100,12 @@ export const saveAppSettings = (partialSettings = {}) => {
     defaultProductDisplayMode: normalizeProductDisplayMode(
       partialSettings?.defaultProductDisplayMode ?? current.defaultProductDisplayMode
     ),
+    defaultInvoicePrintLayout: normalizeInvoicePrintLayout(
+      partialSettings?.defaultInvoicePrintLayout ?? current.defaultInvoicePrintLayout
+    ),
+    defaultPrinterName: normalizeDefaultPrinterName(
+      partialSettings?.defaultPrinterName ?? current.defaultPrinterName
+    ),
     companyName: normalizeCompanyName(partialSettings?.companyName ?? current.companyName),
     companyContactNumbers: normalizeCompanyContactNumbers(
       partialSettings?.companyContactNumbers ?? current.companyContactNumbers
@@ -105,6 +124,8 @@ export const getDefaultSaleType = () => getAppSettings().defaultSaleType;
 export const getDefaultWarehouseId = () => getAppSettings().defaultWarehouseId;
 export const getDefaultSearchMode = () => getAppSettings().defaultSearchMode;
 export const getDefaultProductDisplayMode = () => getAppSettings().defaultProductDisplayMode;
+export const getDefaultInvoicePrintLayout = () => getAppSettings().defaultInvoicePrintLayout;
+export const getDefaultPrinterName = () => getAppSettings().defaultPrinterName;
 export const getCompanyName = () => getAppSettings().companyName;
 export const getCompanyContactNumbers = () => getAppSettings().companyContactNumbers;
 export const getCompanyAddress = () => getAppSettings().companyAddress;

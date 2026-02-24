@@ -16,6 +16,8 @@ import {
   normalizeWarehouseId,
   normalizeSearchMode,
   normalizeProductDisplayMode,
+  normalizeInvoicePrintLayout,
+  normalizeDefaultPrinterName,
   normalizeCompanyName,
   normalizeCompanyContactNumbers,
   normalizeCompanyAddress
@@ -58,6 +60,12 @@ export default function Settings() {
   const [defaultProductDisplayMode, setDefaultProductDisplayMode] = useState(() =>
     normalizeProductDisplayMode(initialAppSettings.defaultProductDisplayMode)
   );
+  const [defaultInvoicePrintLayout, setDefaultInvoicePrintLayout] = useState(() =>
+    normalizeInvoicePrintLayout(initialAppSettings.defaultInvoicePrintLayout)
+  );
+  const [defaultPrinterName, setDefaultPrinterName] = useState(() =>
+    normalizeDefaultPrinterName(initialAppSettings.defaultPrinterName)
+  );
   const [companyName, setCompanyName] = useState(() =>
     normalizeCompanyName(initialAppSettings.companyName)
   );
@@ -69,6 +77,8 @@ export default function Settings() {
   );
   const [warehouses, setWarehouses] = useState([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [printers, setPrinters] = useState([]);
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
 
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [allCustomers, setAllCustomers] = useState([]);
@@ -86,6 +96,33 @@ export default function Settings() {
   const openLicenseManager = () => {
     emitOpenLicenseManagerRequest();
   };
+
+  const loadPrinters = useCallback(async () => {
+    const printersLoader = window.api?.listPrinters || window.api?.getPrinters;
+    if (!printersLoader) {
+      setPrinters([]);
+      return;
+    }
+
+    try {
+      setLoadingPrinters(true);
+      const result = await printersLoader();
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+
+      const parsedPrinters = Array.isArray(result) ? result : [];
+      setPrinters(parsedPrinters);
+    } catch (error) {
+      setPrinters([]);
+      await safeAlert(error?.message || 'تعذر تحميل قائمة الطابعات', null, {
+        type: 'error',
+        title: 'الإعدادات العامة'
+      });
+    } finally {
+      setLoadingPrinters(false);
+    }
+  }, []);
 
   const loadWarehouses = useCallback(async () => {
     if (!window.api?.getWarehouses) {
@@ -147,6 +184,10 @@ export default function Settings() {
   useEffect(() => {
     loadWarehouses();
   }, [loadWarehouses]);
+
+  useEffect(() => {
+    loadPrinters();
+  }, [loadPrinters]);
 
   useEffect(() => {
     loadAllCustomers();
@@ -215,6 +256,8 @@ export default function Settings() {
         defaultWarehouseId: normalizeWarehouseId(defaultWarehouseId),
         defaultSearchMode: normalizeSearchMode(defaultSearchMode),
         defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode),
+        defaultInvoicePrintLayout: normalizeInvoicePrintLayout(defaultInvoicePrintLayout),
+        defaultPrinterName: normalizeDefaultPrinterName(defaultPrinterName),
         companyName: normalizeCompanyName(companyName),
         companyContactNumbers: normalizeCompanyContactNumbers(companyContactNumbers),
         companyAddress: normalizeCompanyAddress(companyAddress)
@@ -611,6 +654,74 @@ export default function Settings() {
                   maxLength={250}
                   disabled={savingBasicSettings}
                 />
+              </div>
+
+              <div className="settings-form-group">
+                <span className="settings-form-label">المقاس الافتراضي لطباعة فواتير البيع</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultInvoicePrintLayout"
+                      value="receipt80"
+                      checked={defaultInvoicePrintLayout === 'receipt80'}
+                      onChange={(event) => setDefaultInvoicePrintLayout(event.target.value)}
+                    />
+                    <span>ريسيت 80mm</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultInvoicePrintLayout"
+                      value="a4"
+                      checked={defaultInvoicePrintLayout === 'a4'}
+                      onChange={(event) => setDefaultInvoicePrintLayout(event.target.value)}
+                    />
+                    <span>A4</span>
+                  </label>
+                </div>
+                <small className="settings-form-help">
+                  يتم تطبيق هذا الإعداد عند طباعة فاتورة البيع من أي شاشة.
+                </small>
+              </div>
+
+              <div className="settings-form-group">
+                <label htmlFor="defaultPrinterName" className="settings-form-label">
+                  الطابعة الافتراضية
+                </label>
+                <div className="settings-inline-controls">
+                  <select
+                    id="defaultPrinterName"
+                    className="settings-select"
+                    value={defaultPrinterName}
+                    onChange={(event) => setDefaultPrinterName(event.target.value)}
+                    disabled={savingBasicSettings || loadingPrinters}
+                  >
+                    <option value="">استخدام طابعة النظام الافتراضية</option>
+                    {printers.map((printer) => {
+                      const printerName = String(printer?.name || '').trim();
+                      if (!printerName) return null;
+                      const printerLabel = printer?.displayName || printerName;
+                      return (
+                        <option key={printerName} value={printerName}>
+                          {printerLabel}
+                          {printer?.isDefault ? ' (افتراضي النظام)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadPrinters}
+                    className="settings-btn settings-btn-secondary"
+                    disabled={loadingPrinters || savingBasicSettings}
+                  >
+                    {loadingPrinters ? 'جاري تحميل الطابعات...' : 'تحديث الطابعات'}
+                  </button>
+                </div>
+                <small className="settings-form-help">
+                  يتم استخدام هذه الطابعة افتراضيًا في جميع عمليات الطباعة داخل النظام.
+                </small>
               </div>
 
               <div className="settings-actions">

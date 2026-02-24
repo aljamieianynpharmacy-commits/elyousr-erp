@@ -4,7 +4,6 @@ import { safeConfirm } from '../utils/safeConfirm';
 import { safePrint } from '../../printing/safePrint';
 import { generateInvoiceHTML } from '../../printing/invoiceTemplate';
 import { APP_NAVIGATE_EVENT, emitPosEditorRequest } from '../utils/posEditorBridge';
-import { getCompanyPrintSettings } from '../utils/appSettings';
 import SaleActions from '../components/sales/SaleActions';
 import SaleDetailsModal from '../components/sales/SaleDetailsModal';
 import './Sales.css';
@@ -341,13 +340,6 @@ export default function Sales() {
 
   const handlePrintSale = useCallback(async (sale) => {
     try {
-      if (typeof window?.api?.printSale === 'function') {
-        const quickPrint = await window.api.printSale(sale.id, getCompanyPrintSettings());
-        if (quickPrint?.success && !quickPrint?.error) {
-          return;
-        }
-      }
-
       const fullSale = await fetchSaleDetails(sale.id);
       if (!fullSale) return;
 

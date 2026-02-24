@@ -659,11 +659,40 @@ ipcMain.handle('dialog:showMessageBox', async (event, options) => {
     }
 });
 
+const normalizePrinterName = (value) => String(value ?? '')
+    .trim()
+    .slice(0, 255);
+
+const printWindowOptionsByWebContentsId = new Map();
+
+ipcMain.handle('print:listPrinters', async (event) => {
+    try {
+        const printers = await event.sender.getPrintersAsync();
+        return (Array.isArray(printers) ? printers : [])
+            .map((printer) => {
+                const name = String(printer?.name || '').trim();
+                if (!name) return null;
+                return {
+                    name,
+                    displayName: String(printer?.displayName || name),
+                    description: String(printer?.description || ''),
+                    isDefault: Boolean(printer?.isDefault)
+                };
+            })
+            .filter(Boolean);
+    } catch (err) {
+        console.error('List Printers Error:', err);
+        return { error: err.message };
+    }
+});
+
 // Print action handler from print preview windows
-ipcMain.handle('trigger-print', async (event) => {
+ipcMain.handle('trigger-print', async (event, options = {}) => {
     try {
         const senderContents = event.sender;
         const senderWindow = BrowserWindow.fromWebContents(senderContents);
+        const storedOptions = printWindowOptionsByWebContentsId.get(senderContents.id) || {};
+        const printerName = normalizePrinterName(options?.printerName || storedOptions?.printerName);
 
         if (!senderWindow || senderWindow.isDestroyed()) {
             return { success: false, error: 'Print window is not available' };
@@ -676,7 +705,7 @@ ipcMain.handle('trigger-print', async (event) => {
                     printBackground: true,
                     color: true,
                     margins: { marginType: 'printableArea' },
-                    pageSize: 'A4'
+                    deviceName: printerName || ''
                 },
                 (success, errorType) => {
                     resolve({ success, error: errorType || null });
@@ -692,6 +721,7 @@ ipcMain.handle('trigger-print', async (event) => {
 // HTML Printing Handler (for safePrint)
 ipcMain.handle('print:html', async (event, options) => {
     try {
+        const printerName = normalizePrinterName(options?.printerName);
         const printWindow = new BrowserWindow({
             width: 900,
             height: 700,
@@ -703,16 +733,23 @@ ipcMain.handle('print:html', async (event, options) => {
                 contextIsolation: true
             }
         });
+        const printWebContentsId = printWindow.webContents.id;
+
+        printWindowOptionsByWebContentsId.set(printWebContentsId, {
+            printerName
+        });
 
         await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(options.html)}`);
 
         // Handler للطباعة من داخل النافذة
         return new Promise((resolve) => {
             printWindow.on('closed', () => {
+                printWindowOptionsByWebContentsId.delete(printWebContentsId);
                 resolve({ success: true, windowOpened: true });
             });
 
             printWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+                printWindowOptionsByWebContentsId.delete(printWebContentsId);
                 printWindow.close();
                 resolve({ success: false, error: errorDescription });
             });
@@ -881,7 +918,13 @@ ipcMain.handle('db:updateExpenseCategory', async (event, id, data) => {
     return await dbService.updateExpenseCategory(id, data);
 });
 // Print HTML
-ipcMain.handle('print:printHTML', async (event, { html, title, silent }) => {
+ipcMain.handle('print:printHTML', async (event, payload = {}) => {
+    const {
+        html = '',
+        title,
+        silent,
+        printerName
+    } = payload;
     let printWindow = new BrowserWindow({
         show: false,
         width: 800,
@@ -895,10 +938,11 @@ ipcMain.handle('print:printHTML', async (event, { html, title, silent }) => {
     try {
         await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
+        const normalizedPrinterName = normalizePrinterName(printerName);
         const options = {
             silent: silent || false,
             printBackground: true,
-            deviceName: '' // Default printer,
+            deviceName: normalizedPrinterName || '' // Default printer when empty
         };
 
         return new Promise((resolve) => {

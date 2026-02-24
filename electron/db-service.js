@@ -4542,17 +4542,120 @@ const dbService = {
 
     // ==================== PURCHASES (فواتير المشتريات) ====================
     async getPurchases(options = {}) {
-        try {
-            const parsedSupplierId = parsePositiveInt(options?.supplierId);
-            const requestedLimit = parseInt(options?.limit, 10);
-            const safeLimit = Number.isFinite(requestedLimit)
-                ? Math.max(1, Math.min(500, requestedLimit))
-                : null;
-            const where = parsedSupplierId ? { supplierId: parsedSupplierId } : undefined;
+        const perf = startPerfTimer('db:getPurchases', {
+            hasPagination: Boolean(options?.paginated || options?.page || options?.pageSize),
+            limit: options?.limit || null,
+            supplierId: options?.supplierId || null,
+            searchLength: String(options?.searchTerm || '').trim().length
+        });
 
-            const purchases = await prisma.purchase.findMany({
-                where,
-                include: {
+        try {
+            const {
+                supplierId,
+                limit,
+                page,
+                pageSize,
+                paginated = false,
+                fromDate,
+                toDate,
+                searchTerm = '',
+                sortCol = 'createdAt',
+                sortDir = 'desc',
+                lightweight = false
+            } = options || {};
+
+            const hasPagination = Boolean(
+                paginated
+                || Object.prototype.hasOwnProperty.call(options || {}, 'page')
+                || Object.prototype.hasOwnProperty.call(options || {}, 'pageSize')
+            );
+
+            const whereClause = {};
+            const parsedSupplierId = parsePositiveInt(supplierId);
+            if (parsedSupplierId) {
+                whereClause.supplierId = parsedSupplierId;
+            }
+
+            const parseOptionalFilterDate = (value, endOfDayValue = false) => {
+                if (!value) return null;
+                const parsedDate = parseDateOrDefault(value, null);
+                if (!parsedDate) return null;
+                if (endOfDayValue) {
+                    parsedDate.setHours(23, 59, 59, 999);
+                } else {
+                    parsedDate.setHours(0, 0, 0, 0);
+                }
+                return parsedDate;
+            };
+
+            const createdAtRange = {};
+            const parsedFromDate = parseOptionalFilterDate(fromDate, false);
+            const parsedToDate = parseOptionalFilterDate(toDate, true);
+            if (parsedFromDate) createdAtRange.gte = parsedFromDate;
+            if (parsedToDate) createdAtRange.lte = parsedToDate;
+            if (Object.keys(createdAtRange).length > 0) {
+                whereClause.createdAt = createdAtRange;
+            }
+
+            const normalizedSearchTerm = String(searchTerm || '').trim();
+            if (normalizedSearchTerm) {
+                const searchOrFilters = [
+                    { notes: { contains: normalizedSearchTerm, mode: 'insensitive' } },
+                    { supplier: { is: { name: { contains: normalizedSearchTerm, mode: 'insensitive' } } } }
+                ];
+
+                const numericSearch = parsePositiveInt(normalizedSearchTerm);
+                if (numericSearch) {
+                    searchOrFilters.unshift({ id: numericSearch });
+                }
+
+                whereClause.AND = [...(whereClause.AND || []), { OR: searchOrFilters }];
+            }
+
+            const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
+            const sortableColumns = new Set([
+                'id',
+                'createdAt',
+                'total',
+                'supplier',
+                'supplierName'
+            ]);
+            const safeSortCol = sortableColumns.has(sortCol) ? sortCol : 'createdAt';
+
+            let orderBy;
+            if (safeSortCol === 'supplier' || safeSortCol === 'supplierName') {
+                orderBy = [
+                    { supplier: { name: safeSortDir } },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ];
+            } else if (safeSortCol === 'createdAt') {
+                orderBy = [
+                    { createdAt: safeSortDir },
+                    { id: 'desc' }
+                ];
+            } else {
+                orderBy = { [safeSortCol]: safeSortDir };
+            }
+
+            const includeClause = lightweight
+                ? {
+                    supplier: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            address: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            items: true,
+                            returns: true
+                        }
+                    }
+                }
+                : {
                     supplier: true,
                     items: {
                         include: {
@@ -4567,38 +4670,96 @@ const dbService = {
                         },
                         orderBy: { createdAt: 'desc' }
                     }
-                },
-                ...(safeLimit ? { take: safeLimit } : {}),
-                orderBy: { createdAt: 'desc' }
+                };
+
+            const mapPurchasesWithComputedFields = async (rawPurchases) => {
+                if (!Array.isArray(rawPurchases) || rawPurchases.length === 0) return [];
+
+                const purchaseIds = rawPurchases
+                    .map((purchase) => parsePositiveInt(purchase?.id))
+                    .filter(Boolean);
+
+                const paymentPresentationByPurchaseId = await buildPurchasePaymentPresentationMap(
+                    prisma,
+                    purchaseIds
+                );
+
+                return rawPurchases.map((purchase) => {
+                    const paymentPresentation = paymentPresentationByPurchaseId.get(purchase.id) || {};
+                    const totalAmount = Math.max(0, toNumber(purchase?.total, 0));
+                    const paidAmount = Math.max(0, Math.min(totalAmount, toNumber(purchase?.paid, 0)));
+                    const fallbackPaymentLabel = paidAmount <= 0
+                        ? (totalAmount > 0 ? '\u0622\u062c\u0644' : null)
+                        : (paidAmount + 0.01 >= totalAmount ? '\u0646\u0642\u062f\u064a' : '\u062c\u0632\u0626\u064a');
+                    const itemsCount = typeof purchase?._count?.items === 'number'
+                        ? purchase._count.items
+                        : (Array.isArray(purchase?.items) ? purchase.items.length : 0);
+                    const returnsCount = typeof purchase?._count?.returns === 'number'
+                        ? purchase._count.returns
+                        : (Array.isArray(purchase?.returns) ? purchase.returns.length : 0);
+
+                    return {
+                        ...purchase,
+                        payment: paymentPresentation.payment || fallbackPaymentLabel || null,
+                        paymentMethod: paymentPresentation.paymentMethod || null,
+                        paymentMethodCode: paymentPresentation.paymentMethodCode || null,
+                        paidAmount,
+                        remainingAmount: Math.max(0, totalAmount - paidAmount),
+                        itemsCount,
+                        returnsCount,
+                        items: Array.isArray(purchase?.items)
+                            ? purchase.items.map((item) => ({
+                                ...item,
+                                price: toNumber(item.cost, 0)
+                            }))
+                            : []
+                    };
+                });
+            };
+
+            const buildFindManyArgs = () => ({
+                where: whereClause,
+                include: includeClause,
+                orderBy
             });
 
-            const paymentPresentationByPurchaseId = await buildPurchasePaymentPresentationMap(
-                prisma,
-                purchases.map((purchase) => purchase?.id)
-            );
+            if (hasPagination) {
+                const safePage = Math.max(1, parseInt(page, 10) || 1);
+                const safePageSize = Math.min(500, Math.max(10, parseInt(pageSize, 10) || 100));
+                const skip = (safePage - 1) * safePageSize;
 
-            return purchases.map((purchase) => {
-                const paymentPresentation = paymentPresentationByPurchaseId.get(purchase.id) || {};
-                const totalAmount = Math.max(0, toNumber(purchase?.total, 0));
-                const paidAmount = Math.max(0, toNumber(purchase?.paid, 0));
-                const fallbackPaymentLabel = paidAmount <= 0
-                    ? (totalAmount > 0 ? 'آجل' : null)
-                    : (paidAmount + 0.01 >= totalAmount ? 'نقدي' : 'جزئي');
+                const [rawPurchases, total] = await Promise.all([
+                    prisma.purchase.findMany({
+                        ...buildFindManyArgs(),
+                        skip,
+                        take: safePageSize
+                    }),
+                    prisma.purchase.count({ where: whereClause })
+                ]);
+
+                const data = await mapPurchasesWithComputedFields(rawPurchases);
+                perf({ rows: data.length });
 
                 return {
-                    ...purchase,
-                    payment: paymentPresentation.payment || fallbackPaymentLabel || null,
-                    paymentMethod: paymentPresentation.paymentMethod || null,
-                    paymentMethodCode: paymentPresentation.paymentMethodCode || null,
-                    items: Array.isArray(purchase.items)
-                        ? purchase.items.map((item) => ({
-                            ...item,
-                            price: toNumber(item.cost, 0)
-                        }))
-                        : []
+                    data,
+                    total,
+                    page: safePage,
+                    pageSize: safePageSize,
+                    totalPages: Math.max(1, Math.ceil(total / safePageSize))
                 };
-            });
+            }
+
+            const queryArgs = buildFindManyArgs();
+            if (limit) {
+                queryArgs.take = Math.max(1, parseInt(limit, 10) || 1);
+            }
+
+            const rawPurchases = await prisma.purchase.findMany(queryArgs);
+            const data = await mapPurchasesWithComputedFields(rawPurchases);
+            perf({ rows: data.length });
+            return data;
         } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },

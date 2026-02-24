@@ -7,12 +7,28 @@ import SaleActions from '../components/sales/SaleActions';
 import './Sales.css';
 
 const PAGE_SIZE = 50;
+const PURCHASES_CACHE_TTL_MS = 60 * 1000;
+const purchasesPageCache = new Map();
 
 const normalizeSearchToken = (value) => String(value ?? '').trim().toLowerCase();
+const normalizeDateToken = (value) => String(value ?? '').trim();
 const getTodayInputDate = () => {
   const now = new Date();
   const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
   return localDate.toISOString().split('T')[0];
+};
+
+const getPurchasesCacheKey = (page, pageSize = PAGE_SIZE, filters = {}) => {
+  const normalizedSearch = normalizeSearchToken(filters?.searchTerm);
+  const normalizedFromDate = normalizeDateToken(filters?.fromDate);
+  const normalizedToDate = normalizeDateToken(filters?.toDate);
+
+  return (
+    `purchases:p${page}:s${pageSize}`
+    + `:q${encodeURIComponent(normalizedSearch)}`
+    + `:f${encodeURIComponent(normalizedFromDate)}`
+    + `:t${encodeURIComponent(normalizedToDate)}`
+  );
 };
 
 const formatDateTime = (value) => {
@@ -34,14 +50,6 @@ const getPurchaseDate = (purchase) => purchase?.invoiceDate || purchase?.created
 const toFiniteNumber = (value, fallback = 0) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const toInputDateToken = (value) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  const localDate = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
-  return localDate.toISOString().split('T')[0];
 };
 
 const escapeHtml = (value) => String(value ?? '')
@@ -69,6 +77,79 @@ const normalizePurchaseRow = (purchase) => {
     remainingAmount,
     itemsCount
   };
+};
+
+const normalizePurchasesResponse = (result, fallbackPage) => {
+  if (Array.isArray(result)) {
+    return {
+      data: result,
+      total: result.length,
+      page: fallbackPage,
+      totalPages: Math.max(1, Math.ceil(result.length / PAGE_SIZE))
+    };
+  }
+
+  return {
+    data: Array.isArray(result?.data) ? result.data : [],
+    total: Number(result?.total || 0),
+    page: Number(result?.page || fallbackPage),
+    totalPages: Number(result?.totalPages || 1)
+  };
+};
+
+const getFreshPurchasesCache = (cacheKey) => {
+  const cached = purchasesPageCache.get(cacheKey);
+  if (!cached) return null;
+  if ((Date.now() - cached.timestamp) > PURCHASES_CACHE_TTL_MS) return null;
+  return cached;
+};
+
+const writePurchasesCache = (cacheKey, payload) => {
+  purchasesPageCache.set(cacheKey, {
+    ...payload,
+    timestamp: Date.now()
+  });
+};
+
+export const clearPurchaseHistoryCache = () => {
+  purchasesPageCache.clear();
+};
+
+export const prefetchPurchaseHistoryPage = async ({ page = 1, pageSize = PAGE_SIZE } = {}) => {
+  if (typeof window === 'undefined' || typeof window?.api?.getPurchases !== 'function') {
+    return null;
+  }
+
+  const cacheKey = getPurchasesCacheKey(page, pageSize, {});
+  const cached = getFreshPurchasesCache(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await window.api.getPurchases({
+      paginated: true,
+      page,
+      pageSize,
+      sortCol: 'createdAt',
+      sortDir: 'desc',
+      lightweight: true
+    });
+
+    if (response?.error) return null;
+
+    const normalized = normalizePurchasesResponse(response, page);
+    const rows = (normalized.data || []).map(normalizePurchaseRow);
+    const payload = {
+      data: rows,
+      totalItems: normalized.total,
+      totalPages: Math.max(1, normalized.totalPages)
+    };
+
+    writePurchasesCache(cacheKey, payload);
+    return payload;
+  } catch (error) {
+    console.error('Purchase history prefetch failed:', error);
+    return null;
+  }
 };
 
 const buildPurchaseSearchIndex = (purchase) => ([
@@ -265,28 +346,94 @@ export default function PurchaseHistory() {
   const [fromDateFilter, setFromDateFilter] = useState(() => defaultDateFilter);
   const [toDateFilter, setToDateFilter] = useState(() => defaultDateFilter);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   const detailsRequestRef = useRef(0);
+  const latestPurchasesRequestRef = useRef(0);
 
   const loadPurchases = useCallback(async () => {
+    const requestId = latestPurchasesRequestRef.current + 1;
+    latestPurchasesRequestRef.current = requestId;
+
+    const normalizedSearchTerm = String(searchTerm || '').trim();
+    let normalizedFromDate = String(fromDateFilter || '').trim();
+    let normalizedToDate = String(toDateFilter || '').trim();
+
+    if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
+      [normalizedFromDate, normalizedToDate] = [normalizedToDate, normalizedFromDate];
+    }
+
+    const cacheKey = getPurchasesCacheKey(currentPage, PAGE_SIZE, {
+      searchTerm: normalizedSearchTerm,
+      fromDate: normalizedFromDate,
+      toDate: normalizedToDate
+    });
+    const cached = getFreshPurchasesCache(cacheKey);
+    const hasCache = Boolean(cached);
+
+    if (hasCache) {
+      setPurchases(cached.data || []);
+      setTotalItems(cached.totalItems || 0);
+      setTotalPages(cached.totalPages || 1);
+    }
+
     try {
-      const response = await window.api.getPurchases();
+      const requestOptions = {
+        paginated: true,
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+        searchTerm: normalizedSearchTerm,
+        sortCol: 'createdAt',
+        sortDir: 'desc',
+        lightweight: true
+      };
+
+      if (normalizedFromDate) requestOptions.fromDate = normalizedFromDate;
+      if (normalizedToDate) requestOptions.toDate = normalizedToDate;
+
+      const response = await window.api.getPurchases(requestOptions);
+      if (requestId !== latestPurchasesRequestRef.current) return;
+
       if (response?.error) {
-        await safeAlert('تعذر تحميل فواتير المشتريات: ' + response.error);
-        setPurchases([]);
+        if (!hasCache) {
+          await safeAlert('تعذر تحميل فواتير المشتريات: ' + response.error);
+          setPurchases([]);
+          setTotalItems(0);
+          setTotalPages(1);
+        } else {
+          console.error('Purchase history refresh failed:', response.error);
+        }
         return;
       }
 
-      const rows = (Array.isArray(response) ? response : []).map(normalizePurchaseRow);
+      const normalized = normalizePurchasesResponse(response, currentPage);
+      const rows = (normalized.data || []).map(normalizePurchaseRow);
+      const nextTotalPages = Math.max(1, normalized.totalPages);
+
       setPurchases(rows);
+      setTotalItems(normalized.total);
+      setTotalPages(nextTotalPages);
+
+      writePurchasesCache(cacheKey, {
+        data: rows,
+        totalItems: normalized.total,
+        totalPages: nextTotalPages
+      });
     } catch (error) {
+      if (requestId !== latestPurchasesRequestRef.current) return;
       console.error('Failed to load purchases:', error);
-      await safeAlert('تعذر تحميل فواتير المشتريات');
-      setPurchases([]);
+      if (!hasCache) {
+        await safeAlert('تعذر تحميل فواتير المشتريات');
+        setPurchases([]);
+        setTotalItems(0);
+        setTotalPages(1);
+      }
     } finally {
+      if (requestId !== latestPurchasesRequestRef.current) return;
       setHasLoadedOnce(true);
     }
-  }, []);
+  }, [currentPage, searchTerm, fromDateFilter, toDateFilter]);
 
   const fetchPurchaseDetails = useCallback(async (purchaseId) => {
     const result = await window.api.getPurchaseById(purchaseId);
@@ -301,49 +448,17 @@ export default function PurchaseHistory() {
     loadPurchases();
   }, [loadPurchases]);
 
-  const normalizedDateRange = useMemo(() => {
-    let normalizedFromDate = String(fromDateFilter || '').trim();
-    let normalizedToDate = String(toDateFilter || '').trim();
-    if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
-      [normalizedFromDate, normalizedToDate] = [normalizedToDate, normalizedFromDate];
-    }
-    return { normalizedFromDate, normalizedToDate };
-  }, [fromDateFilter, toDateFilter]);
-
-  const filteredPurchases = useMemo(() => {
+  const visiblePurchases = useMemo(() => {
     const normalizedSearch = normalizeSearchToken(searchTerm);
-    const { normalizedFromDate, normalizedToDate } = normalizedDateRange;
-
-    return purchases
-      .filter((purchase) => {
-        const purchaseDateToken = toInputDateToken(getPurchaseDate(purchase));
-
-        if (normalizedFromDate && purchaseDateToken && purchaseDateToken < normalizedFromDate) return false;
-        if (normalizedToDate && purchaseDateToken && purchaseDateToken > normalizedToDate) return false;
-
-        if (!normalizedSearch) return true;
-        return buildPurchaseSearchIndex(purchase).includes(normalizedSearch);
-      })
-      .sort((left, right) => {
-        const leftTime = new Date(getPurchaseDate(left) || 0).getTime();
-        const rightTime = new Date(getPurchaseDate(right) || 0).getTime();
-        if (leftTime !== rightTime) return rightTime - leftTime;
-        return Number(right?.id || 0) - Number(left?.id || 0);
-      });
-  }, [purchases, searchTerm, normalizedDateRange]);
-
-  const totalItems = filteredPurchases.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-  const isInitialLoading = !hasLoadedOnce && purchases.length === 0;
+    if (!normalizedSearch) return purchases;
+    return purchases.filter((purchase) => buildPurchaseSearchIndex(purchase).includes(normalizedSearch));
+  }, [purchases, searchTerm]);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(Math.max(1, prev), totalPages));
   }, [totalPages]);
 
-  const visiblePurchases = useMemo(() => {
-    const startIndex = (currentPage - 1) * PAGE_SIZE;
-    return filteredPurchases.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredPurchases, currentPage]);
+  const isInitialLoading = !hasLoadedOnce && purchases.length === 0;
 
   const handleCloseDetailsModal = useCallback(() => {
     detailsRequestRef.current += 1;
@@ -377,7 +492,10 @@ export default function PurchaseHistory() {
 
   const handleEditPurchase = useCallback(async (purchase) => {
     try {
-      if (Array.isArray(purchase?.returns) && purchase.returns.length > 0) {
+      const linkedReturnsCount = Array.isArray(purchase?.returns)
+        ? purchase.returns.length
+        : Number(purchase?.returnsCount || 0);
+      if (linkedReturnsCount > 0) {
         await safeAlert('لا يمكن تعديل فاتورة مشتريات مرتبطة بمرتجع مشتريات.');
         return;
       }
@@ -409,7 +527,10 @@ export default function PurchaseHistory() {
   }, [fetchPurchaseDetails]);
 
   const handleDeletePurchase = useCallback(async (purchase) => {
-    if (Array.isArray(purchase?.returns) && purchase.returns.length > 0) {
+    const linkedReturnsCount = Array.isArray(purchase?.returns)
+      ? purchase.returns.length
+      : Number(purchase?.returnsCount || 0);
+    if (linkedReturnsCount > 0) {
       await safeAlert('لا يمكن حذف فاتورة مشتريات مرتبطة بمرتجع مشتريات.');
       return;
     }
@@ -427,13 +548,18 @@ export default function PurchaseHistory() {
         return;
       }
 
+      clearPurchaseHistoryCache();
       setSelectedPurchase((prev) => (prev?.id === purchase.id ? null : prev));
-      await loadPurchases();
+      if (purchases.length === 1 && currentPage > 1) {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await loadPurchases();
+      }
     } catch (error) {
       console.error('Delete purchase failed:', error);
       await safeAlert('تعذر حذف فاتورة المشتريات');
     }
-  }, [loadPurchases]);
+  }, [purchases.length, currentPage, loadPurchases]);
 
   const handlePrintPurchase = useCallback(async (purchase) => {
     try {
@@ -531,7 +657,10 @@ export default function PurchaseHistory() {
           <button
             type="button"
             className="sales-btn sales-btn-light"
-            onClick={loadPurchases}
+            onClick={() => {
+              clearPurchaseHistoryCache();
+              loadPurchases();
+            }}
           >
             تحديث
           </button>

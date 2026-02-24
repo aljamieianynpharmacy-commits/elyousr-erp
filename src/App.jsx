@@ -4,7 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import EnhancedPOS from './pages/EnhancedPOS';
 import Sales, { prefetchSalesPage } from './pages/Sales';
-import PurchaseHistory from './pages/PurchaseHistory';
+import PurchaseHistory, { prefetchPurchaseHistoryPage } from './pages/PurchaseHistory';
 import Purchases from './pages/Purchases';
 import Returns from './pages/Returns';
 import PurchaseReturns from './pages/PurchaseReturns';
@@ -115,8 +115,11 @@ function App() {
 
     const handle = schedule(() => {
       if (cancelled) return;
-      prefetchSalesPage({ page: 1 }).catch((error) => {
-        console.error('Sales prefetch failed:', error);
+      Promise.all([
+        prefetchSalesPage({ page: 1 }),
+        prefetchPurchaseHistoryPage({ page: 1 })
+      ]).catch((error) => {
+        console.error('Background prefetch failed:', error);
       });
     });
 

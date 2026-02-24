@@ -10,7 +10,6 @@ import PurchaseReturns from './pages/PurchaseReturns';
 import Customers from './pages/Customers';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
-import DebtReminders from './pages/DebtReminders';
 import Treasury from './pages/Treasury';
 import Warehouses from './pages/Warehouses';
 import Settings from './pages/Settings';
@@ -43,7 +42,6 @@ function App() {
       'customers',
       'suppliers',
       'treasury',
-      'debtreminders',
       'settings',
       'users'
     ]);
@@ -124,8 +122,6 @@ function App() {
         return <Suppliers />;
       case 'treasury':
         return <Treasury />;
-      case 'debtreminders':
-        return <DebtReminders />;
       case 'settings':
         return <Settings />;
       case 'users':
@@ -196,7 +192,6 @@ function App() {
             <NavItem page="customers" icon="👥" label="العملاء" />
             <NavItem page="suppliers" icon="🚚" label="الموردين" />
             <NavItem page="treasury" icon="🏦" label="الحسابات" />
-            <NavItem page="debtreminders" icon="⚠️" label="تذكيرات الديون" />
             <NavItem page="settings" icon="⚙️" label="الإعدادات" />
             {user?.role === 'ADMIN' && <NavItem page="users" icon="👤" label="المستخدمين" />}
           </ul>

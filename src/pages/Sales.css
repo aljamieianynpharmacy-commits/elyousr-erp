@@ -147,8 +147,9 @@
 
 .sales-search-bar {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid #e2e8f0;
   background: #fff;
@@ -161,6 +162,15 @@
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.sales-filter-group-search {
+  min-width: 280px;
+  flex: 1;
+}
+
+.sales-filter-group-date {
+  min-width: 160px;
 }
 
 .sales-table-scroll {

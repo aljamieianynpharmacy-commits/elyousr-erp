@@ -12,9 +12,24 @@ const PAGE_SIZE = 50;
 const SALES_CACHE_TTL_MS = 60 * 1000;
 const salesPageCache = new Map();
 const normalizeSearchToken = (value) => String(value ?? '').trim().toLowerCase();
-const getSalesCacheKey = (page, pageSize = PAGE_SIZE, searchTerm = '') => (
-  `sales:p${page}:s${pageSize}:q${encodeURIComponent(normalizeSearchToken(searchTerm))}`
-);
+const normalizeDateToken = (value) => String(value ?? '').trim();
+const getTodayInputDate = () => {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+  return localDate.toISOString().split('T')[0];
+};
+const getSalesCacheKey = (page, pageSize = PAGE_SIZE, filters = {}) => {
+  const normalizedSearch = normalizeSearchToken(filters?.searchTerm);
+  const normalizedFromDate = normalizeDateToken(filters?.fromDate);
+  const normalizedToDate = normalizeDateToken(filters?.toDate);
+
+  return (
+    `sales:p${page}:s${pageSize}`
+    + `:q${encodeURIComponent(normalizedSearch)}`
+    + `:f${encodeURIComponent(normalizedFromDate)}`
+    + `:t${encodeURIComponent(normalizedToDate)}`
+  );
+};
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -148,7 +163,7 @@ export const prefetchSalesPage = async ({ page = 1, pageSize = PAGE_SIZE } = {})
     return null;
   }
 
-  const cacheKey = getSalesCacheKey(page, pageSize);
+  const cacheKey = getSalesCacheKey(page, pageSize, {});
   const cached = getFreshSalesCache(cacheKey);
   if (cached) return cached;
 
@@ -185,6 +200,9 @@ export default function Sales() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [defaultDateFilter] = useState(() => getTodayInputDate());
+  const [fromDateFilter, setFromDateFilter] = useState(() => defaultDateFilter);
+  const [toDateFilter, setToDateFilter] = useState(() => defaultDateFilter);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -198,7 +216,18 @@ export default function Sales() {
     latestSalesRequestRef.current = requestId;
 
     const normalizedSearchTerm = String(searchTerm || '').trim();
-    const cacheKey = getSalesCacheKey(currentPage, PAGE_SIZE, normalizedSearchTerm);
+    let normalizedFromDate = String(fromDateFilter || '').trim();
+    let normalizedToDate = String(toDateFilter || '').trim();
+
+    if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
+      [normalizedFromDate, normalizedToDate] = [normalizedToDate, normalizedFromDate];
+    }
+
+    const cacheKey = getSalesCacheKey(currentPage, PAGE_SIZE, {
+      searchTerm: normalizedSearchTerm,
+      fromDate: normalizedFromDate,
+      toDate: normalizedToDate
+    });
     const cached = getFreshSalesCache(cacheKey);
     const hasCache = Boolean(cached);
 
@@ -209,7 +238,7 @@ export default function Sales() {
     }
 
     try {
-      const response = await window.api.getSales({
+      const requestOptions = {
         paginated: true,
         page: currentPage,
         pageSize: PAGE_SIZE,
@@ -217,7 +246,12 @@ export default function Sales() {
         sortCol: 'invoiceDate',
         sortDir: 'desc',
         lightweight: true
-      });
+      };
+
+      if (normalizedFromDate) requestOptions.fromDate = normalizedFromDate;
+      if (normalizedToDate) requestOptions.toDate = normalizedToDate;
+
+      const response = await window.api.getSales(requestOptions);
 
       if (requestId !== latestSalesRequestRef.current) return;
 
@@ -259,7 +293,7 @@ export default function Sales() {
       if (requestId !== latestSalesRequestRef.current) return;
       setHasLoadedOnce(true);
     }
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, fromDateFilter, toDateFilter]);
 
   const fetchSaleDetails = useCallback(async (saleId) => {
     const result = await window.api.getSaleById(saleId);
@@ -380,10 +414,28 @@ export default function Sales() {
     setCurrentPage(1);
   }, []);
 
-  const clearSearch = useCallback(() => {
-    setSearchTerm('');
+  const handleFromDateFilterChange = useCallback((event) => {
+    setFromDateFilter(event.target.value);
     setCurrentPage(1);
   }, []);
+
+  const handleToDateFilterChange = useCallback((event) => {
+    setToDateFilter(event.target.value);
+    setCurrentPage(1);
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setSearchTerm('');
+    setFromDateFilter(defaultDateFilter);
+    setToDateFilter(defaultDateFilter);
+    setCurrentPage(1);
+  }, [defaultDateFilter]);
+
+  const hasActiveFilters = Boolean(
+    searchTerm
+    || fromDateFilter !== defaultDateFilter
+    || toDateFilter !== defaultDateFilter
+  );
 
   const visibleSales = useMemo(() => {
     const normalized = normalizeSearchToken(searchTerm);
@@ -438,20 +490,42 @@ export default function Sales() {
     <div className="sales-page">
       <div className="sales-table-card card">
         <div className="sales-search-bar">
-          <input
-            type="text"
-            className="sales-search-input"
-            value={searchTerm}
-            onChange={handleSearchChange}
-            placeholder="بحث سريع: رقم الفاتورة / اسم العميل / ملاحظة"
-          />
-          {searchTerm ? (
+          <div className="sales-filter-group sales-filter-group-search">
+            <label>بحث سريع</label>
+            <input
+              type="text"
+              className="sales-search-input"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="رقم الفاتورة / اسم العميل / ملاحظة"
+            />
+          </div>
+
+          <div className="sales-filter-group sales-filter-group-date">
+            <label>من تاريخ</label>
+            <input
+              type="date"
+              value={fromDateFilter}
+              onChange={handleFromDateFilterChange}
+            />
+          </div>
+
+          <div className="sales-filter-group sales-filter-group-date">
+            <label>إلى تاريخ</label>
+            <input
+              type="date"
+              value={toDateFilter}
+              onChange={handleToDateFilterChange}
+            />
+          </div>
+
+          {hasActiveFilters ? (
             <button
               type="button"
               className="sales-btn sales-btn-light"
-              onClick={clearSearch}
+              onClick={clearAllFilters}
             >
-              مسح
+              مسح الفلاتر
             </button>
           ) : null}
         </div>

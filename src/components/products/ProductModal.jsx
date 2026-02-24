@@ -584,13 +584,7 @@ export default function ProductModal({
         const normalizedVariant = normalizedVariants[index];
         const sourceVariant = formData.variants[index] || normalizedVariant;
         const rowTotal = getVariantWarehouseTotal(sourceVariant);
-        const expectedQty = Math.max(0, toInt(normalizedVariant.quantity, 0));
-
-        if (rowTotal !== expectedQty) {
-          setValidationMessage(`كمية المتغير ${normalizedVariant.size || '-'} / ${normalizedVariant.color || '-'} يجب أن تساوي مجموع كميات المخازن (${expectedQty}).`);
-          setActiveTab(TABS.STOCK);
-          return;
-        }
+        normalizedVariant.quantity = rowTotal;
 
         for (const warehouse of warehouses) {
           const qty = getVariantWarehouseQty(sourceVariant, warehouse.id);
@@ -660,10 +654,7 @@ export default function ProductModal({
             بيانات أساسية
           </button>
           <button type="button" className={`tab-button ${activeTab === TABS.PRICING ? 'active' : ''}`} onClick={() => setActiveTab(TABS.PRICING)} disabled={isBusy}>
-            التسعير
-          </button>
-          <button type="button" className={`tab-button ${activeTab === TABS.STOCK ? 'active' : ''}`} onClick={() => setActiveTab(TABS.STOCK)} disabled={isBusy}>
-            المخزون
+            التسعير والمخزون
           </button>
         </div>
 
@@ -675,457 +666,359 @@ export default function ProductModal({
             </div>
           ) : (
             <>
-          {validationMessage ? (
-            <div className="modal-inline-alert">
-              <AlertCircle size={16} />
-              <span>{validationMessage}</span>
-            </div>
-          ) : null}
+              {validationMessage ? (
+                <div className="modal-inline-alert">
+                  <AlertCircle size={16} />
+                  <span>{validationMessage}</span>
+                </div>
+              ) : null}
 
-          {activeTab === TABS.BASIC ? (
-            <div className="form-section">
-              <div className="basic-layout">
-                <div className="image-panel">
-                  <input ref={fileInputRef} type="file" accept="image/*" className="image-file-input" onChange={onImageFileSelected} />
-                  <div className="image-upload-wrap">
-                    <button type="button" className="image-upload-box" onClick={pickImage}>
-                      {formData.image ? <img src={formData.image} alt={formData.name || 'Product'} /> : <Camera size={34} />}
-                    </button>
-                    {formData.image ? (
-                      <button
-                        type="button"
-                        className="image-clear-fab"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          clearImage();
-                        }}
-                        aria-label="حذف الصورة"
-                        title="حذف الصورة"
-                        disabled={isBusy}
-                      >
-                        <X size={14} />
-                      </button>
-                    ) : null}
-                  </div>
+              {activeTab === TABS.BASIC ? (
+                <div className="form-section">
+                  <div className="basic-layout">
+                    <div className="image-panel">
+                      <input ref={fileInputRef} type="file" accept="image/*" className="image-file-input" onChange={onImageFileSelected} />
+                      <div className="image-upload-wrap">
+                        <button type="button" className="image-upload-box" onClick={pickImage}>
+                          {formData.image ? <img src={formData.image} alt={formData.name || 'Product'} /> : <Camera size={34} />}
+                        </button>
+                        {formData.image ? (
+                          <button
+                            type="button"
+                            className="image-clear-fab"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              clearImage();
+                            }}
+                            aria-label="حذف الصورة"
+                            title="حذف الصورة"
+                            disabled={isBusy}
+                          >
+                            <X size={14} />
+                          </button>
+                        ) : null}
+                      </div>
 
-                  <div className="image-status-row">
-                    <label className="toggle-switch">
-                      <input type="checkbox" checked={formData.isActive} onChange={(event) => setField('isActive', event.target.checked)} />
-                      <span className="toggle-slider" />
-                      <span>{formData.isActive ? 'المنتج نشط' : 'المنتج غير نشط'}</span>
-                    </label>
+                      <div className="image-status-row">
+                        <label className="toggle-switch">
+                          <input type="checkbox" checked={formData.isActive} onChange={(event) => setField('isActive', event.target.checked)} />
+                          <span className="toggle-slider" />
+                          <span>{formData.isActive ? 'المنتج نشط' : 'المنتج غير نشط'}</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="main-form-grid">
+                      <div className="form-row">
+                        <label className="form-group">
+                          <span>اسم الصنف</span>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={formData.name}
+                            onChange={(event) => setField('name', event.target.value)}
+                            placeholder="مثال: تيشيرت قطن"
+                          />
+                        </label>
+                        <label className="form-group">
+                          <span>الفئة</span>
+                          <select className="form-select" value={formData.categoryId} onChange={(event) => setField('categoryId', event.target.value)}>
+                            <option value="">بدون فئة</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>{category.icon || '📦'} {category.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="form-row">
+                        <label className="form-group">
+                          <span>SKU / كود الصنف</span>
+                          <div className="field-with-button">
+                            <input type="text" className="form-input" value={formData.sku} onChange={(event) => setField('sku', event.target.value)} />
+                            <button type="button" className="btn-icon" onClick={() => setField('sku', makeSku(formData.name))} title="توليد كود">
+                              <Shuffle size={14} />
+                            </button>
+                          </div>
+                        </label>
+                        <label className="form-group">
+                          <span>باركود المنتج</span>
+                          <div className="field-with-button">
+                            <input type="text" className="form-input" value={formData.barcode} onChange={(event) => setField('barcode', event.target.value)} />
+                            <button type="button" className="btn-icon" onClick={generateProductBarcode} title="توليد باركود">
+                              <Barcode size={14} />
+                            </button>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="form-row">
+                        <label className="form-group">
+                          <span>الماركة</span>
+                          <input type="text" className="form-input" value={formData.brand} onChange={(event) => setField('brand', event.target.value)} />
+                        </label>
+                        <label className="form-group">
+                          <span>نوع المنتج</span>
+                          <select className="form-select" value={formData.type} onChange={(event) => setField('type', event.target.value)}>
+                            <option value="store">منتج مخزني</option>
+                            <option value="service">خدمة</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="form-row">
+                        <label className="form-group form-grow">
+                          <span>الوصف</span>
+                          <textarea
+                            className="form-input"
+                            rows={3}
+                            value={formData.description}
+                            onChange={(event) => setField('description', event.target.value)}
+                            placeholder="وصف مختصر للصنف"
+                          />
+                        </label>
+                      </div>
+
+                    </div>
                   </div>
                 </div>
+              ) : null}
 
-                <div className="main-form-grid">
+              {activeTab === TABS.PRICING ? (
+                <div
+                  className="form-section"
+                  onFocusCapture={selectAllInputValue}
+                  onClickCapture={selectAllInputValue}
+                >
                   <div className="form-row">
                     <label className="form-group">
-                      <span>اسم الصنف</span>
+                      <span>الوحدة الافتراضية</span>
                       <input
                         type="text"
                         className="form-input"
-                        value={formData.name}
-                        onChange={(event) => setField('name', event.target.value)}
-                        placeholder="مثال: تيشيرت قطن"
+                        value={mainUnit.unitName}
+                        onChange={(event) => setUnitField('unitName', event.target.value)}
+                        placeholder="مثال: قطعة"
                       />
                     </label>
                     <label className="form-group">
-                      <span>الفئة</span>
-                      <select className="form-select" value={formData.categoryId} onChange={(event) => setField('categoryId', event.target.value)}>
-                        <option value="">بدون فئة</option>
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>{category.icon || '📦'} {category.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="form-row">
-                    <label className="form-group">
-                      <span>SKU / كود الصنف</span>
-                      <div className="field-with-button">
-                        <input type="text" className="form-input" value={formData.sku} onChange={(event) => setField('sku', event.target.value)} />
-                        <button type="button" className="btn-icon" onClick={() => setField('sku', makeSku(formData.name))} title="توليد كود">
-                          <Shuffle size={14} />
-                        </button>
-                      </div>
-                    </label>
-                    <label className="form-group">
-                      <span>باركود المنتج</span>
-                      <div className="field-with-button">
-                        <input type="text" className="form-input" value={formData.barcode} onChange={(event) => setField('barcode', event.target.value)} />
-                        <button type="button" className="btn-icon" onClick={generateProductBarcode} title="توليد باركود">
-                          <Barcode size={14} />
-                        </button>
-                      </div>
-                    </label>
-                  </div>
-
-                  <div className="form-row">
-                    <label className="form-group">
-                      <span>الماركة</span>
-                      <input type="text" className="form-input" value={formData.brand} onChange={(event) => setField('brand', event.target.value)} />
-                    </label>
-                    <label className="form-group">
-                      <span>نوع المنتج</span>
-                      <select className="form-select" value={formData.type} onChange={(event) => setField('type', event.target.value)}>
-                        <option value="store">منتج مخزني</option>
-                        <option value="service">خدمة</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="form-row">
-                    <label className="form-group form-grow">
-                      <span>الوصف</span>
-                      <textarea
+                      <span>سعر الجملة</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
                         className="form-input"
-                        rows={3}
-                        value={formData.description}
-                        onChange={(event) => setField('description', event.target.value)}
-                        placeholder="وصف مختصر للصنف"
+                        value={mainUnit.wholesalePrice}
+                        onChange={(event) => setUnitField('wholesalePrice', event.target.value)}
                       />
                     </label>
                   </div>
 
-                </div>
-              </div>
-            </div>
-          ) : null}
+                  <div className="form-row">
+                    <label className="form-group">
+                      <span>أقل سعر بيع</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-input"
+                        value={mainUnit.minSalePrice}
+                        onChange={(event) => setUnitField('minSalePrice', event.target.value)}
+                      />
+                    </label>
+                    <label className="form-group">
+                      <span>حد إعادة الطلب للمخزون</span>
+                      <input type="number" min="0" className="form-input" value={formData.minStock} onChange={(event) => setField('minStock', toInt(event.target.value, 5))} />
+                    </label>
+                  </div>
 
-          {activeTab === TABS.PRICING ? (
-            <div
-              className="form-section"
-              onFocusCapture={selectAllInputValue}
-              onClickCapture={selectAllInputValue}
-            >
-              <div className="pricing-calculator">
-                <label className="form-group">
-                  <span>تكلفة الوحدة</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="form-input"
-                    value={mainUnit.purchasePrice}
-                    onChange={(event) => setUnitField('purchasePrice', event.target.value)}
-                  />
-                </label>
-                <label className="form-group">
-                  <span>نسبة الربح %</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="form-input"
-                    value={marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice)}
-                    onChange={(event) => setUnitMarginPercent(event.target.value)}
-                  />
-                </label>
-                <label className="form-group">
-                  <span>سعر البيع</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="form-input"
-                    value={mainUnit.salePrice}
-                    onChange={(event) => setUnitField('salePrice', event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="form-row">
-                <label className="form-group">
-                  <span>الوحدة</span>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={mainUnit.unitName}
-                    onChange={(event) => setUnitField('unitName', event.target.value)}
-                    placeholder="مثال: قطعة"
-                  />
-                </label>
-                <label className="form-group">
-                  <span>سعر الجملة</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="form-input"
-                    value={mainUnit.wholesalePrice}
-                    onChange={(event) => setUnitField('wholesalePrice', event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="form-row">
-                <label className="form-group">
-                  <span>أقل سعر بيع</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="form-input"
-                    value={mainUnit.minSalePrice}
-                    onChange={(event) => setUnitField('minSalePrice', event.target.value)}
-                  />
-                </label>
-                <div />
-              </div>
-
-              <section className="variants-section">
-                <div className="variants-header">
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formData.hasVariants}
-                      onChange={(event) => toggleVariants(event.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                    <span>المنتج له ألوان/مقاسات</span>
-                  </label>
-
-                  {formData.hasVariants ? (
-                    <div className="variants-actions">
-                      <button type="button" className="btn-inline" onClick={() => addVariantRow()}>
-                        <Plus size={14} />
-                        إضافة متغير
-                      </button>
-                      <button type="button" className="btn-inline btn-inline-ghost" onClick={generateVariantCombinations}>
-                        <Shuffle size={14} />
-                        توليد تركيبات
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-
-                {formData.hasVariants ? (
-                  <>
-                    <div className="variants-generator-grid">
-                      <label className="form-group">
-                        <span>المقاسات (فاصلة)</span>
+                  <section className="unified-pricing-section" style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '24px' }}>
+                    <div className="variants-header" style={{ marginBottom: '16px' }}>
+                      <label className="toggle-switch">
                         <input
-                          type="text"
-                          className="form-input"
-                          value={formData.variantSizeDraft}
-                          onChange={(event) => setField('variantSizeDraft', event.target.value)}
-                          placeholder="S, M, L, XL"
+                          type="checkbox"
+                          checked={formData.hasVariants}
+                          onChange={(event) => toggleVariants(event.target.checked)}
                         />
+                        <span className="toggle-slider" />
+                        <span>المنتج له ألوان/مقاسات</span>
                       </label>
-                      <label className="form-group">
-                        <span>الألوان (فاصلة)</span>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={formData.variantColorDraft}
-                          onChange={(event) => setField('variantColorDraft', event.target.value)}
-                          placeholder="أسود, أبيض"
-                        />
-                      </label>
+
+                      {formData.hasVariants ? (
+                        <div className="variants-actions">
+                          <button type="button" className="btn-inline" onClick={() => addVariantRow()}>
+                            <Plus size={14} />
+                            إضافة متغير
+                          </button>
+                          <button type="button" className="btn-inline btn-inline-ghost" onClick={generateVariantCombinations}>
+                            <Shuffle size={14} />
+                            توليد تركيبات
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
+
+                    {formData.hasVariants && (
+                      <div className="variants-generator-grid">
+                        <label className="form-group">
+                          <span>المقاسات (فاصلة)</span>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={formData.variantSizeDraft}
+                            onChange={(event) => setField('variantSizeDraft', event.target.value)}
+                            placeholder="S, M, L, XL"
+                          />
+                        </label>
+                        <label className="form-group">
+                          <span>الألوان (فاصلة)</span>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={formData.variantColorDraft}
+                            onChange={(event) => setField('variantColorDraft', event.target.value)}
+                            placeholder="أسود, أبيض"
+                          />
+                        </label>
+                      </div>
+                    )}
 
                     <div className="variants-table-wrap">
                       <table className="variants-table">
                         <thead>
                           <tr>
-                            <th>المقاس</th>
-                            <th>اللون</th>
+                            {formData.hasVariants && <th>المقاس</th>}
+                            {formData.hasVariants && <th>اللون</th>}
+                            <th>سعر الشراء</th>
                             <th>سعر البيع</th>
-                            <th>التكلفة</th>
-                            <th>الكمية</th>
+                            <th>النسبة %</th>
+                            {warehouses.length === 0 && <th>الكمية</th>}
+                            {warehouses.map(wh => (<th key={wh.id}>{wh.icon || '🏭'} {wh.name}</th>))}
+                            {warehouses.length > 0 && <th>الإجمالي</th>}
                             <th>الباركود</th>
-                            <th />
+                            {formData.hasVariants && <th></th>}
                           </tr>
                         </thead>
                         <tbody>
-                          {formData.variants.map((variant, index) => (
-                            <tr key={variant.tempId || variant.id || index}>
+                          {formData.hasVariants ? formData.variants.map((variant, index) => {
+                            const rowTotal = getVariantWarehouseTotal(variant);
+                            const margin = marginPercentOf(variant.cost, variant.price);
+                            return (
+                              <tr key={variant.tempId || variant.id || index}>
+                                <td>
+                                  <input type="text" value={variant.size} onChange={(event) => setVariantField(index, 'size', event.target.value)} placeholder="M" />
+                                </td>
+                                <td>
+                                  <input type="text" value={variant.color} onChange={(event) => setVariantField(index, 'color', event.target.value)} placeholder="أسود" />
+                                </td>
+                                <td>
+                                  <input type="number" min="0" step="0.01" value={variant.cost} onChange={(event) => setVariantField(index, 'cost', event.target.value)} />
+                                </td>
+                                <td>
+                                  <input type="number" min="0" step="0.01" value={variant.price} onChange={(event) => setVariantField(index, 'price', event.target.value)} />
+                                </td>
+                                <td>
+                                  <input type="number" step="0.01" value={margin} onChange={(e) => {
+                                    const m = toNum(e.target.value, 0);
+                                    setVariantField(index, 'price', money(variant.cost * (1 + m / 100)));
+                                  }} />
+                                </td>
+                                {warehouses.length === 0 && (
+                                  <td>
+                                    <input type="number" min="0" value={variant.quantity} onChange={(event) => setVariantField(index, 'quantity', event.target.value)} />
+                                  </td>
+                                )}
+                                {warehouses.map(wh => (
+                                  <td key={wh.id}>
+                                    <input type="number" min="0" value={getVariantWarehouseQty(variant, wh.id)} onChange={(e) => setVariantWarehouseQty(variant, wh.id, e.target.value)} />
+                                  </td>
+                                ))}
+                                {warehouses.length > 0 && <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{rowTotal}</td>}
+                                <td>
+                                  <div className="unit-barcode-field" style={{ display: 'flex' }}>
+                                    <input type="text" value={variant.barcode || ''} onChange={(event) => setVariantField(index, 'barcode', event.target.value)} />
+                                    <button type="button" className="btn-icon" onClick={() => generateVariantBarcode(index)} title="توليد باركود المتغير">
+                                      <Barcode size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                                <td>
+                                  <button type="button" className="delete-btn" onClick={() => removeVariantRow(index)} aria-label="حذف المتغير">
+                                    <Trash2 size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          }) : (
+                            <tr>
                               <td>
-                                <input type="text" value={variant.size} onChange={(event) => setVariantField(index, 'size', event.target.value)} placeholder="M" />
+                                <input type="number" min="0" step="0.01" value={mainUnit.purchasePrice} onChange={(event) => setUnitField('purchasePrice', event.target.value)} />
                               </td>
                               <td>
-                                <input type="text" value={variant.color} onChange={(event) => setVariantField(index, 'color', event.target.value)} placeholder="أسود" />
+                                <input type="number" min="0" step="0.01" value={mainUnit.salePrice} onChange={(event) => setUnitField('salePrice', event.target.value)} />
                               </td>
                               <td>
-                                <input type="number" min="0" step="0.01" value={variant.price} onChange={(event) => setVariantField(index, 'price', event.target.value)} />
+                                <input type="number" step="0.01" value={marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice)} onChange={(e) => setUnitMarginPercent(e.target.value)} />
                               </td>
+                              {warehouses.length === 0 && (
+                                <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{stockTotalPreview}</td>
+                              )}
+                              {warehouses.map(wh => {
+                                const stock = warehouseStocks.find(s => s.warehouseId === wh.id);
+                                const qty = stock ? toInt(stock.quantity, 0) : 0;
+                                return (
+                                  <td key={wh.id}>
+                                    <input type="number" min="0" value={qty} onChange={(e) => {
+                                      const newQty = toInt(e.target.value, 0);
+                                      setWarehouseStocks((prev) => {
+                                        const filtered = prev.filter(s => s.warehouseId !== wh.id);
+                                        if (newQty > 0 || mode === 'edit') return [...filtered, { warehouseId: wh.id, quantity: newQty, warehouse: wh }];
+                                        return filtered;
+                                      });
+                                    }} />
+                                  </td>
+                                );
+                              })}
+                              {warehouses.length > 0 && <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{stockTotalPreview}</td>}
                               <td>
-                                <input type="number" min="0" step="0.01" value={variant.cost} onChange={(event) => setVariantField(index, 'cost', event.target.value)} />
-                              </td>
-                              <td>
-                                <input type="number" min="0" value={variant.quantity} onChange={(event) => setVariantField(index, 'quantity', event.target.value)} />
-                              </td>
-                              <td>
-                                <div className="unit-barcode-field">
-                                  <input type="text" value={variant.barcode || ''} onChange={(event) => setVariantField(index, 'barcode', event.target.value)} />
-                                  <button type="button" className="btn-icon" onClick={() => generateVariantBarcode(index)} title="توليد باركود المتغير">
+                                <div className="unit-barcode-field" style={{ display: 'flex' }}>
+                                  <input type="text" value={mainUnit.barcode || formData.barcode || ''} onChange={(event) => setUnitField('barcode', event.target.value)} />
+                                  <button type="button" className="btn-icon" onClick={generateProductBarcode} title="توليد باركود">
                                     <Barcode size={14} />
                                   </button>
                                 </div>
                               </td>
-                              <td>
-                                <button type="button" className="delete-btn" onClick={() => removeVariantRow(index)} aria-label="حذف المتغير">
-                                  <Trash2 size={16} />
-                                </button>
-                              </td>
                             </tr>
-                          ))}
+                          )}
                         </tbody>
                       </table>
                     </div>
-                  </>
-                ) : (
-                  <div className="variants-empty-note">فعّل الخيار لإضافة ألوان ومقاسات للمنتج.</div>
-                )}
-              </section>
-            </div>
-          ) : null}
+                  </section>
 
-          {activeTab === TABS.STOCK ? (
-            <div
-              className="form-section"
-              onFocusCapture={selectAllInputValue}
-              onClickCapture={selectAllInputValue}
-            >
-              <div className="stock-layout">
-                {isEditMode ? <div className="stock-note">سيتم تحديث كميات المخزون الحالية لهذا الصنف.</div> : null}
+                  {warehouses.length === 0 && (
+                    <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#fef3c7', borderRadius: '8px', border: '1px solid #fbbf24', textAlign: 'center' }}>
+                      <span style={{ color: '#92400e' }}>⚠️ لا توجد مخازن نشطة. يرجى إضافة مخازن من صفحة إدارة المخازن.</span>
+                    </div>
+                  )}
 
-                <div className="stock-basic-grid">
-                  <label className="form-group">
-                    <span>الوحدة الافتراضية للمخزون</span>
-                    <input type="text" className="form-input" value={nText(mainUnit.unitName) || 'قطعة'} readOnly />
-                  </label>
-                  <label className="form-group">
-                    <span>حد إعادة الطلب</span>
-                    <input type="number" min="0" className="form-input" value={formData.minStock} onChange={(event) => setField('minStock', toInt(event.target.value, 5))} />
-                  </label>
+                  <div className="stock-layout" style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '24px' }}>
+                    <div className="stock-total-card">
+                      <span>{formData.hasVariants ? 'إجمالي الرصيد الحالي (من كميات المتغيرات)' : 'إجمالي الرصيد الحالي'}</span>
+                      <strong>{stockTotalPreview}</strong>
+                    </div>
+
+                    <details className="stock-advanced-panel">
+                      <summary>إعدادات الملاحظات</summary>
+                      <div className="stock-advanced-content">
+                        <label className="form-group form-grow">
+                          <span>ملاحظات المخزون</span>
+                          <textarea className="form-input" rows={3} value={formData.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="أي ملاحظة تخص التخزين أو التجهيز" />
+                        </label>
+                      </div>
+                    </details>
+                  </div>
                 </div>
-
-                {warehouses.length > 0 && formData.hasVariants && (
-                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <h3 style={{ marginBottom: '16px', fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>توزيع المقاسات/الألوان داخل المخازن</h3>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: `${380 + (warehouses.length * 170)}px` }}>
-                        <thead style={{ backgroundColor: '#fff' }}>
-                          <tr>
-                            <th style={{ padding: '10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>المتغير</th>
-                            <th style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>كمية المتغير</th>
-                            {warehouses.map((wh) => (
-                              <th key={wh.id} style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>
-                                {wh.icon || '🏭'} {wh.name}
-                              </th>
-                            ))}
-                            <th style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>مجموع المخازن</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {formData.variants.map((variant, variantIndex) => {
-                            const variantQty = Math.max(0, toInt(variant?.quantity, 0));
-                            const rowTotal = getVariantWarehouseTotal(variant);
-                            const isMismatch = rowTotal !== variantQty;
-                            return (
-                              <tr key={variant.tempId || variant.id || variantIndex} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                <td style={{ padding: '10px' }}>
-                                  <strong>{nText(variant.size) || '-'}</strong> / <span>{nText(variant.color) || '-'}</span>
-                                </td>
-                                <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>{variantQty}</td>
-                                {warehouses.map((wh) => (
-                                  <td key={`${variant.tempId || variant.id || variantIndex}-${wh.id}`} style={{ padding: '8px', textAlign: 'center' }}>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      className="form-input"
-                                      style={{ width: '110px', margin: '0 auto', textAlign: 'center' }}
-                                      value={getVariantWarehouseQty(variant, wh.id)}
-                                      onChange={(event) => setVariantWarehouseQty(variant, wh.id, event.target.value)}
-                                    />
-                                  </td>
-                                ))}
-                                <td style={{ padding: '10px', textAlign: 'center', color: isMismatch ? '#dc2626' : '#059669', fontWeight: '700' }}>
-                                  {rowTotal}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#64748b' }}>
-                      لازم مجموع كميات كل متغير في المخازن يساوي كمية نفس المتغير.
-                    </div>
-                  </div>
-                )}
-
-                {warehouses.length > 0 && !formData.hasVariants && (
-                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <h3 style={{ marginBottom: '16px', fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>الكميات في المخازن</h3>
-                    <div style={{ display: 'grid', gap: '12px' }}>
-                      {warehouses.map((wh) => {
-                        const stock = warehouseStocks.find(s => s.warehouseId === wh.id);
-                        const qty = stock ? toInt(stock.quantity, 0) : 0;
-                        return (
-                          <label key={wh.id} className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
-                            <span style={{ minWidth: '150px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
-                              <span style={{ fontSize: '1.2rem' }}>{wh.icon || '🏭'}</span>
-                              <strong style={{ color: wh.color || '#334155' }}>{wh.name}</strong>
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              className="form-input"
-                              style={{ flex: 1, maxWidth: '200px' }}
-                              value={qty}
-                              onChange={(event) => {
-                                const newQty = toInt(event.target.value, 0);
-                                setWarehouseStocks((prev) => {
-                                  const filtered = prev.filter(s => s.warehouseId !== wh.id);
-                                  if (newQty > 0 || mode === 'edit') {
-                                    return [...filtered, { warehouseId: wh.id, quantity: newQty, warehouse: wh }];
-                                  }
-                                  return filtered;
-                                });
-                              }}
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#fff', borderRadius: '4px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '0.9rem', color: '#64748b' }}>إجمالي الكمية: </span>
-                      <strong style={{ fontSize: '1.1rem', color: '#1e293b' }}>
-                        {warehouseStocks.reduce((sum, s) => sum + toInt(s.quantity, 0), 0)}
-                      </strong>
-                    </div>
-                  </div>
-                )}
-
-                {warehouses.length === 0 && (
-                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#fef3c7', borderRadius: '8px', border: '1px solid #fbbf24', textAlign: 'center' }}>
-                    <span style={{ color: '#92400e' }}>⚠️ لا توجد مخازن نشطة. يرجى إضافة مخازن من صفحة إدارة المخازن.</span>
-                  </div>
-                )}
-
-                <div className="stock-total-card">
-                  <span>{formData.hasVariants ? 'إجمالي الرصيد الحالي (من كميات المتغيرات)' : 'إجمالي الرصيد الحالي (مخزن + عرض)'}</span>
-                  <strong>{stockTotalPreview}</strong>
-                </div>
-
-                <details className="stock-advanced-panel">
-                  <summary>إعدادات متقدمة</summary>
-                  <div className="stock-advanced-content">
-                    <label className="form-group">
-                      <span>الحد الأقصى المقترح</span>
-                      <input type="number" min="0" className="form-input" value={formData.maxStock} onChange={(event) => setField('maxStock', toInt(event.target.value, 100))} />
-                    </label>
-                    <label className="form-group form-grow">
-                      <span>ملاحظات المخزون</span>
-                      <textarea className="form-input" rows={3} value={formData.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="أي ملاحظة تخص التخزين أو التجهيز" />
-                    </label>
-                  </div>
-                </details>
-              </div>
-            </div>
-          ) : null}
+              ) : null}
             </>
           )}
         </div>

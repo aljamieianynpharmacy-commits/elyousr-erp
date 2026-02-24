@@ -30,7 +30,8 @@ contextBridge.exposeInMainWorld('api', {
     getWarehouseStocks: (productId) => ipcRenderer.invoke('db:getWarehouseStocks', productId),
     updateWarehouseStock: (productId, warehouseId, quantity) => ipcRenderer.invoke('db:updateWarehouseStock', productId, warehouseId, quantity),
     updateMultipleWarehouseStocks: (productId, stocks) => ipcRenderer.invoke('db:updateMultipleWarehouseStocks', productId, stocks),
-    transferProductBetweenWarehouses: (productId, fromWarehouseId, toWarehouseId, quantity, notes) => ipcRenderer.invoke('db:transferProductBetweenWarehouses', productId, fromWarehouseId, toWarehouseId, quantity, notes),
+    updateVariantWarehouseStocks: (productId, stocks) => ipcRenderer.invoke('db:updateVariantWarehouseStocks', productId, stocks),
+    transferProductBetweenWarehouses: (productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId) => ipcRenderer.invoke('db:transferProductBetweenWarehouses', productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId),
     getWarehouseTransfers: (productId, limit) => ipcRenderer.invoke('db:getWarehouseTransfers', productId, limit),
 
     // Inventory

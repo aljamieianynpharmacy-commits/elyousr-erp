@@ -2249,9 +2249,7 @@ export default function EnhancedPOS() {
                                     }}
                                 />
                             </div>
-                        </div>
-                        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                            {/* Warehouse Selector */}
+                             {/* Warehouse Selector */}
                             <div
                                 style={{
                                     display: "flex",
@@ -2270,8 +2268,9 @@ export default function EnhancedPOS() {
                                         outline: "none",
                                         fontSize: "14px",
                                         color: "#374151",
-                                        fontWeight: "500",
+                                        fontWeight: "800",
                                         cursor: "pointer",
+                                        width: "100%",
                                         backgroundColor: "transparent",
                                     }}
                                 >
@@ -2281,7 +2280,9 @@ export default function EnhancedPOS() {
                                     ))}
                                 </select>
                             </div>
-
+                        </div>
+                        <div style={{ gap: "10px", alignItems: "center" }}>
+                    
                             {!activeInvoice.customer ? (
                                 <div
                                     ref={customerDropdownRef}

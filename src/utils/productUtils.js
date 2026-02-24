@@ -79,31 +79,42 @@ export const stock = (p) => {
 };
 
 export const unitsOf = (product) =>
-    (Array.isArray(product?.productUnits) ? product.productUnits : []);
+    [mainUnitOf(product)].filter(Boolean);
 
 export const mainUnitOf = (product) => {
-    const units = unitsOf(product);
-    if (!units.length) return null;
-    return units.find((unit) => nNum(unit.conversionFactor, 1) === 1) || units[0];
+    if (!product) return null;
+    const salePrice = nNum(product?.basePrice, 0);
+    const wholesalePrice = nNum(product?.wholesalePrice, salePrice);
+    const minSalePrice = nNum(product?.minSalePrice, wholesalePrice);
+    const purchasePrice = nNum(product?.cost, 0);
+    return {
+        unitName: nText(product?.unitName) || DEFAULT_UNIT,
+        salePrice,
+        wholesalePrice: Math.min(salePrice, Math.max(0, wholesalePrice)),
+        minSalePrice: Math.min(Math.min(salePrice, Math.max(0, minSalePrice)), Math.min(salePrice, Math.max(0, wholesalePrice))),
+        purchasePrice,
+        barcode: nText(product?.barcode)
+    };
 };
 
 export const salePriceOf = (product) =>
-    nNum(mainUnitOf(product)?.salePrice, nNum(product?.basePrice, 0));
+    nNum(product?.basePrice, nNum(mainUnitOf(product)?.salePrice, 0));
 
 export const costPriceOf = (product) =>
-    nNum(mainUnitOf(product)?.purchasePrice, nNum(product?.cost, 0));
+    nNum(product?.cost, nNum(mainUnitOf(product)?.purchasePrice, 0));
 
 export const wholesale = (product) => {
-    const mainUnit = mainUnitOf(product);
-    if (mainUnit) {
-        return nNum(mainUnit.wholesalePrice, nNum(mainUnit.salePrice, nNum(product?.basePrice, 0)));
+    const salePrice = salePriceOf(product);
+    const productWholesale = nNum(product?.wholesalePrice, salePrice);
+    if (productWholesale > 0) {
+        return Math.min(salePrice, productWholesale);
     }
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     if (variants.length > 0) {
-        const prices = variants.map((variant) => nNum(variant.price, nNum(product.basePrice, 0)));
+        const prices = variants.map((variant) => nNum(variant.price, salePrice));
         return Math.min(...prices);
     }
-    return nNum(product?.basePrice, 0);
+    return salePrice;
 };
 
 export const getGridHeight = () => {

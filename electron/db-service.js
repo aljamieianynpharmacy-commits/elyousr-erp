@@ -68,34 +68,53 @@ const toMoney = (value, fallback = 0) => (
     Math.max(0, Number(toNumber(value, fallback).toFixed(2)))
 );
 
-const normalizeProductUnits = (units, baseSalePrice = 0, baseCostPrice = 0) => {
-    if (!Array.isArray(units)) return [];
+const normalizeSingleProductUnit = (payload, {
+    baseSalePrice = 0,
+    baseCostPrice = 0,
+    fallbackBarcode = null
+} = {}) => {
+    const salePrice = toMoney(
+        payload?.basePrice,
+        baseSalePrice
+    );
+    const purchasePrice = toMoney(
+        payload?.cost,
+        baseCostPrice
+    );
+    const wholesalePrice = toMoney(
+        Math.min(
+            salePrice,
+            toNumber(
+                payload?.wholesalePrice,
+                salePrice
+            )
+        ),
+        salePrice
+    );
+    const minSalePrice = toMoney(
+        Math.min(
+            wholesalePrice,
+            toNumber(
+                payload?.minSalePrice,
+                wholesalePrice
+            )
+        ),
+        wholesalePrice
+    );
+    const unitName = normalizeString(payload?.unitName)
+        || '\u0642\u0637\u0639\u0629';
+    const barcode = normalizeString(payload?.barcode)
+        || normalizeString(fallbackBarcode)
+        || null;
 
-    return units
-        .map((unit, index) => {
-            const salePrice = toMoney(unit?.salePrice, baseSalePrice);
-            const wholesalePrice = toMoney(Math.min(salePrice, toNumber(unit?.wholesalePrice, salePrice)), salePrice);
-            const minSalePrice = toMoney(Math.min(salePrice, toNumber(unit?.minSalePrice, wholesalePrice)), wholesalePrice);
-            const purchasePrice = toMoney(unit?.purchasePrice, baseCostPrice);
-
-            return {
-                unitName: normalizeString(unit?.unitName) || (index === 0 ? '\u0642\u0637\u0639\u0629' : null),
-                conversionFactor: index === 0 ? 1 : Math.max(0.0001, toNumber(unit?.conversionFactor, 1)),
-                salePrice,
-                wholesalePrice,
-                minSalePrice,
-                purchasePrice,
-                barcode: normalizeString(unit?.barcode)
-            };
-        })
-        .filter((unit, index) => (
-            index === 0
-            || unit.unitName
-            || unit.barcode
-            || unit.salePrice > 0
-            || unit.purchasePrice > 0
-        ))
-        .filter((unit) => unit.unitName);
+    return {
+        unitName,
+        salePrice,
+        wholesalePrice,
+        minSalePrice,
+        purchasePrice,
+        barcode
+    };
 };
 
 const PRODUCT_CATEGORY_SELECT = {
@@ -115,18 +134,6 @@ const PRODUCT_INVENTORY_SELECT = {
     displayQty: true,
     lastRestock: true,
     notes: true,
-    updatedAt: true
-};
-
-const PRODUCT_UNIT_SELECT = {
-    id: true,
-    unitName: true,
-    conversionFactor: true,
-    salePrice: true,
-    wholesalePrice: true,
-    minSalePrice: true,
-    purchasePrice: true,
-    barcode: true,
     updatedAt: true
 };
 
@@ -152,7 +159,6 @@ const buildProductSelect = ({
     includeImage = true,
     includeCategory = true,
     includeInventory = true,
-    includeProductUnits = true,
     includeVariants = true,
     includeWarehouseStocks = true
 } = {}) => ({
@@ -161,10 +167,13 @@ const buildProductSelect = ({
     ...(includeDescription ? { description: true } : {}),
     categoryId: true,
     brand: true,
+    unitName: true,
     barcode: true,
     ...(includeImage ? { image: true } : {}),
     sku: true,
     basePrice: true,
+    wholesalePrice: true,
+    minSalePrice: true,
     cost: true,
     isActive: true,
     type: true,
@@ -172,10 +181,389 @@ const buildProductSelect = ({
     updatedAt: true,
     ...(includeCategory ? { category: { select: PRODUCT_CATEGORY_SELECT } } : {}),
     ...(includeInventory ? { inventory: { select: PRODUCT_INVENTORY_SELECT } } : {}),
-    ...(includeProductUnits ? { productUnits: { select: PRODUCT_UNIT_SELECT } } : {}),
     ...(includeVariants ? { variants: { select: PRODUCT_VARIANT_SELECT } } : {}),
     ...(includeWarehouseStocks ? { warehouseStocks: { select: WAREHOUSE_STOCK_SELECT } } : {})
 });
+
+const normalizeErrorText = (value) => String(value || '').toLowerCase();
+
+const isMissingTableError = (error, tableName) => {
+    const target = normalizeErrorText(tableName);
+    const code = String(error?.code || '').trim();
+    const message = normalizeErrorText(error?.message);
+    const metaTable = normalizeErrorText(error?.meta?.table);
+
+    if (code === 'P2021') {
+        if (!target) return true;
+        return metaTable.includes(target) || message.includes(target);
+    }
+
+    if (!target) {
+        return message.includes('does not exist in the current database');
+    }
+
+    return message.includes('does not exist') && message.includes(target);
+};
+
+const isWarehouseStockTableMissingError = (error) => (
+    isMissingTableError(error, 'WarehouseStock')
+);
+
+const isVariantWarehouseStockTableMissingError = (error) => (
+    isMissingTableError(error, 'VariantWarehouseStock')
+);
+
+const isWarehouseSchemaMissingError = (error) => (
+    isMissingTableError(error, 'Warehouse')
+    || isMissingTableError(error, 'WarehouseStock')
+    || isMissingTableError(error, 'VariantWarehouseStock')
+    || isMissingTableError(error, 'WarehouseTransfer')
+);
+
+const WAREHOUSE_SCHEMA_MISSING_MESSAGE = 'Warehouse features are unavailable. Please run database migrations.';
+
+let warehouseStockFallbackLogged = false;
+const logWarehouseStockFallback = (context, error) => {
+    if (warehouseStockFallbackLogged) return;
+    warehouseStockFallbackLogged = true;
+    console.warn(
+        `[db-service] ${context}: WarehouseStock table is missing. Falling back without warehouse stock relation data.`
+    );
+    if (error?.message) {
+        console.warn('[db-service] Original Prisma error:', error.message);
+    }
+};
+
+let warehouseSchemaFallbackLogged = false;
+const logWarehouseSchemaFallback = (context, error) => {
+    if (warehouseSchemaFallbackLogged) return;
+    warehouseSchemaFallbackLogged = true;
+    console.warn(
+        `[db-service] ${context}: Warehouse tables are missing. Falling back to compatibility mode.`
+    );
+    if (error?.message) {
+        console.warn('[db-service] Original Prisma error:', error.message);
+    }
+};
+
+const withWarehouseStockRelationFallback = async (context, primaryQuery, fallbackQuery) => {
+    try {
+        return await primaryQuery();
+    } catch (error) {
+        if (!isWarehouseStockTableMissingError(error)) {
+            throw error;
+        }
+
+        logWarehouseStockFallback(context, error);
+        return await fallbackQuery();
+    }
+};
+
+const withVariantWarehouseStockRelationFallback = async (context, primaryQuery, fallbackQuery) => {
+    try {
+        return await primaryQuery();
+    } catch (error) {
+        if (!isVariantWarehouseStockTableMissingError(error)) {
+            throw error;
+        }
+
+        logWarehouseSchemaFallback(context, error);
+        return await fallbackQuery();
+    }
+};
+
+const syncWarehouseStockTotalWithQuantity = async (dbClient, productId, targetTotalQuantity) => {
+    const resolvedProductId = parsePositiveInt(productId);
+    if (!resolvedProductId) return 0;
+
+    const target = Math.max(0, toInteger(targetTotalQuantity, 0));
+    const existingStocks = await dbClient.warehouseStock.findMany({
+        where: { productId: resolvedProductId },
+        select: { id: true, warehouseId: true, quantity: true },
+        orderBy: [{ quantity: 'desc' }, { id: 'asc' }]
+    });
+
+    if (existingStocks.length === 0) {
+        if (target <= 0) return 0;
+
+        const firstWarehouse = (
+            await dbClient.warehouse.findFirst({
+                where: { isActive: true },
+                select: { id: true },
+                orderBy: { id: 'asc' }
+            })
+        ) || (
+            await dbClient.warehouse.findFirst({
+                select: { id: true },
+                orderBy: { id: 'asc' }
+            })
+        );
+
+        if (!firstWarehouse?.id) return 0;
+
+        await dbClient.warehouseStock.create({
+            data: {
+                productId: resolvedProductId,
+                warehouseId: firstWarehouse.id,
+                quantity: target
+            }
+        });
+
+        return target;
+    }
+
+    const currentTotal = existingStocks.reduce((sum, stock) => sum + Math.max(0, toInteger(stock.quantity, 0)), 0);
+    if (currentTotal === target) return currentTotal;
+
+    if (currentTotal < target) {
+        const primaryStock = existingStocks[0];
+        const delta = target - currentTotal;
+        await dbClient.warehouseStock.update({
+            where: { id: primaryStock.id },
+            data: { quantity: Math.max(0, toInteger(primaryStock.quantity, 0) + delta) }
+        });
+        return target;
+    }
+
+    let remainingReduction = currentTotal - target;
+    for (const stock of existingStocks) {
+        if (remainingReduction <= 0) break;
+        const currentQty = Math.max(0, toInteger(stock.quantity, 0));
+        const reduction = Math.min(currentQty, remainingReduction);
+        if (reduction <= 0) continue;
+
+        await dbClient.warehouseStock.update({
+            where: { id: stock.id },
+            data: { quantity: currentQty - reduction }
+        });
+        remainingReduction -= reduction;
+    }
+
+    return target;
+};
+
+const syncVariantWarehouseStockTotalsWithVariantQuantities = async (dbClient, productId) => {
+    const resolvedProductId = parsePositiveInt(productId);
+    if (!resolvedProductId) return [];
+
+    const variants = await dbClient.variant.findMany({
+        where: { productId: resolvedProductId },
+        select: { id: true, quantity: true },
+        orderBy: { id: 'asc' }
+    });
+    if (variants.length === 0) return [];
+
+    const firstWarehouse = (
+        await dbClient.warehouse.findFirst({
+            where: { isActive: true },
+            select: { id: true },
+            orderBy: { id: 'asc' }
+        })
+    ) || (
+        await dbClient.warehouse.findFirst({
+            select: { id: true },
+            orderBy: { id: 'asc' }
+        })
+    );
+
+    for (const variant of variants) {
+        const targetQuantity = Math.max(0, toInteger(variant.quantity, 0));
+        const existingStocks = await dbClient.variantWarehouseStock.findMany({
+            where: { variantId: variant.id },
+            select: { id: true, warehouseId: true, quantity: true },
+            orderBy: [{ quantity: 'desc' }, { id: 'asc' }]
+        });
+
+        if (existingStocks.length === 0) {
+            if (targetQuantity <= 0 || !firstWarehouse?.id) continue;
+            await dbClient.variantWarehouseStock.create({
+                data: {
+                    variantId: variant.id,
+                    warehouseId: firstWarehouse.id,
+                    quantity: targetQuantity
+                }
+            });
+            continue;
+        }
+
+        const currentTotal = existingStocks.reduce((sum, stock) => sum + Math.max(0, toInteger(stock.quantity, 0)), 0);
+        if (currentTotal === targetQuantity) continue;
+
+        if (currentTotal < targetQuantity) {
+            const primaryStock = existingStocks[0];
+            await dbClient.variantWarehouseStock.update({
+                where: { id: primaryStock.id },
+                data: { quantity: Math.max(0, toInteger(primaryStock.quantity, 0) + (targetQuantity - currentTotal)) }
+            });
+            continue;
+        }
+
+        let remainingReduction = currentTotal - targetQuantity;
+        for (const stock of existingStocks) {
+            if (remainingReduction <= 0) break;
+            const currentQty = Math.max(0, toInteger(stock.quantity, 0));
+            const reduction = Math.min(currentQty, remainingReduction);
+            if (reduction <= 0) continue;
+            const nextQty = currentQty - reduction;
+
+            if (nextQty > 0) {
+                await dbClient.variantWarehouseStock.update({
+                    where: { id: stock.id },
+                    data: { quantity: nextQty }
+                });
+            } else {
+                await dbClient.variantWarehouseStock.delete({
+                    where: { id: stock.id }
+                });
+            }
+            remainingReduction -= reduction;
+        }
+    }
+
+    return variants;
+};
+
+const syncLegacyProductWarehouseTotalsFromVariantStocks = async (dbClient, productId) => {
+    const resolvedProductId = parsePositiveInt(productId);
+    if (!resolvedProductId) return [];
+
+    const variants = await dbClient.variant.findMany({
+        where: { productId: resolvedProductId },
+        select: { id: true }
+    });
+    const variantIds = variants.map((variant) => variant.id);
+
+    if (variantIds.length === 0) {
+        await dbClient.warehouseStock.deleteMany({
+            where: { productId: resolvedProductId }
+        });
+        return [];
+    }
+
+    const grouped = await dbClient.variantWarehouseStock.groupBy({
+        by: ['warehouseId'],
+        where: { variantId: { in: variantIds } },
+        _sum: { quantity: true }
+    });
+    const totals = grouped
+        .map((row) => ({
+            warehouseId: row.warehouseId,
+            quantity: Math.max(0, toInteger(row?._sum?.quantity, 0))
+        }))
+        .filter((row) => row.quantity > 0);
+
+    const existingRows = await dbClient.warehouseStock.findMany({
+        where: { productId: resolvedProductId },
+        select: { id: true, warehouseId: true }
+    });
+    const existingByWarehouseId = new Map(existingRows.map((row) => [row.warehouseId, row]));
+    const incomingWarehouseIds = new Set(totals.map((row) => row.warehouseId));
+
+    for (const row of totals) {
+        const existing = existingByWarehouseId.get(row.warehouseId);
+        if (existing?.id) {
+            await dbClient.warehouseStock.update({
+                where: { id: existing.id },
+                data: { quantity: row.quantity }
+            });
+        } else {
+            await dbClient.warehouseStock.create({
+                data: {
+                    productId: resolvedProductId,
+                    warehouseId: row.warehouseId,
+                    quantity: row.quantity
+                }
+            });
+        }
+    }
+
+    const staleIds = existingRows
+        .filter((row) => !incomingWarehouseIds.has(row.warehouseId))
+        .map((row) => row.id)
+        .filter(Boolean);
+    if (staleIds.length > 0) {
+        await dbClient.warehouseStock.deleteMany({
+            where: { id: { in: staleIds } }
+        });
+    }
+
+    return totals;
+};
+
+const syncSingleProductInventoryWithVariants = async (dbClient, productId) => {
+    const resolvedProductId = parsePositiveInt(productId);
+    if (!resolvedProductId) return 0;
+
+    const variantsAggregate = await dbClient.variant.aggregate({
+        where: { productId: resolvedProductId },
+        _sum: { quantity: true },
+        _count: { id: true }
+    });
+    const variantsCount = Math.max(0, toInteger(variantsAggregate?._count?.id, 0));
+    if (variantsCount <= 0) {
+        const existingInventory = await dbClient.inventory.findUnique({
+            where: { productId: resolvedProductId },
+            select: { totalQuantity: true }
+        });
+        return Math.max(0, toInteger(existingInventory?.totalQuantity, 0));
+    }
+
+    const totalQuantity = Math.max(0, toInteger(variantsAggregate?._sum?.quantity, 0));
+    const quantityData = {
+        totalQuantity,
+        warehouseQty: totalQuantity,
+        displayQty: 0
+    };
+
+    const existingInventory = await dbClient.inventory.findUnique({
+        where: { productId: resolvedProductId },
+        select: { productId: true }
+    });
+
+    if (existingInventory) {
+        await dbClient.inventory.update({
+            where: { productId: resolvedProductId },
+            data: quantityData
+        });
+    } else {
+        await dbClient.inventory.create({
+            data: {
+                productId: resolvedProductId,
+                minStock: 5,
+                maxStock: 100,
+                ...quantityData,
+                lastRestock: totalQuantity > 0 ? new Date() : null
+            }
+        });
+    }
+
+    try {
+        await syncVariantWarehouseStockTotalsWithVariantQuantities(dbClient, resolvedProductId);
+        await syncLegacyProductWarehouseTotalsFromVariantStocks(dbClient, resolvedProductId);
+    } catch (error) {
+        if (isVariantWarehouseStockTableMissingError(error)) {
+            await syncWarehouseStockTotalWithQuantity(dbClient, resolvedProductId, totalQuantity);
+        } else if (isWarehouseSchemaMissingError(error)) {
+            logWarehouseSchemaFallback('syncSingleProductInventoryWithVariants', error);
+        } else {
+            throw error;
+        }
+    }
+
+    return totalQuantity;
+};
+
+const syncProductInventoriesWithVariants = async (dbClient, productIds = []) => {
+    const uniqueProductIds = Array.from(new Set(
+        (Array.isArray(productIds) ? productIds : [])
+            .map((id) => parsePositiveInt(id))
+            .filter(Boolean)
+    ));
+
+    for (const productId of uniqueProductIds) {
+        await syncSingleProductInventoryWithVariants(dbClient, productId);
+    }
+};
 
 const isPrismaDecimalLike = (value) => (
     value
@@ -1585,8 +1973,8 @@ const dbService = {
         includeImage = true,
         includeCategory = true,
         includeInventory = true,
-        includeProductUnits = true,
-        includeVariants = true
+        includeVariants = true,
+        includeWarehouseStocks = true
     } = {}) {
         try {
             const safePage = Math.max(1, parseInt(page, 10) || 1);
@@ -1633,23 +2021,15 @@ const dbService = {
 
             const normalizedSearch = String(searchTerm || '').trim();
             if (normalizedSearch.length > 0) {
-                const [unitBarcodeRows, variantBarcodeRows] = await Promise.all([
-                    prisma.productUnit.findMany({
-                        where: { barcode: { startsWith: normalizedSearch } },
-                        select: { productId: true },
-                        take: 150
-                    }),
-                    prisma.variant.findMany({
-                        where: { barcode: { startsWith: normalizedSearch } },
-                        select: { productId: true },
-                        take: 150
-                    })
-                ]);
+                const variantBarcodeRows = await prisma.variant.findMany({
+                    where: { barcode: { startsWith: normalizedSearch } },
+                    select: { productId: true },
+                    take: 150
+                });
 
-                const barcodeProductIds = Array.from(new Set([
-                    ...unitBarcodeRows.map((row) => row.productId),
-                    ...variantBarcodeRows.map((row) => row.productId)
-                ])).filter((id) => Number.isFinite(id) && id > 0);
+                const barcodeProductIds = Array.from(new Set(
+                    variantBarcodeRows.map((row) => row.productId)
+                )).filter((id) => Number.isFinite(id) && id > 0);
 
                 const globalSearchOr = [
                     { name: { contains: normalizedSearch, mode: 'insensitive' } },
@@ -1681,7 +2061,6 @@ const dbService = {
                         const codeOr = [
                             { sku: { startsWith: value, mode: 'insensitive' } },
                             { barcode: { startsWith: value } },
-                            { productUnits: { some: { barcode: { startsWith: value } } } },
                             { variants: { some: { barcode: { startsWith: value } } } }
                         ];
                         if (Number.isFinite(numericPart) && numericPart > 0) {
@@ -1703,14 +2082,13 @@ const dbService = {
                         andConditions.push({
                             OR: [
                                 { barcode: { startsWith: value } },
-                                { productUnits: { some: { barcode: { startsWith: value } } } },
                                 { variants: { some: { barcode: { startsWith: value } } } }
                             ]
                         });
                         break;
 
                     case 'unit':
-                        andConditions.push({ productUnits: { some: { unitName: { contains: value, mode: 'insensitive' } } } });
+                        andConditions.push({ unitName: { contains: value, mode: 'insensitive' } });
                         break;
 
                     case 'warehouse': {
@@ -1743,7 +2121,6 @@ const dbService = {
                             andConditions.push({
                                 OR: [
                                     { basePrice: parsed },
-                                    { productUnits: { some: { salePrice: parsed } } },
                                     { variants: { some: { price: parsed } } }
                                 ]
                             });
@@ -1757,7 +2134,6 @@ const dbService = {
                             andConditions.push({
                                 OR: [
                                     { cost: parsed },
-                                    { productUnits: { some: { purchasePrice: parsed } } },
                                     { variants: { some: { cost: parsed } } }
                                 ]
                             });
@@ -1768,7 +2144,7 @@ const dbService = {
                     case 'wholesalePrice': {
                         const parsed = Number.parseFloat(value);
                         if (Number.isFinite(parsed)) {
-                            andConditions.push({ productUnits: { some: { wholesalePrice: parsed } } });
+                            andConditions.push({ wholesalePrice: parsed });
                         }
                         break;
                     }
@@ -1788,33 +2164,46 @@ const dbService = {
             const safeSortDir = sortDir === 'asc' ? 'asc' : 'desc';
             const orderBy = validSortCols.includes(sortCol) ? { [sortCol]: safeSortDir } : { id: 'desc' };
 
-            const queryArgs = {
-                skip,
-                take: safePageSize,
-                where,
-                orderBy,
-                select: buildProductSelect({
-                    includeDescription: includeDescription !== false,
-                    includeImage: includeImage !== false,
-                    includeCategory: includeCategory !== false,
-                    includeInventory: includeInventory !== false,
-                    includeProductUnits: includeProductUnits !== false,
-                    includeVariants: includeVariants !== false,
-                    includeWarehouseStocks: true
-                })
-            };
-
             const needTotal = includeTotal !== false;
             let products = [];
             let total = null;
+            const shouldIncludeWarehouseStocks = includeWarehouseStocks !== false;
 
-            if (needTotal) {
-                [products, total] = await Promise.all([
-                    prisma.product.findMany(queryArgs),
-                    prisma.product.count({ where })
-                ]);
+            const runProductQuery = async (withWarehouseStocks) => {
+                const queryArgs = {
+                    skip,
+                    take: safePageSize,
+                    where,
+                    orderBy,
+                    select: buildProductSelect({
+                        includeDescription: includeDescription !== false,
+                        includeImage: includeImage !== false,
+                        includeCategory: includeCategory !== false,
+                        includeInventory: includeInventory !== false,
+                        includeVariants: includeVariants !== false,
+                        includeWarehouseStocks: withWarehouseStocks
+                    })
+                };
+
+                if (needTotal) {
+                    return await Promise.all([
+                        prisma.product.findMany(queryArgs),
+                        prisma.product.count({ where })
+                    ]);
+                }
+
+                const rows = await prisma.product.findMany(queryArgs);
+                return [rows, null];
+            };
+
+            if (shouldIncludeWarehouseStocks) {
+                [products, total] = await withWarehouseStockRelationFallback(
+                    'getProducts',
+                    () => runProductQuery(true),
+                    () => runProductQuery(false)
+                );
             } else {
-                products = await prisma.product.findMany(queryArgs);
+                [products, total] = await runProductQuery(false);
             }
 
             const totalPages = needTotal ? Math.ceil((total || 0) / safePageSize) : null;
@@ -1838,10 +2227,17 @@ const dbService = {
                 return { error: 'Invalid productId' };
             }
 
-            const product = await prisma.product.findUnique({
-                where: { id: productId },
-                select: buildProductSelect()
-            });
+            const product = await withWarehouseStockRelationFallback(
+                'getProduct',
+                () => prisma.product.findUnique({
+                    where: { id: productId },
+                    select: buildProductSelect({ includeWarehouseStocks: true })
+                }),
+                () => prisma.product.findUnique({
+                    where: { id: productId },
+                    select: buildProductSelect({ includeWarehouseStocks: false })
+                })
+            );
 
             if (!product) {
                 return { error: 'Product not found' };
@@ -1858,62 +2254,65 @@ const dbService = {
             // تنظيف البيانات
             const basePrice = toMoney(productData.basePrice, 0);
             const cost = toMoney(productData.cost, 0);
-            const units = normalizeProductUnits(productData.units, basePrice, cost);
-            const mainUnit = units[0] || null;
+            const singleUnit = normalizeSingleProductUnit(productData, {
+                baseSalePrice: basePrice,
+                baseCostPrice: cost,
+                fallbackBarcode: productData?.barcode
+            });
             const name = String(productData.name ?? '').trim();
             if (!name) return { error: 'Product name is required' };
+            const requestedTotalQuantity = Math.max(
+                0,
+                toInteger(
+                    productData.totalQuantity,
+                    toInteger(productData.openingQty, 0) + toInteger(productData.displayQty, 0)
+                )
+            );
+            const hasVariantsRequested = Boolean(productData?.hasVariants)
+                || (Array.isArray(productData?.variants) && productData.variants.length > 0);
 
             const cleanData = {
                 name,
                 description: normalizeString(productData.description),
                 categoryId: productData.categoryId ? parsePositiveInt(productData.categoryId) : null,
                 brand: normalizeString(productData.brand),
-                basePrice: mainUnit ? toMoney(mainUnit.salePrice, basePrice) : basePrice,
-                cost: mainUnit ? toMoney(mainUnit.purchasePrice, cost) : cost,
+                unitName: singleUnit.unitName,
+                basePrice: singleUnit.salePrice,
+                wholesalePrice: singleUnit.wholesalePrice,
+                minSalePrice: singleUnit.minSalePrice,
+                cost: singleUnit.purchasePrice,
                 image: normalizeString(productData.image),
                 sku: normalizeString(productData.sku),
-                barcode: normalizeString(productData.barcode) || mainUnit?.barcode || null,
+                barcode: singleUnit.barcode,
                 isActive: productData.isActive ?? true,
                 type: normalizeString(productData.type) || 'store',
             };
 
-            const warehouseQty = Math.max(0, toInteger(productData.openingQty, 0));
-
             return await prisma.product.create({
                 data: {
                     ...cleanData,
-                    ...(units.length > 0 ? {
-                        productUnits: {
-                            create: units.map((unit) => ({
-                                unitName: unit.unitName,
-                                conversionFactor: unit.conversionFactor,
-                                salePrice: unit.salePrice,
-                                wholesalePrice: unit.wholesalePrice,
-                                minSalePrice: unit.minSalePrice,
-                                purchasePrice: unit.purchasePrice,
-                                barcode: unit.barcode
-                            }))
-                        }
-                    } : {}),
                     inventory: {
                         create: {
-                            warehouseQty,
-                            totalQuantity: warehouseQty,
-                            lastRestock: warehouseQty > 0 ? new Date() : null
+                            warehouseQty: requestedTotalQuantity,
+                            displayQty: 0,
+                            totalQuantity: requestedTotalQuantity,
+                            lastRestock: requestedTotalQuantity > 0 ? new Date() : null
                         }
                     },
-                    variants: {
-                        create: [{
-                            productSize: 'Standard',
-                            color: 'Standard',
-                            price: cleanData.basePrice,
-                            cost: cleanData.cost,
-                            quantity: warehouseQty,
-                            barcode: cleanData.barcode
-                        }]
-                    }
+                    ...(!hasVariantsRequested ? {
+                        variants: {
+                            create: [{
+                                productSize: 'Standard',
+                                color: 'Standard',
+                                price: cleanData.basePrice,
+                                cost: cleanData.cost,
+                                quantity: requestedTotalQuantity,
+                                barcode: cleanData.barcode
+                            }]
+                        }
+                    } : {})
                 },
-                include: { variants: true, category: true, inventory: true, productUnits: true }
+                include: { variants: true, category: true, inventory: true }
             });
         } catch (error) {
             return { error: error.message };
@@ -1926,18 +2325,24 @@ const dbService = {
             const cleanData = {};
             const basePrice = toMoney(productData.basePrice, 0);
             const cost = toMoney(productData.cost, 0);
-            const units = normalizeProductUnits(productData.units, basePrice, cost);
-            const mainUnit = units[0] || null;
+            const singleUnit = normalizeSingleProductUnit(productData, {
+                baseSalePrice: basePrice,
+                baseCostPrice: cost,
+                fallbackBarcode: productData?.barcode
+            });
 
             if (productData.name !== undefined) cleanData.name = String(productData.name ?? '').trim();
             if (productData.description !== undefined) cleanData.description = normalizeString(productData.description);
             if (productData.categoryId !== undefined) cleanData.categoryId = productData.categoryId ? parsePositiveInt(productData.categoryId) : null;
             if (productData.brand !== undefined) cleanData.brand = normalizeString(productData.brand);
-            if (productData.basePrice !== undefined) cleanData.basePrice = mainUnit ? toMoney(mainUnit.salePrice, basePrice) : basePrice;
-            if (productData.cost !== undefined) cleanData.cost = mainUnit ? toMoney(mainUnit.purchasePrice, cost) : cost;
+            if (productData.unitName !== undefined) cleanData.unitName = singleUnit.unitName;
+            if (productData.basePrice !== undefined) cleanData.basePrice = singleUnit.salePrice;
+            if (productData.wholesalePrice !== undefined) cleanData.wholesalePrice = singleUnit.wholesalePrice;
+            if (productData.minSalePrice !== undefined) cleanData.minSalePrice = singleUnit.minSalePrice;
+            if (productData.cost !== undefined) cleanData.cost = singleUnit.purchasePrice;
             if (productData.image !== undefined) cleanData.image = normalizeString(productData.image);
             if (productData.sku !== undefined) cleanData.sku = normalizeString(productData.sku);
-            if (productData.barcode !== undefined) cleanData.barcode = normalizeString(productData.barcode) || mainUnit?.barcode || null;
+            if (productData.barcode !== undefined) cleanData.barcode = singleUnit.barcode;
             if (productData.isActive !== undefined) cleanData.isActive = productData.isActive;
             if (productData.type !== undefined) cleanData.type = normalizeString(productData.type) || 'store';
 
@@ -1947,27 +2352,9 @@ const dbService = {
                     data: cleanData
                 });
 
-                if (Array.isArray(productData.units)) {
-                    await tx.productUnit.deleteMany({ where: { productId } });
-                    if (units.length > 0) {
-                        await tx.productUnit.createMany({
-                            data: units.map((unit) => ({
-                                productId,
-                                unitName: unit.unitName,
-                                conversionFactor: unit.conversionFactor,
-                                salePrice: unit.salePrice,
-                                wholesalePrice: unit.wholesalePrice,
-                                minSalePrice: unit.minSalePrice,
-                                purchasePrice: unit.purchasePrice,
-                                barcode: unit.barcode
-                            }))
-                        });
-                    }
-                }
-
                 return await tx.product.findUnique({
                     where: { id: productId },
-                    include: { variants: true, category: true, inventory: true, productUnits: true }
+                    include: { variants: true, category: true, inventory: true }
                 });
             });
         } catch (error) {
@@ -2058,23 +2445,78 @@ const dbService = {
 
     async updateInventory(productId, inventoryData) {
         try {
+            const productIdInt = parseInt(productId);
+            const normalizedInventoryData = {
+                ...(inventoryData && typeof inventoryData === 'object' ? inventoryData : {})
+            };
+            const hasTotalQuantity = Object.prototype.hasOwnProperty.call(normalizedInventoryData, 'totalQuantity');
+            const hasWarehouseQty = Object.prototype.hasOwnProperty.call(normalizedInventoryData, 'warehouseQty');
+            const hasDisplayQty = Object.prototype.hasOwnProperty.call(normalizedInventoryData, 'displayQty');
+
+            const variantStats = await prisma.variant.aggregate({
+                where: { productId: productIdInt },
+                _sum: { quantity: true },
+                _count: { id: true }
+            });
+            const hasVariants = Math.max(0, toInteger(variantStats?._count?.id, 0)) > 0;
+
+            if (hasVariants) {
+                const variantTotal = Math.max(0, toInteger(variantStats?._sum?.quantity, 0));
+                normalizedInventoryData.totalQuantity = variantTotal;
+                normalizedInventoryData.warehouseQty = variantTotal;
+                normalizedInventoryData.displayQty = 0;
+            }
+
+            if (hasTotalQuantity || hasWarehouseQty || hasDisplayQty) {
+                const normalizedTotalQuantity = Math.max(
+                    0,
+                    toInteger(
+                        hasTotalQuantity ? normalizedInventoryData.totalQuantity : null,
+                        toInteger(normalizedInventoryData.warehouseQty, 0) + toInteger(normalizedInventoryData.displayQty, 0)
+                    )
+                );
+                normalizedInventoryData.totalQuantity = normalizedTotalQuantity;
+                normalizedInventoryData.warehouseQty = normalizedTotalQuantity;
+                normalizedInventoryData.displayQty = 0;
+            }
+
+            if (
+                Object.prototype.hasOwnProperty.call(normalizedInventoryData, 'minStock')
+                || Object.prototype.hasOwnProperty.call(normalizedInventoryData, 'maxStock')
+            ) {
+                const minStock = Math.max(0, toInteger(normalizedInventoryData.minStock, 5));
+                const maxStock = Math.max(minStock, toInteger(normalizedInventoryData.maxStock, 100));
+                normalizedInventoryData.minStock = minStock;
+                normalizedInventoryData.maxStock = maxStock;
+            }
+
             const existing = await prisma.inventory.findUnique({
-                where: { productId: parseInt(productId) }
+                where: { productId: productIdInt }
             });
 
+            let inventoryRecord;
             if (existing) {
-                return await prisma.inventory.update({
-                    where: { productId: parseInt(productId) },
-                    data: inventoryData
+                inventoryRecord = await prisma.inventory.update({
+                    where: { productId: productIdInt },
+                    data: normalizedInventoryData
                 });
             } else {
-                return await prisma.inventory.create({
+                inventoryRecord = await prisma.inventory.create({
                     data: {
-                        productId: parseInt(productId),
-                        ...inventoryData
+                        productId: productIdInt,
+                        ...normalizedInventoryData
                     }
                 });
             }
+
+            if (!hasVariants) {
+                return inventoryRecord;
+            }
+
+            await syncSingleProductInventoryWithVariants(prisma, productIdInt);
+            return await prisma.inventory.findUnique({
+                where: { productId: productIdInt }
+            });
         } catch (error) {
             return { error: error.message };
         }
@@ -2087,6 +2529,10 @@ const dbService = {
                 orderBy: { name: 'asc' }
             });
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('getWarehouses', error);
+                return [];
+            }
             return { error: error.message };
         }
     },
@@ -2097,6 +2543,10 @@ const dbService = {
                 data: warehouseData
             });
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('addWarehouse', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
             return { error: error.message };
         }
     },
@@ -2108,76 +2558,303 @@ const dbService = {
                 data: warehouseData
             });
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('updateWarehouse', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
             return { error: error.message };
         }
     },
 
     async deleteWarehouse(id) {
         try {
-            // Check if warehouse has stocks
-            const stocks = await prisma.warehouseStock.findFirst({
-                where: { warehouseId: parseInt(id) }
-            });
-            if (stocks) {
-                return { error: 'لا يمكن حذف المخزن لأنه يحتوي على منتجات' };
+            const warehouseId = parseInt(id);
+            const [productStocks, variantStocks] = await Promise.all([
+                prisma.warehouseStock.findFirst({
+                    where: { warehouseId, quantity: { gt: 0 } }
+                }),
+                withVariantWarehouseStockRelationFallback(
+                    'deleteWarehouse',
+                    () => prisma.variantWarehouseStock.findFirst({
+                        where: { warehouseId, quantity: { gt: 0 } }
+                    }),
+                    () => Promise.resolve(null)
+                )
+            ]);
+
+            if (productStocks || variantStocks) {
+                return { error: 'Cannot delete warehouse because it still has stock.' };
             }
 
             return await prisma.warehouse.delete({
-                where: { id: parseInt(id) }
+                where: { id: warehouseId }
             });
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('deleteWarehouse', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
             return { error: error.message };
         }
     },
 
     async getWarehouseStocks(productId) {
         try {
-            return await prisma.warehouseStock.findMany({
-                where: { productId: parseInt(productId) },
-                include: { warehouse: true },
-                orderBy: { warehouse: { name: 'asc' } }
-            });
+            const productIdInt = parseInt(productId);
+            return await withVariantWarehouseStockRelationFallback(
+                'getWarehouseStocks',
+                async () => {
+                    const [variants, legacyTotals] = await Promise.all([
+                        prisma.variant.findMany({
+                            where: { productId: productIdInt },
+                            select: {
+                                id: true,
+                                productId: true,
+                                productSize: true,
+                                color: true,
+                                quantity: true,
+                                barcode: true,
+                                warehouseStocks: {
+                                    include: { warehouse: true },
+                                    orderBy: { warehouse: { name: 'asc' } }
+                                }
+                            },
+                            orderBy: [{ id: 'asc' }]
+                        }),
+                        prisma.warehouseStock.findMany({
+                            where: { productId: productIdInt },
+                            include: { warehouse: true },
+                            orderBy: { warehouse: { name: 'asc' } }
+                        })
+                    ]);
+
+                    const totalsMap = new Map();
+                    for (const variant of variants) {
+                        for (const stock of (variant.warehouseStocks || [])) {
+                            const warehouseId = parsePositiveInt(stock?.warehouseId);
+                            if (!warehouseId) continue;
+                            const current = totalsMap.get(warehouseId) || {
+                                warehouseId,
+                                quantity: 0,
+                                warehouse: stock.warehouse || null
+                            };
+                            current.quantity += Math.max(0, toInteger(stock?.quantity, 0));
+                            if (!current.warehouse && stock.warehouse) current.warehouse = stock.warehouse;
+                            totalsMap.set(warehouseId, current);
+                        }
+                    }
+                    const computedTotals = Array.from(totalsMap.values()).filter((row) => row.quantity > 0);
+                    const totals = computedTotals.length > 0
+                        ? computedTotals
+                        : legacyTotals.map((row) => ({
+                            warehouseId: row.warehouseId,
+                            quantity: Math.max(0, toInteger(row.quantity, 0)),
+                            warehouse: row.warehouse || null
+                        }));
+
+                    return {
+                        productId: productIdInt,
+                        totals,
+                        variants: variants.map((variant) => ({
+                            id: variant.id,
+                            productId: variant.productId,
+                            productSize: variant.productSize,
+                            color: variant.color,
+                            quantity: Math.max(0, toInteger(variant.quantity, 0)),
+                            barcode: variant.barcode || null,
+                            warehouseStocks: (variant.warehouseStocks || []).map((stock) => ({
+                                id: stock.id,
+                                warehouseId: stock.warehouseId,
+                                quantity: Math.max(0, toInteger(stock.quantity, 0)),
+                                warehouse: stock.warehouse || null
+                            }))
+                        }))
+                    };
+                },
+                async () => {
+                    const [legacyRows, variants] = await Promise.all([
+                        prisma.warehouseStock.findMany({
+                            where: { productId: productIdInt },
+                            include: { warehouse: true },
+                            orderBy: { warehouse: { name: 'asc' } }
+                        }),
+                        prisma.variant.findMany({
+                            where: { productId: productIdInt },
+                            select: {
+                                id: true,
+                                productId: true,
+                                productSize: true,
+                                color: true,
+                                quantity: true,
+                                barcode: true
+                            },
+                            orderBy: [{ id: 'asc' }]
+                        })
+                    ]);
+
+                    return {
+                        productId: productIdInt,
+                        totals: legacyRows.map((row) => ({
+                            warehouseId: row.warehouseId,
+                            quantity: Math.max(0, toInteger(row.quantity, 0)),
+                            warehouse: row.warehouse || null
+                        })),
+                        variants: variants.map((variant) => ({
+                            ...variant,
+                            warehouseStocks: []
+                        }))
+                    };
+                }
+            );
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('getWarehouseStocks', error);
+                return [];
+            }
             return { error: error.message };
         }
     },
 
     async getWarehouseInventory(warehouseId) {
         try {
-            return await prisma.warehouseStock.findMany({
-                where: { warehouseId: parseInt(warehouseId) },
-                include: { 
-                    product: {
-                        include: {
-                            variants: true
+            const warehouseIdInt = parseInt(warehouseId);
+            return await withVariantWarehouseStockRelationFallback(
+                'getWarehouseInventory',
+                () => prisma.variantWarehouseStock.findMany({
+                    where: {
+                        warehouseId: warehouseIdInt,
+                        quantity: { gt: 0 }
+                    },
+                    include: {
+                        warehouse: true,
+                        variant: {
+                            include: {
+                                product: true
+                            }
                         }
-                    } 
-                },
-                orderBy: { product: { name: 'asc' } }
-            });
+                    },
+                    orderBy: { id: 'asc' }
+                }),
+                () => prisma.warehouseStock.findMany({
+                    where: { warehouseId: warehouseIdInt },
+                    include: {
+                        product: {
+                            include: {
+                                variants: true
+                            }
+                        }
+                    },
+                    orderBy: { product: { name: 'asc' } }
+                })
+            );
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('getWarehouseInventory', error);
+                return [];
+            }
             return { error: error.message };
         }
     },
 
     async updateWarehouseStock(productId, warehouseId, quantity) {
         try {
+            const productIdInt = parseInt(productId);
+            const warehouseIdInt = parseInt(warehouseId);
             const qty = Math.max(0, parseInt(quantity) || 0);
-            return await prisma.warehouseStock.upsert({
-                where: {
-                    productId_warehouseId: {
-                        productId: parseInt(productId),
-                        warehouseId: parseInt(warehouseId)
+
+            return await withVariantWarehouseStockRelationFallback(
+                'updateWarehouseStock',
+                async () => {
+                    let variants = await prisma.variant.findMany({
+                        where: { productId: productIdInt },
+                        select: { id: true },
+                        orderBy: [{ id: 'asc' }]
+                    });
+                    if (variants.length === 0) {
+                        const product = await prisma.product.findUnique({
+                            where: { id: productIdInt },
+                            select: { basePrice: true, cost: true, barcode: true }
+                        });
+                        if (!product) {
+                            return { error: 'Product not found.' };
+                        }
+
+                        const createdVariant = await prisma.variant.create({
+                            data: {
+                                productId: productIdInt,
+                                productSize: 'Standard',
+                                color: 'Standard',
+                                price: Math.max(0, toNumber(product.basePrice, 0)),
+                                cost: Math.max(0, toNumber(product.cost, 0)),
+                                quantity: qty,
+                                barcode: product.barcode || null
+                            },
+                            select: { id: true }
+                        });
+                        variants = [createdVariant];
                     }
+                    if (variants.length > 1) {
+                        return { error: 'This product has sizes/colors. Update stock per variant per warehouse.' };
+                    }
+
+                    const variantId = variants[0].id;
+                    if (qty > 0) {
+                        await prisma.variantWarehouseStock.upsert({
+                            where: {
+                                variantId_warehouseId: {
+                                    variantId,
+                                    warehouseId: warehouseIdInt
+                                }
+                            },
+                            update: { quantity: qty },
+                            create: {
+                                variantId,
+                                warehouseId: warehouseIdInt,
+                                quantity: qty
+                            }
+                        });
+                    } else {
+                        await prisma.variantWarehouseStock.deleteMany({
+                            where: { variantId, warehouseId: warehouseIdInt }
+                        });
+                    }
+
+                    await syncSingleProductInventoryWithVariants(prisma, productIdInt);
+                    return await this.getWarehouseStocks(productIdInt);
                 },
-                update: { quantity: qty },
-                create: {
-                    productId: parseInt(productId),
-                    warehouseId: parseInt(warehouseId),
-                    quantity: qty
+                async () => {
+                    await prisma.warehouseStock.upsert({
+                        where: {
+                            productId_warehouseId: {
+                                productId: productIdInt,
+                                warehouseId: warehouseIdInt
+                            }
+                        },
+                        update: { quantity: qty },
+                        create: {
+                            productId: productIdInt,
+                            warehouseId: warehouseIdInt,
+                            quantity: qty
+                        }
+                    });
+
+                    await syncSingleProductInventoryWithVariants(prisma, productIdInt);
+
+                    return await prisma.warehouseStock.findUnique({
+                        where: {
+                            productId_warehouseId: {
+                                productId: productIdInt,
+                                warehouseId: warehouseIdInt
+                            }
+                        }
+                    });
                 }
-            });
+            );
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('updateWarehouseStock', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
             return { error: error.message };
         }
     },
@@ -2185,101 +2862,361 @@ const dbService = {
     async updateMultipleWarehouseStocks(productId, stocks) {
         try {
             const productIdInt = parseInt(productId);
-            const results = [];
+            return await withVariantWarehouseStockRelationFallback(
+                'updateMultipleWarehouseStocks',
+                async () => {
+                    const normalizedRows = (Array.isArray(stocks) ? stocks : [])
+                        .map((stock) => ({
+                            warehouseId: parsePositiveInt(stock?.warehouseId),
+                            quantity: Math.max(0, toInteger(stock?.quantity, 0))
+                        }))
+                        .filter((stock) => stock.warehouseId);
 
-            for (const stock of stocks) {
-                const qty = Math.max(0, parseInt(stock.quantity) || 0);
-                const result = await prisma.warehouseStock.upsert({
-                    where: {
-                        productId_warehouseId: {
-                            productId: productIdInt,
-                            warehouseId: parseInt(stock.warehouseId)
+                    let variants = await prisma.variant.findMany({
+                        where: { productId: productIdInt },
+                        select: { id: true },
+                        orderBy: [{ id: 'asc' }]
+                    });
+                    if (variants.length === 0) {
+                        const totalQuantity = normalizedRows.reduce((sum, row) => sum + Math.max(0, toInteger(row.quantity, 0)), 0);
+                        const product = await prisma.product.findUnique({
+                            where: { id: productIdInt },
+                            select: { basePrice: true, cost: true, barcode: true }
+                        });
+                        if (!product) {
+                            return { error: 'Product not found.' };
                         }
-                    },
-                    update: { quantity: qty },
-                    create: {
-                        productId: productIdInt,
-                        warehouseId: parseInt(stock.warehouseId),
-                        quantity: qty
+
+                        const createdVariant = await prisma.variant.create({
+                            data: {
+                                productId: productIdInt,
+                                productSize: 'Standard',
+                                color: 'Standard',
+                                price: Math.max(0, toNumber(product.basePrice, 0)),
+                                cost: Math.max(0, toNumber(product.cost, 0)),
+                                quantity: totalQuantity,
+                                barcode: product.barcode || null
+                            },
+                            select: { id: true }
+                        });
+                        variants = [createdVariant];
                     }
-                });
-                results.push(result);
+                    if (variants.length > 1) {
+                        return { error: 'This product has sizes/colors. Update stock per variant per warehouse.' };
+                    }
+
+                    const variantId = variants[0].id;
+
+                    await prisma.$transaction(async (tx) => {
+                        await tx.variantWarehouseStock.deleteMany({
+                            where: { variantId }
+                        });
+
+                        const rowsToCreate = normalizedRows
+                            .filter((row) => row.quantity > 0)
+                            .map((row) => ({
+                                variantId,
+                                warehouseId: row.warehouseId,
+                                quantity: row.quantity
+                            }));
+                        if (rowsToCreate.length > 0) {
+                            await tx.variantWarehouseStock.createMany({
+                                data: rowsToCreate
+                            });
+                        }
+
+                        await syncSingleProductInventoryWithVariants(tx, productIdInt);
+                    });
+
+                    return await this.getWarehouseStocks(productIdInt);
+                },
+                async () => {
+                    for (const stock of stocks) {
+                        const qty = Math.max(0, parseInt(stock.quantity) || 0);
+                        await prisma.warehouseStock.upsert({
+                            where: {
+                                productId_warehouseId: {
+                                    productId: productIdInt,
+                                    warehouseId: parseInt(stock.warehouseId)
+                                }
+                            },
+                            update: { quantity: qty },
+                            create: {
+                                productId: productIdInt,
+                                warehouseId: parseInt(stock.warehouseId),
+                                quantity: qty
+                            }
+                        });
+                    }
+
+                    await syncSingleProductInventoryWithVariants(prisma, productIdInt);
+
+                    return await prisma.warehouseStock.findMany({
+                        where: { productId: productIdInt },
+                        include: { warehouse: true },
+                        orderBy: { warehouse: { name: 'asc' } }
+                    });
+                }
+            );
+        } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('updateMultipleWarehouseStocks', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
+            return { error: error.message };
+        }
+    },
+
+    async updateVariantWarehouseStocks(productId, stocks) {
+        try {
+            const productIdInt = parseInt(productId);
+            return await withVariantWarehouseStockRelationFallback(
+                'updateVariantWarehouseStocks',
+                async () => {
+                    const variants = await prisma.variant.findMany({
+                        where: { productId: productIdInt },
+                        select: { id: true },
+                        orderBy: [{ id: 'asc' }]
+                    });
+                    if (variants.length === 0) {
+                        return { error: 'No variants found for this product.' };
+                    }
+
+                    const validVariantIds = new Set(variants.map((variant) => variant.id));
+                    const normalizedRows = (Array.isArray(stocks) ? stocks : [])
+                        .map((stock) => ({
+                            variantId: parsePositiveInt(stock?.variantId),
+                            warehouseId: parsePositiveInt(stock?.warehouseId),
+                            quantity: Math.max(0, toInteger(stock?.quantity, 0))
+                        }))
+                        .filter((stock) => stock.variantId && stock.warehouseId && validVariantIds.has(stock.variantId));
+
+                    await prisma.$transaction(async (tx) => {
+                        await tx.variantWarehouseStock.deleteMany({
+                            where: {
+                                variantId: { in: Array.from(validVariantIds) }
+                            }
+                        });
+
+                        const rowsToCreate = normalizedRows
+                            .filter((row) => row.quantity > 0)
+                            .map((row) => ({
+                                variantId: row.variantId,
+                                warehouseId: row.warehouseId,
+                                quantity: row.quantity
+                            }));
+                        if (rowsToCreate.length > 0) {
+                            await tx.variantWarehouseStock.createMany({
+                                data: rowsToCreate
+                            });
+                        }
+
+                        await syncSingleProductInventoryWithVariants(tx, productIdInt);
+                    });
+
+                    return await this.getWarehouseStocks(productIdInt);
+                },
+                async () => ({ error: 'Please run database migrations to enable per-variant warehouse stock.' })
+            );
+        } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('updateVariantWarehouseStocks', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
+            return { error: error.message };
+        }
+    },
+
+    async reconcileVariantInventoryStocks(productId = null) {
+        try {
+            const parsedProductId = parsePositiveInt(productId);
+            const variantRows = await prisma.variant.groupBy({
+                by: ['productId'],
+                ...(parsedProductId ? { where: { productId: parsedProductId } } : {})
+            });
+
+            const targetProductIds = Array.from(new Set(
+                variantRows
+                    .map((row) => parsePositiveInt(row?.productId))
+                    .filter(Boolean)
+            ));
+
+            const summary = {
+                processed: targetProductIds.length,
+                synced: 0,
+                failed: 0,
+                errors: []
+            };
+
+            for (const targetProductId of targetProductIds) {
+                try {
+                    await syncSingleProductInventoryWithVariants(prisma, targetProductId);
+                    summary.synced += 1;
+                } catch (error) {
+                    summary.failed += 1;
+                    if (summary.errors.length < 20) {
+                        summary.errors.push({
+                            productId: targetProductId,
+                            message: error?.message || 'Unknown error'
+                        });
+                    }
+                }
             }
 
-            return results;
+            return summary;
         } catch (error) {
             return { error: error.message };
         }
     },
 
-    async transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes) {
+    async transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId = null) {
         try {
             const productIdInt = parseInt(productId);
             const fromId = parseInt(fromWarehouseId);
             const toId = parseInt(toWarehouseId);
             const qty = Math.max(1, parseInt(quantity) || 0);
+            const requestedVariantId = parsePositiveInt(variantId);
 
             if (fromId === toId) {
-                return { error: 'لا يمكن النقل لنفس المخزن' };
+                return { error: 'Cannot transfer to the same warehouse.' };
             }
 
-            // Check source warehouse has enough stock
-            const fromStock = await prisma.warehouseStock.findUnique({
-                where: {
-                    productId_warehouseId: {
-                        productId: productIdInt,
-                        warehouseId: fromId
+            return await withVariantWarehouseStockRelationFallback(
+                'transferProductBetweenWarehouses',
+                async () => {
+                    const variants = await prisma.variant.findMany({
+                        where: { productId: productIdInt },
+                        select: { id: true },
+                        orderBy: [{ id: 'asc' }]
+                    });
+                    if (variants.length === 0) {
+                        return { error: 'No variants found for this product.' };
                     }
+
+                    let targetVariantId = requestedVariantId;
+                    if (targetVariantId) {
+                        const exists = variants.some((variant) => variant.id === targetVariantId);
+                        if (!exists) {
+                            return { error: 'Selected variant does not belong to this product.' };
+                        }
+                    } else if (variants.length === 1) {
+                        targetVariantId = variants[0].id;
+                    } else {
+                        return { error: 'Please select the size/color variant before transfer.' };
+                    }
+
+                    const fromStock = await prisma.variantWarehouseStock.findUnique({
+                        where: {
+                            variantId_warehouseId: {
+                                variantId: targetVariantId,
+                                warehouseId: fromId
+                            }
+                        }
+                    });
+                    if (!fromStock || fromStock.quantity < qty) {
+                        return { error: 'Insufficient quantity in source warehouse.' };
+                    }
+
+                    const result = await prisma.$transaction(async (tx) => {
+                        await tx.variantWarehouseStock.update({
+                            where: {
+                                variantId_warehouseId: {
+                                    variantId: targetVariantId,
+                                    warehouseId: fromId
+                                }
+                            },
+                            data: { quantity: { decrement: qty } }
+                        });
+
+                        await tx.variantWarehouseStock.upsert({
+                            where: {
+                                variantId_warehouseId: {
+                                    variantId: targetVariantId,
+                                    warehouseId: toId
+                                }
+                            },
+                            update: { quantity: { increment: qty } },
+                            create: {
+                                variantId: targetVariantId,
+                                warehouseId: toId,
+                                quantity: qty
+                            }
+                        });
+
+                        const transfer = await tx.warehouseTransfer.create({
+                            data: {
+                                productId: productIdInt,
+                                variantId: targetVariantId,
+                                fromWarehouseId: fromId,
+                                toWarehouseId: toId,
+                                quantity: qty,
+                                notes: notes || null
+                            }
+                        });
+
+                        await syncSingleProductInventoryWithVariants(tx, productIdInt);
+                        return transfer;
+                    });
+
+                    return result;
+                },
+                async () => {
+                    const fromStock = await prisma.warehouseStock.findUnique({
+                        where: {
+                            productId_warehouseId: {
+                                productId: productIdInt,
+                                warehouseId: fromId
+                            }
+                        }
+                    });
+
+                    if (!fromStock || fromStock.quantity < qty) {
+                        return { error: 'Insufficient quantity in source warehouse.' };
+                    }
+
+                    return await prisma.$transaction(async (tx) => {
+                        await tx.warehouseStock.update({
+                            where: {
+                                productId_warehouseId: {
+                                    productId: productIdInt,
+                                    warehouseId: fromId
+                                }
+                            },
+                            data: { quantity: { decrement: qty } }
+                        });
+
+                        await tx.warehouseStock.upsert({
+                            where: {
+                                productId_warehouseId: {
+                                    productId: productIdInt,
+                                    warehouseId: toId
+                                }
+                            },
+                            update: { quantity: { increment: qty } },
+                            create: {
+                                productId: productIdInt,
+                                warehouseId: toId,
+                                quantity: qty
+                            }
+                        });
+
+                        return await tx.warehouseTransfer.create({
+                            data: {
+                                productId: productIdInt,
+                                fromWarehouseId: fromId,
+                                toWarehouseId: toId,
+                                quantity: qty,
+                                notes: notes || null
+                            }
+                        });
+                    });
                 }
-            });
-
-            if (!fromStock || fromStock.quantity < qty) {
-                return { error: 'الكمية المتاحة في المخزن المصدر غير كافية' };
-            }
-
-            // Perform transfer in transaction
-            const result = await prisma.$transaction(async (tx) => {
-                // Decrease from source
-                await tx.warehouseStock.update({
-                    where: {
-                        productId_warehouseId: {
-                            productId: productIdInt,
-                            warehouseId: fromId
-                        }
-                    },
-                    data: { quantity: { decrement: qty } }
-                });
-
-                // Increase in destination
-                await tx.warehouseStock.upsert({
-                    where: {
-                        productId_warehouseId: {
-                            productId: productIdInt,
-                            warehouseId: toId
-                        }
-                    },
-                    update: { quantity: { increment: qty } },
-                    create: {
-                        productId: productIdInt,
-                        warehouseId: toId,
-                        quantity: qty
-                    }
-                });
-
-                // Create transfer record
-                return await tx.warehouseTransfer.create({
-                    data: {
-                        productId: productIdInt,
-                        fromWarehouseId: fromId,
-                        toWarehouseId: toId,
-                        quantity: qty,
-                        notes: notes || null
-                    }
-                });
-            });
-
-            return result;
+            );
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('transferProductBetweenWarehouses', error);
+                return { error: WAREHOUSE_SCHEMA_MISSING_MESSAGE };
+            }
             return { error: error.message };
         }
     },
@@ -2290,6 +3227,7 @@ const dbService = {
                 where: productId ? { productId: parseInt(productId) } : {},
                 include: {
                     product: { select: { id: true, name: true, sku: true } },
+                    variant: { select: { id: true, productSize: true, color: true, barcode: true } },
                     fromWarehouse: { select: { id: true, name: true } },
                     toWarehouse: { select: { id: true, name: true } }
                 },
@@ -2297,6 +3235,10 @@ const dbService = {
                 take: parseInt(limit)
             });
         } catch (error) {
+            if (isWarehouseSchemaMissingError(error)) {
+                logWarehouseSchemaFallback('getWarehouseTransfers', error);
+                return [];
+            }
             return { error: error.message };
         }
     },
@@ -2329,16 +3271,22 @@ const dbService = {
                 );
             }
 
-            return await prisma.variant.findMany({
-                include: { 
-                    product: {
-                        include: {
-                            warehouseStocks: true
-                        }
-                    }
-                },
-                orderBy: { id: 'desc' }
-            });
+            const runVariantQuery = (withWarehouseStocks) => (
+                prisma.variant.findMany({
+                    include: {
+                        product: withWarehouseStocks
+                            ? { include: { warehouseStocks: true } }
+                            : true
+                    },
+                    orderBy: { id: 'desc' }
+                })
+            );
+
+            return await withWarehouseStockRelationFallback(
+                'getVariants',
+                () => runVariantQuery(true),
+                () => runVariantQuery(false)
+            );
         } catch (error) {
             return { error: error.message };
         }
@@ -2346,23 +3294,30 @@ const dbService = {
 
     async searchVariants(query) {
         try {
-            return await prisma.variant.findMany({
-                where: {
-                    OR: [
-                        { barcode: { contains: query } },
-                        { product: { name: { contains: query, mode: 'insensitive' } } },
-                        { product: { barcode: { contains: query } } }
-                    ]
-                },
-                include: { 
-                    product: {
-                        include: {
-                            warehouseStocks: true
-                        }
-                    }
-                },
-                take: 20
-            });
+            const where = {
+                OR: [
+                    { barcode: { contains: query } },
+                    { product: { name: { contains: query, mode: 'insensitive' } } },
+                    { product: { barcode: { contains: query } } }
+                ]
+            };
+            const runVariantQuery = (withWarehouseStocks) => (
+                prisma.variant.findMany({
+                    where,
+                    include: {
+                        product: withWarehouseStocks
+                            ? { include: { warehouseStocks: true } }
+                            : true
+                    },
+                    take: 20
+                })
+            );
+
+            return await withWarehouseStockRelationFallback(
+                'searchVariants',
+                () => runVariantQuery(true),
+                () => runVariantQuery(false)
+            );
         } catch (error) {
             return { error: error.message };
         }
@@ -2370,17 +3325,23 @@ const dbService = {
 
     async addVariant(variantData) {
         try {
-            return await prisma.variant.create({
-                data: {
-                    productId: parseInt(variantData.productId),
-                    productSize: variantData.size,
-                    color: variantData.color,
-                    price: parseFloat(variantData.price),
-                    cost: parseFloat(variantData.cost),
-                    quantity: parseInt(variantData.quantity),
-                    barcode: variantData.barcode || null
-                },
-                include: { product: true }
+            const productId = parseInt(variantData.productId);
+            return await prisma.$transaction(async (tx) => {
+                const createdVariant = await tx.variant.create({
+                    data: {
+                        productId,
+                        productSize: variantData.size,
+                        color: variantData.color,
+                        price: parseFloat(variantData.price),
+                        cost: parseFloat(variantData.cost),
+                        quantity: parseInt(variantData.quantity),
+                        barcode: variantData.barcode || null
+                    },
+                    include: { product: true }
+                });
+
+                await syncSingleProductInventoryWithVariants(tx, createdVariant.productId);
+                return createdVariant;
             });
         } catch (error) {
             return { error: error.message };
@@ -2389,6 +3350,7 @@ const dbService = {
 
     async updateVariant(id, variantData) {
         try {
+            const variantId = parseInt(id);
             const updateData = {};
             if (variantData.size !== undefined) updateData.productSize = variantData.size;
             if (variantData.color !== undefined) updateData.color = variantData.color;
@@ -2397,10 +3359,15 @@ const dbService = {
             if (variantData.quantity !== undefined) updateData.quantity = parseInt(variantData.quantity);
             if (variantData.barcode !== undefined) updateData.barcode = variantData.barcode || null;
 
-            return await prisma.variant.update({
-                where: { id: parseInt(id) },
-                data: updateData,
-                include: { product: true }
+            return await prisma.$transaction(async (tx) => {
+                const updatedVariant = await tx.variant.update({
+                    where: { id: variantId },
+                    data: updateData,
+                    include: { product: true }
+                });
+
+                await syncSingleProductInventoryWithVariants(tx, updatedVariant.productId);
+                return updatedVariant;
             });
         } catch (error) {
             return { error: error.message };
@@ -2409,8 +3376,14 @@ const dbService = {
 
     async deleteVariant(id) {
         try {
-            return await prisma.variant.delete({
-                where: { id: parseInt(id) }
+            const variantId = parseInt(id);
+            return await prisma.$transaction(async (tx) => {
+                const deletedVariant = await tx.variant.delete({
+                    where: { id: variantId }
+                });
+
+                await syncSingleProductInventoryWithVariants(tx, deletedVariant.productId);
+                return deletedVariant;
             });
         } catch (error) {
             return { error: error.message };
@@ -2826,6 +3799,7 @@ const dbService = {
                             : undefined
                     }
                 });
+                const affectedProductIds = new Set();
 
                 // إنشاء بنود الفاتورة وتحديث المخزون
                 for (let i = 0; i < saleData.items.length; i++) {
@@ -2842,11 +3816,17 @@ const dbService = {
                         }
                     });
 
-                    await tx.variant.update({
+                    const updatedVariant = await tx.variant.update({
                         where: { id: parseInt(item.variantId) },
-                        data: { quantity: { decrement: parseInt(item.quantity) } }
+                        data: { quantity: { decrement: parseInt(item.quantity) } },
+                        select: { productId: true }
                     });
+                    if (updatedVariant?.productId) {
+                        affectedProductIds.add(updatedVariant.productId);
+                    }
                 }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
 
                 const outstandingAmount = computeSaleOutstandingAmount({
                     total: saleData.total,
@@ -3066,14 +4046,21 @@ const dbService = {
                 const previousSaleDelta = saleTransactions.reduce((sum, trx) => (
                     sum + (toNumber(trx.debit) - toNumber(trx.credit))
                 ), 0);
+                const affectedProductIds = new Set();
 
                 // استرجاع الكميات للمنتجات
                 for (const item of sale.items) {
-                    await tx.variant.update({
+                    const updatedVariant = await tx.variant.update({
                         where: { id: item.variantId },
-                        data: { quantity: { increment: item.quantity } }
+                        data: { quantity: { increment: item.quantity } },
+                        select: { productId: true }
                     });
+                    if (updatedVariant?.productId) {
+                        affectedProductIds.add(updatedVariant.productId);
+                    }
                 }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
 
                 await tx.customerTransaction.deleteMany({
                     where: {
@@ -3166,13 +4153,18 @@ const dbService = {
                 const oldOutstanding = oldSaleTransactions.reduce((sum, trx) => (
                     sum + (toNumber(trx.debit) - toNumber(trx.credit))
                 ), 0);
+                const affectedProductIds = new Set();
 
                 // استرجاع الكميات القديمة
                 for (const item of currentSale.items) {
-                    await tx.variant.update({
+                    const updatedVariant = await tx.variant.update({
                         where: { id: item.variantId },
-                        data: { quantity: { increment: item.quantity } }
+                        data: { quantity: { increment: item.quantity } },
+                        select: { productId: true }
                     });
+                    if (updatedVariant?.productId) {
+                        affectedProductIds.add(updatedVariant.productId);
+                    }
                 }
 
                 await tx.customerTransaction.deleteMany({
@@ -3203,14 +4195,20 @@ const dbService = {
                             }
                         });
 
-                        await tx.variant.update({
+                        const updatedVariant = await tx.variant.update({
                             where: { id: parseInt(item.variantId) },
-                            data: { quantity: { decrement: parseInt(item.quantity) } }
+                            data: { quantity: { decrement: parseInt(item.quantity) } },
+                            select: { productId: true }
                         });
+                        if (updatedVariant?.productId) {
+                            affectedProductIds.add(updatedVariant.productId);
+                        }
                     }
                 }
 
                 // تحديث بيانات الفاتورة
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
                 const updatedSale = await tx.sale.update({
                     where: { id: parseInt(saleId) },
                     data: {
@@ -3472,6 +4470,7 @@ const dbService = {
                         createdAt: invoiceDate
                     }
                 });
+                const affectedProductIds = new Set();
 
                 for (let i = 0; i < purchaseData.items.length; i++) {
                     const item = purchaseData.items[i];
@@ -3497,6 +4496,9 @@ const dbService = {
                         where: { id: variantId },
                         select: { productId: true }
                     });
+                    if (variantRecord?.productId) {
+                        affectedProductIds.add(variantRecord.productId);
+                    }
 
                     // زيادة المخزون
                     await tx.variant.update({
@@ -3509,24 +4511,49 @@ const dbService = {
 
                     const parsedWarehouseId = parsePositiveInt(purchaseData?.warehouseId);
                     if (parsedWarehouseId && variantRecord?.productId) {
-                        await tx.warehouseStock.upsert({
-                            where: {
-                                productId_warehouseId: {
-                                    productId: variantRecord.productId,
-                                    warehouseId: parsedWarehouseId
+                        try {
+                            await tx.variantWarehouseStock.upsert({
+                                where: {
+                                    variantId_warehouseId: {
+                                        variantId,
+                                        warehouseId: parsedWarehouseId
+                                    }
+                                },
+                                update: { quantity: { increment: quantity } },
+                                create: {
+                                    variantId,
+                                    warehouseId: parsedWarehouseId,
+                                    quantity: quantity
                                 }
-                            },
-                            update: { quantity: { increment: quantity } },
-                            create: {
-                                productId: variantRecord.productId,
-                                warehouseId: parsedWarehouseId,
-                                quantity: quantity
+                            });
+                        } catch (warehouseError) {
+                            if (isVariantWarehouseStockTableMissingError(warehouseError)) {
+                                await tx.warehouseStock.upsert({
+                                    where: {
+                                        productId_warehouseId: {
+                                            productId: variantRecord.productId,
+                                            warehouseId: parsedWarehouseId
+                                        }
+                                    },
+                                    update: { quantity: { increment: quantity } },
+                                    create: {
+                                        productId: variantRecord.productId,
+                                        warehouseId: parsedWarehouseId,
+                                        quantity: quantity
+                                    }
+                                });
+                            } else if (!isWarehouseSchemaMissingError(warehouseError)) {
+                                throw warehouseError;
+                            } else {
+                                logWarehouseSchemaFallback('createPurchase', warehouseError);
                             }
-                        });
+                        }
                     }
                 }
 
                 // تحديث رصيد المورد
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
                 if (parsedSupplierId) {
                     const remaining = Math.max(0, safeTotal - safePaid);
                     await tx.supplier.update({
@@ -3627,6 +4654,7 @@ const dbService = {
                         notes: returnData.notes || null
                     }
                 });
+                const affectedProductIds = new Set();
 
                 for (let i = 0; i < returnData.items.length; i++) {
                     const item = returnData.items[i];
@@ -3642,11 +4670,17 @@ const dbService = {
                     });
 
                     // إرجاع الكمية للمخزون
-                    await tx.variant.update({
+                    const updatedVariant = await tx.variant.update({
                         where: { id: parseInt(item.variantId) },
-                        data: { quantity: { increment: parseInt(item.quantity) } }
+                        data: { quantity: { increment: parseInt(item.quantity) } },
+                        select: { productId: true }
                     });
+                    if (updatedVariant?.productId) {
+                        affectedProductIds.add(updatedVariant.productId);
+                    }
                 }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
 
                 // إنشاء سجل مرتجعات في CustomerTransaction
                 if (returnData.customerId) {
@@ -3829,6 +4863,7 @@ const dbService = {
                 });
 
                 let computedTotal = 0;
+                const affectedProductIds = new Set();
                 for (let i = 0; i < returnData.items.length; i++) {
                     const item = returnData.items[i];
                     const variantId = parsePositiveInt(item?.variantId);
@@ -3853,10 +4888,13 @@ const dbService = {
 
                     const variant = await tx.variant.findUnique({
                         where: { id: variantId },
-                        select: { id: true, quantity: true }
+                        select: { id: true, productId: true, quantity: true }
                     });
                     if (!variant) {
                         throw new Error('Variant not found in purchase return items');
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
                     }
 
                     if (toNumber(variant.quantity, 0) < quantity) {
@@ -3882,6 +4920,8 @@ const dbService = {
 
                     computedTotal += price * quantity;
                 }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
 
                 const finalTotal = Math.max(0, toNumber(
                     requestedTotal > 0 ? requestedTotal : computedTotal

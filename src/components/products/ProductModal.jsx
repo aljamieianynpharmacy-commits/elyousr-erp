@@ -1,16 +1,15 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Barcode, Camera, Copy, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
+import { AlertCircle, Barcode, Camera, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
 import './ProductModal.css';
 
 const TABS = {
   BASIC: 'basic',
-  UNITS: 'units',
+  PRICING: 'pricing',
   STOCK: 'stock'
 };
 
 const DEFAULT_UNIT_ROW = {
   unitName: '',
-  conversionFactor: 1,
   salePrice: 0,
   wholesalePrice: 0,
   minSalePrice: 0,
@@ -31,7 +30,6 @@ const DEFAULT_VARIANT_ROW = () => ({
 });
 
 const NUMERIC_UNIT_FIELDS = new Set([
-  'conversionFactor',
   'salePrice',
   'wholesalePrice',
   'minSalePrice',
@@ -81,16 +79,14 @@ const makeEan13 = () => {
 };
 
 const normalizeUnit = (unit, index) => {
-  const unitName = nText(unit?.unitName) || (index === 0 ? 'قطعة' : '');
-  const conversionFactor = index === 0 ? 1 : Math.max(0.0001, toNum(unit?.conversionFactor, 1));
+  const unitName = nText(unit?.unitName) || 'قطعة';
   const salePrice = money(unit?.salePrice);
   const purchasePrice = money(unit?.purchasePrice);
   const wholesalePrice = money(Math.min(Math.max(0, toNum(unit?.wholesalePrice, salePrice)), salePrice));
-  const minSalePrice = money(Math.min(Math.max(0, toNum(unit?.minSalePrice, wholesalePrice)), salePrice));
+  const minSalePrice = money(Math.min(Math.max(0, toNum(unit?.minSalePrice, wholesalePrice)), wholesalePrice));
 
   return {
     unitName,
-    conversionFactor,
     salePrice,
     wholesalePrice,
     minSalePrice,
@@ -111,29 +107,26 @@ const buildInitialState = (initialData) => {
       image: '',
       type: 'store',
       isActive: true,
-      openingUnit: 'قطعة',
-      openingQty: 0,
-      displayQty: 0,
       minStock: 5,
       maxStock: 100,
       notes: '',
-      units: [{ ...DEFAULT_UNIT_ROW, unitName: 'قطعة' }],
+      unit: { ...DEFAULT_UNIT_ROW, unitName: 'قطعة' },
       hasVariants: false,
       variants: [],
       variantSizeDraft: 'S, M, L, XL',
       variantColorDraft: 'أسود, أبيض'
     };
   }
-  const sourceUnits = Array.isArray(initialData.productUnits) ? initialData.productUnits : [];
-  const units = sourceUnits.length > 0
-    ? sourceUnits.map((unit, index) => normalizeUnit(unit, index))
-    : [{
-      ...DEFAULT_UNIT_ROW,
-      unitName: 'قطعة',
-      salePrice: money(initialData.basePrice),
-      purchasePrice: money(initialData.cost),
-      barcode: nText(initialData.barcode)
-    }];
+  const primaryUnit = {
+    ...DEFAULT_UNIT_ROW,
+    unitName: nText(initialData.unitName) || 'قطعة',
+    salePrice: money(initialData.basePrice),
+    wholesalePrice: money(initialData.wholesalePrice ?? initialData.basePrice),
+    minSalePrice: money(initialData.minSalePrice ?? initialData.wholesalePrice ?? initialData.basePrice),
+    purchasePrice: money(initialData.cost),
+    barcode: nText(initialData.barcode)
+  };
+  const unit = normalizeUnit(primaryUnit, 0);
   const sourceVariants = Array.isArray(initialData.variants) ? initialData.variants : [];
   const variants = sourceVariants.map((variant) => ({
     tempId: makeTempVariantId(),
@@ -155,13 +148,10 @@ const buildInitialState = (initialData) => {
     image: nText(initialData.image),
     type: nText(initialData.type) || 'store',
     isActive: initialData.isActive ?? true,
-    openingUnit: nText(units[0]?.unitName) || 'قطعة',
-    openingQty: toInt(initialData?.inventory?.warehouseQty, 0),
-    displayQty: toInt(initialData?.inventory?.displayQty, 0),
     minStock: Math.max(0, toInt(initialData?.inventory?.minStock, 5)),
     maxStock: Math.max(0, toInt(initialData?.inventory?.maxStock, 100)),
     notes: nText(initialData?.inventory?.notes),
-    units,
+    unit,
     hasVariants: variants.length > 0,
     variants,
     variantSizeDraft: 'S, M, L, XL',
@@ -181,6 +171,7 @@ export default function ProductModal({
 }) {
   const [warehouses, setWarehouses] = useState([]);
   const [warehouseStocks, setWarehouseStocks] = useState([]);
+  const [variantWarehouseMatrix, setVariantWarehouseMatrix] = useState({});
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
   const [formData, setFormData] = useState(() => buildInitialState(initialData));
   const [validationMessage, setValidationMessage] = useState('');
@@ -210,10 +201,30 @@ export default function ProductModal({
       if (initialData?.id) {
         const stocksRes = await window.api.getWarehouseStocks(initialData.id);
         if (!stocksRes?.error) {
-          setWarehouseStocks(Array.isArray(stocksRes) ? stocksRes : []);
+          if (stocksRes && typeof stocksRes === 'object' && !Array.isArray(stocksRes)) {
+            setWarehouseStocks(Array.isArray(stocksRes.totals) ? stocksRes.totals : []);
+            const nextMatrix = {};
+            (Array.isArray(stocksRes.variants) ? stocksRes.variants : []).forEach((variant) => {
+              const matrixKey = variant?.id ? `id:${variant.id}` : null;
+              if (!matrixKey) return;
+              nextMatrix[matrixKey] = {};
+              (Array.isArray(variant.warehouseStocks) ? variant.warehouseStocks : []).forEach((stock) => {
+                const warehouseId = toInt(stock?.warehouseId, 0);
+                const quantity = Math.max(0, toInt(stock?.quantity, 0));
+                if (warehouseId > 0 && quantity > 0) {
+                  nextMatrix[matrixKey][warehouseId] = quantity;
+                }
+              });
+            });
+            setVariantWarehouseMatrix(nextMatrix);
+          } else {
+            setWarehouseStocks(Array.isArray(stocksRes) ? stocksRes : []);
+            setVariantWarehouseMatrix({});
+          }
         }
       } else {
         setWarehouseStocks([]);
+        setVariantWarehouseMatrix({});
       }
     })();
   }, [isOpen, initialData, isEditMode, isLoadingProduct]);
@@ -227,20 +238,79 @@ export default function ProductModal({
     return () => window.removeEventListener('keydown', onEscape);
   }, [isOpen, isSaving, onClose]);
 
-  const mainUnit = useMemo(() => normalizeUnit(formData.units[0] || DEFAULT_UNIT_ROW, 0), [formData.units]);
+  const mainUnit = useMemo(() => normalizeUnit(formData.unit || DEFAULT_UNIT_ROW, 0), [formData.unit]);
   const stockTotalPreview = useMemo(
-    () => Math.max(0, toInt(formData.openingQty, 0) + toInt(formData.displayQty, 0)),
-    [formData.openingQty, formData.displayQty]
+    () => (
+      formData.hasVariants
+        ? Math.max(0, (Array.isArray(formData.variants) ? formData.variants : []).reduce((sum, variant) => sum + toInt(variant?.quantity, 0), 0))
+        : Math.max(0, warehouseStocks.reduce((sum, stock) => sum + toInt(stock?.quantity, 0), 0))
+    ),
+    [formData.hasVariants, formData.variants, warehouseStocks]
   );
+
+  useEffect(() => {
+    setVariantWarehouseMatrix((prev) => {
+      const next = { ...prev };
+      const keepKeys = new Set();
+      let changed = false;
+
+      (Array.isArray(formData.variants) ? formData.variants : []).forEach((variant) => {
+        const key = variant?.id ? `id:${variant.id}` : `temp:${variant?.tempId}`;
+        if (!key || key === 'temp:') return;
+        keepKeys.add(key);
+        if (!next[key]) {
+          next[key] = {};
+          changed = true;
+        }
+      });
+
+      Object.keys(next).forEach((key) => {
+        if (!keepKeys.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [formData.variants]);
+
+  const variantMatrixKey = (variant) => (
+    variant?.id ? `id:${variant.id}` : `temp:${variant?.tempId}`
+  );
+
+  const getVariantWarehouseQty = (variant, warehouseId) => {
+    const key = variantMatrixKey(variant);
+    return Math.max(0, toInt(variantWarehouseMatrix?.[key]?.[warehouseId], 0));
+  };
+
+  const getVariantWarehouseTotal = (variant) => (
+    warehouses.reduce((sum, warehouse) => sum + getVariantWarehouseQty(variant, warehouse.id), 0)
+  );
+
+  const setVariantWarehouseQty = (variant, warehouseId, quantity) => {
+    const key = variantMatrixKey(variant);
+    if (!key || key === 'temp:') return;
+
+    setVariantWarehouseMatrix((prev) => {
+      const currentRow = { ...(prev[key] || {}) };
+      const nextQty = Math.max(0, toInt(quantity, 0));
+      if (nextQty > 0) currentRow[warehouseId] = nextQty;
+      else delete currentRow[warehouseId];
+
+      const next = { ...prev };
+      next[key] = currentRow;
+      return next;
+    });
+  };
 
   const setField = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const setUnitField = (index, field, value) => {
+  const setUnitField = (field, value) => {
     setFormData((prev) => {
-      const nextUnits = [...prev.units];
-      const current = normalizeUnit(nextUnits[index] || DEFAULT_UNIT_ROW, index);
+      const current = normalizeUnit(prev.unit || DEFAULT_UNIT_ROW, 0);
       if (field === 'purchasePrice') {
         const newPurchase = money(value);
         const currentMargin = marginPercentOf(current.purchasePrice, current.salePrice);
@@ -256,46 +326,26 @@ export default function ProductModal({
         current.minSalePrice = Math.min(current.minSalePrice, newSale);
       } else if (field === 'wholesalePrice') {
         current.wholesalePrice = money(Math.min(toNum(value, 0), current.salePrice));
+        current.minSalePrice = Math.min(current.minSalePrice, current.wholesalePrice);
       } else if (field === 'minSalePrice') {
-        current.minSalePrice = money(Math.min(toNum(value, 0), current.salePrice));
+        current.minSalePrice = money(Math.min(toNum(value, 0), current.wholesalePrice));
       } else {
         current[field] = NUMERIC_UNIT_FIELDS.has(field) ? toNum(value, 0) : value;
       }
-      nextUnits[index] = current;
-      return { ...prev, units: nextUnits };
+      return { ...prev, unit: current };
     });
   };
 
-  const setUnitMarginPercent = (index, value) => {
+  const setUnitMarginPercent = (value) => {
     setFormData((prev) => {
-      const nextUnits = [...prev.units];
-      const current = normalizeUnit(nextUnits[index] || DEFAULT_UNIT_ROW, index);
+      const current = normalizeUnit(prev.unit || DEFAULT_UNIT_ROW, 0);
       const marginPercent = Math.max(-100, toNum(value, 0));
       const salePrice = money(current.purchasePrice * (1 + (marginPercent / 100)));
       current.salePrice = salePrice;
       current.wholesalePrice = Math.min(current.wholesalePrice, salePrice);
       current.minSalePrice = Math.min(current.minSalePrice, salePrice);
-      nextUnits[index] = current;
-      return { ...prev, units: nextUnits };
+      return { ...prev, unit: current };
     });
-  };
-
-  const applyMainMarginToAllUnits = () => {
-    const mainMargin = marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice);
-    setFormData((prev) => ({
-      ...prev,
-      units: prev.units.map((unit, index) => {
-        const normalized = normalizeUnit(unit, index);
-        if (index === 0) return normalized;
-        const salePrice = money(normalized.purchasePrice * (1 + (mainMargin / 100)));
-        return normalizeUnit({
-          ...normalized,
-          salePrice,
-          wholesalePrice: Math.min(normalized.wholesalePrice, salePrice),
-          minSalePrice: Math.min(normalized.minSalePrice, salePrice)
-        }, index);
-      })
-    }));
   };
 
   const setVariantField = (index, field, value) => {
@@ -392,17 +442,12 @@ export default function ProductModal({
     });
   };
 
-  const collectTakenBarcodes = ({ excludeProduct = false, excludeUnitIndex = null, excludeVariantIndex = null } = {}) => {
+  const collectTakenBarcodes = ({ excludeProduct = false, excludeVariantIndex = null } = {}) => {
     const taken = new Set();
     if (!excludeProduct) {
       const productBarcode = nText(formData.barcode);
       if (productBarcode) taken.add(productBarcode.toLowerCase());
     }
-    formData.units.forEach((unit, index) => {
-      if (excludeUnitIndex !== null && index === excludeUnitIndex) return;
-      const unitBarcode = nText(unit?.barcode);
-      if (unitBarcode) taken.add(unitBarcode.toLowerCase());
-    });
     formData.variants.forEach((variant, index) => {
       if (excludeVariantIndex !== null && index === excludeVariantIndex) return;
       const variantBarcode = nText(variant?.barcode);
@@ -419,63 +464,9 @@ export default function ProductModal({
     return `${Date.now()}${Math.floor(Math.random() * 10)}`.slice(0, 13);
   };
 
-  const addUnit = () => {
-    setFormData((prev) => ({
-      ...prev,
-      units: [...prev.units, { ...DEFAULT_UNIT_ROW }]
-    }));
-  };
-
-  const removeUnit = (index) => {
-    if (formData.units.length <= 1) return;
-    setFormData((prev) => ({
-      ...prev,
-      units: prev.units.filter((_, rowIndex) => rowIndex !== index)
-    }));
-  };
-
-  const normalizeAllUnits = () => {
-    setFormData((prev) => ({
-      ...prev,
-      units: prev.units.map((unit, index) => normalizeUnit(unit, index))
-    }));
-  };
-
-  const generateUnitsPricingFromMain = () => {
-    const baseSale = money(mainUnit.salePrice);
-    const baseCost = money(mainUnit.purchasePrice);
-
-    setFormData((prev) => ({
-      ...prev,
-      units: prev.units.map((unit, index) => {
-        if (index === 0) return normalizeUnit(unit, 0);
-        const factor = Math.max(0.0001, toNum(unit.conversionFactor, 1));
-        const salePrice = money(baseSale * factor);
-        const purchasePrice = money(baseCost * factor);
-        return normalizeUnit({
-          ...unit,
-          salePrice,
-          wholesalePrice: salePrice,
-          minSalePrice: salePrice,
-          purchasePrice
-        }, index);
-      })
-    }));
-  };
-
-  const copyMainBarcodeToProductBarcode = () => {
-    if (!nText(mainUnit.barcode)) return;
-    setField('barcode', nText(mainUnit.barcode));
-  };
-
   const generateProductBarcode = () => {
     const taken = collectTakenBarcodes({ excludeProduct: true });
     setField('barcode', buildUniqueBarcode(taken));
-  };
-
-  const generateUnitBarcode = (index) => {
-    const taken = collectTakenBarcodes({ excludeUnitIndex: index });
-    setUnitField(index, 'barcode', buildUniqueBarcode(taken));
   };
 
   const generateVariantBarcode = (index) => {
@@ -545,22 +536,7 @@ export default function ProductModal({
       return;
     }
 
-    const normalizedUnits = formData.units
-      .map((unit, index) => normalizeUnit(unit, index))
-      .filter((unit, index) => index === 0 || unit.unitName || unit.salePrice || unit.purchasePrice || unit.barcode);
-
-    if (!normalizedUnits.length || !nText(normalizedUnits[0].unitName)) {
-      setValidationMessage('أضف وحدة أساسية واحدة على الأقل.');
-      setActiveTab(TABS.UNITS);
-      return;
-    }
-
-    const unitBarcodes = normalizedUnits.map((unit) => nText(unit.barcode).toLowerCase()).filter(Boolean);
-    if (new Set(unitBarcodes).size !== unitBarcodes.length) {
-      setValidationMessage('يوجد باركود مكرر بين الوحدات.');
-      setActiveTab(TABS.UNITS);
-      return;
-    }
+    const firstUnit = normalizeUnit(formData.unit || DEFAULT_UNIT_ROW, 0);
 
     const normalizedVariants = (formData.hasVariants ? formData.variants : [])
       .map((variant) => ({
@@ -568,8 +544,8 @@ export default function ProductModal({
         id: variant.id ? toInt(variant.id, 0) : null,
         size: nText(variant.size) || 'موحد',
         color: nText(variant.color) || 'افتراضي',
-        price: money(variant.price || normalizedUnits[0].salePrice),
-        cost: money(variant.cost || normalizedUnits[0].purchasePrice),
+        price: money(variant.price || firstUnit.salePrice),
+        cost: money(variant.cost || firstUnit.purchasePrice),
         quantity: Math.max(0, toInt(variant.quantity, 0)),
         barcode: nText(variant.barcode) || null
       }))
@@ -577,34 +553,57 @@ export default function ProductModal({
 
     if (formData.hasVariants && normalizedVariants.length === 0) {
       setValidationMessage('أضف متغيرًا واحدًا على الأقل أو ألغِ خيار الألوان/المقاسات.');
-      setActiveTab(TABS.UNITS);
+      setActiveTab(TABS.PRICING);
       return;
     }
 
     const variantBarcodes = normalizedVariants.map((variant) => nText(variant.barcode).toLowerCase()).filter(Boolean);
     if (new Set(variantBarcodes).size !== variantBarcodes.length) {
       setValidationMessage('يوجد باركود مكرر بين المتغيرات.');
-      setActiveTab(TABS.UNITS);
+      setActiveTab(TABS.PRICING);
       return;
     }
 
+    const productBarcode = nText(formData.barcode) || nText(firstUnit.barcode);
     const allBarcodes = [
-      ...unitBarcodes,
       ...variantBarcodes,
-      nText(formData.barcode).toLowerCase()
+      productBarcode.toLowerCase()
     ].filter(Boolean);
     if (new Set(allBarcodes).size !== allBarcodes.length) {
-      setValidationMessage('يوجد تعارض باركود بين المنتج/الوحدات/المتغيرات.');
-      setActiveTab(TABS.UNITS);
+      setValidationMessage('يوجد تعارض باركود بين المنتج والمتغيرات.');
+      setActiveTab(TABS.PRICING);
       return;
     }
 
     const categoryId = nText(formData.categoryId) || null;
-    const openingQty = Math.max(0, toInt(formData.openingQty, 0));
-    const displayQty = Math.max(0, toInt(formData.displayQty, 0));
     const minStock = Math.max(0, toInt(formData.minStock, 5));
     const maxStock = Math.max(minStock, toInt(formData.maxStock, 100));
-    const firstUnit = normalizedUnits[0];
+    const variantWarehouseStocks = [];
+    if (formData.hasVariants && warehouses.length > 0) {
+      for (let index = 0; index < normalizedVariants.length; index += 1) {
+        const normalizedVariant = normalizedVariants[index];
+        const sourceVariant = formData.variants[index] || normalizedVariant;
+        const rowTotal = getVariantWarehouseTotal(sourceVariant);
+        const expectedQty = Math.max(0, toInt(normalizedVariant.quantity, 0));
+
+        if (rowTotal !== expectedQty) {
+          setValidationMessage(`كمية المتغير ${normalizedVariant.size || '-'} / ${normalizedVariant.color || '-'} يجب أن تساوي مجموع كميات المخازن (${expectedQty}).`);
+          setActiveTab(TABS.STOCK);
+          return;
+        }
+
+        for (const warehouse of warehouses) {
+          const qty = getVariantWarehouseQty(sourceVariant, warehouse.id);
+          if (qty <= 0) continue;
+          variantWarehouseStocks.push({
+            variantId: normalizedVariant.id || null,
+            tempId: normalizedVariant.tempId || sourceVariant.tempId || null,
+            warehouseId: warehouse.id,
+            quantity: qty
+          });
+        }
+      }
+    }
 
     // Prepare warehouse stocks
     const stocks = warehouses.map(wh => {
@@ -621,22 +620,23 @@ export default function ProductModal({
       brand: nText(formData.brand) || null,
       description: nText(formData.description) || null,
       sku: nText(formData.sku) || null,
-      barcode: nText(formData.barcode) || nText(firstUnit.barcode) || null,
+      barcode: productBarcode || null,
       image: nText(formData.image) || null,
       type: nText(formData.type) || 'store',
       isActive: Boolean(formData.isActive),
-      openingUnit: nText(formData.openingUnit) || nText(firstUnit.unitName) || 'قطعة',
-      openingQty,
-      displayQty,
+      totalQuantity: stockTotalPreview,
       minStock,
       maxStock,
       notes: nText(formData.notes) || null,
-      units: normalizedUnits,
+      unitName: nText(firstUnit.unitName) || 'قطعة',
       hasVariants: Boolean(formData.hasVariants),
       variants: normalizedVariants,
       basePrice: money(firstUnit.salePrice),
       cost: money(firstUnit.purchasePrice),
-      warehouseStocks: stocks
+      wholesalePrice: money(firstUnit.wholesalePrice),
+      minSalePrice: money(firstUnit.minSalePrice),
+      warehouseStocks: stocks,
+      variantWarehouseStocks
     });
   };
 
@@ -648,7 +648,7 @@ export default function ProductModal({
         <div className="product-modal-header">
           <div>
             <h2>{isEditMode ? 'تعديل منتج' : 'إضافة منتج جديد'}</h2>
-            <p>{isEditMode ? 'حدّث بيانات المنتج والتسعير والمخزون' : 'أدخل البيانات الأساسية والتسعير والوحدات'}</p>
+            <p>{isEditMode ? 'حدّث بيانات المنتج والتسعير والمخزون' : 'أدخل البيانات الأساسية والتسعير والمخزون'}</p>
           </div>
           <button type="button" className="close-button" onClick={onClose} disabled={isSaving}>
             <X size={20} />
@@ -659,8 +659,8 @@ export default function ProductModal({
           <button type="button" className={`tab-button ${activeTab === TABS.BASIC ? 'active' : ''}`} onClick={() => setActiveTab(TABS.BASIC)} disabled={isBusy}>
             بيانات أساسية
           </button>
-          <button type="button" className={`tab-button ${activeTab === TABS.UNITS ? 'active' : ''}`} onClick={() => setActiveTab(TABS.UNITS)} disabled={isBusy}>
-            التسعير والوحدات
+          <button type="button" className={`tab-button ${activeTab === TABS.PRICING ? 'active' : ''}`} onClick={() => setActiveTab(TABS.PRICING)} disabled={isBusy}>
+            التسعير
           </button>
           <button type="button" className={`tab-button ${activeTab === TABS.STOCK ? 'active' : ''}`} onClick={() => setActiveTab(TABS.STOCK)} disabled={isBusy}>
             المخزون
@@ -752,13 +752,10 @@ export default function ProductModal({
                     </label>
                     <label className="form-group">
                       <span>باركود المنتج</span>
-                      <div className="field-with-buttons">
+                      <div className="field-with-button">
                         <input type="text" className="form-input" value={formData.barcode} onChange={(event) => setField('barcode', event.target.value)} />
                         <button type="button" className="btn-icon" onClick={generateProductBarcode} title="توليد باركود">
                           <Barcode size={14} />
-                        </button>
-                        <button type="button" className="btn-icon" onClick={copyMainBarcodeToProductBarcode} title="نسخ باركود الوحدة الأساسية">
-                          <Copy size={14} />
                         </button>
                       </div>
                     </label>
@@ -796,39 +793,22 @@ export default function ProductModal({
             </div>
           ) : null}
 
-          {activeTab === TABS.UNITS ? (
+          {activeTab === TABS.PRICING ? (
             <div
               className="form-section"
               onFocusCapture={selectAllInputValue}
               onClickCapture={selectAllInputValue}
             >
-              <div className="units-toolbar">
-                <button type="button" className="btn-inline" onClick={addUnit}>
-                  <Plus size={14} />
-                  إضافة وحدة
-                </button>
-                <button type="button" className="btn-inline" onClick={generateUnitsPricingFromMain}>
-                  <Shuffle size={14} />
-                  توليد أسعار الوحدات من الأساسية
-                </button>
-                <button type="button" className="btn-inline" onClick={applyMainMarginToAllUnits}>
-                  تطبيق نفس نسبة ربح الوحدة الأساسية
-                </button>
-                <button type="button" className="btn-inline btn-inline-ghost" onClick={normalizeAllUnits}>
-                  ترتيب وتنظيف الأرقام
-                </button>
-              </div>
-
               <div className="pricing-calculator">
                 <label className="form-group">
-                  <span>تكلفة الوحدة الأساسية</span>
+                  <span>تكلفة الوحدة</span>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     className="form-input"
                     value={mainUnit.purchasePrice}
-                    onChange={(event) => setUnitField(0, 'purchasePrice', event.target.value)}
+                    onChange={(event) => setUnitField('purchasePrice', event.target.value)}
                   />
                 </label>
                 <label className="form-group">
@@ -838,97 +818,59 @@ export default function ProductModal({
                     step="0.01"
                     className="form-input"
                     value={marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice)}
-                    onChange={(event) => setUnitMarginPercent(0, event.target.value)}
+                    onChange={(event) => setUnitMarginPercent(event.target.value)}
                   />
                 </label>
                 <label className="form-group">
-                  <span>سعر البيع الناتج</span>
+                  <span>سعر البيع</span>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     className="form-input"
                     value={mainUnit.salePrice}
-                    onChange={(event) => setUnitField(0, 'salePrice', event.target.value)}
+                    onChange={(event) => setUnitField('salePrice', event.target.value)}
                   />
                 </label>
               </div>
 
-              <div className="units-table-wrap">
-                <table className="units-table">
-                  <thead>
-                    <tr>
-                      <th>الوحدة</th>
-                      <th>معامل التحويل</th>
-                      <th>سعر البيع</th>
-                      <th>سعر الجملة</th>
-                      <th>أقل سعر</th>
-                      <th>سعر الشراء</th>
-                      <th>هامش %</th>
-                      <th>باركود الوحدة</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {formData.units.map((unit, index) => (
-                      <tr key={`unit-${index}`}>
-                        <td>
-                          <input
-                            type="text"
-                            value={unit.unitName}
-                            onChange={(event) => setUnitField(index, 'unitName', event.target.value)}
-                            placeholder={index === 0 ? 'الوحدة الأساسية' : 'مثال: كرتونة'}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={unit.conversionFactor}
-                            onChange={(event) => setUnitField(index, 'conversionFactor', event.target.value)}
-                            disabled={index === 0}
-                          />
-                        </td>
-                        <td>
-                          <input type="number" step="0.01" min="0" value={unit.salePrice} onChange={(event) => setUnitField(index, 'salePrice', event.target.value)} />
-                        </td>
-                        <td>
-                          <input type="number" step="0.01" min="0" value={unit.wholesalePrice} onChange={(event) => setUnitField(index, 'wholesalePrice', event.target.value)} />
-                        </td>
-                        <td>
-                          <input type="number" step="0.01" min="0" value={unit.minSalePrice} onChange={(event) => setUnitField(index, 'minSalePrice', event.target.value)} />
-                        </td>
-                        <td>
-                          <input type="number" step="0.01" min="0" value={unit.purchasePrice} onChange={(event) => setUnitField(index, 'purchasePrice', event.target.value)} />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={marginPercentOf(unit.purchasePrice, unit.salePrice)}
-                            onChange={(event) => setUnitMarginPercent(index, event.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <div className="unit-barcode-field">
-                            <input type="text" value={unit.barcode} onChange={(event) => setUnitField(index, 'barcode', event.target.value)} />
-                            <button type="button" className="btn-icon" onClick={() => generateUnitBarcode(index)} title="توليد باركود الوحدة">
-                              <Barcode size={14} />
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          {index > 0 ? (
-                            <button type="button" className="delete-btn" onClick={() => removeUnit(index)} aria-label="حذف الوحدة">
-                              <Trash2 size={16} />
-                            </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="form-row">
+                <label className="form-group">
+                  <span>الوحدة</span>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={mainUnit.unitName}
+                    onChange={(event) => setUnitField('unitName', event.target.value)}
+                    placeholder="مثال: قطعة"
+                  />
+                </label>
+                <label className="form-group">
+                  <span>سعر الجملة</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="form-input"
+                    value={mainUnit.wholesalePrice}
+                    onChange={(event) => setUnitField('wholesalePrice', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label className="form-group">
+                  <span>أقل سعر بيع</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="form-input"
+                    value={mainUnit.minSalePrice}
+                    onChange={(event) => setUnitField('minSalePrice', event.target.value)}
+                  />
+                </label>
+                <div />
               </div>
 
               <section className="variants-section">
@@ -1051,13 +993,7 @@ export default function ProductModal({
                 <div className="stock-basic-grid">
                   <label className="form-group">
                     <span>الوحدة الافتراضية للمخزون</span>
-                    <select className="form-select" value={formData.openingUnit} onChange={(event) => setField('openingUnit', event.target.value)}>
-                      {formData.units.map((unit, index) => (
-                        <option key={`opening-unit-${index}`} value={nText(unit.unitName) || `unit-${index}`}>
-                          {nText(unit.unitName) || `وحدة ${index + 1}`}
-                        </option>
-                      ))}
-                    </select>
+                    <input type="text" className="form-input" value={nText(mainUnit.unitName) || 'قطعة'} readOnly />
                   </label>
                   <label className="form-group">
                     <span>حد إعادة الطلب</span>
@@ -1065,7 +1001,62 @@ export default function ProductModal({
                   </label>
                 </div>
 
-                {warehouses.length > 0 && (
+                {warehouses.length > 0 && formData.hasVariants && (
+                  <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <h3 style={{ marginBottom: '16px', fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>توزيع المقاسات/الألوان داخل المخازن</h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: `${380 + (warehouses.length * 170)}px` }}>
+                        <thead style={{ backgroundColor: '#fff' }}>
+                          <tr>
+                            <th style={{ padding: '10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>المتغير</th>
+                            <th style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>كمية المتغير</th>
+                            {warehouses.map((wh) => (
+                              <th key={wh.id} style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>
+                                {wh.icon || '🏭'} {wh.name}
+                              </th>
+                            ))}
+                            <th style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #e2e8f0' }}>مجموع المخازن</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {formData.variants.map((variant, variantIndex) => {
+                            const variantQty = Math.max(0, toInt(variant?.quantity, 0));
+                            const rowTotal = getVariantWarehouseTotal(variant);
+                            const isMismatch = rowTotal !== variantQty;
+                            return (
+                              <tr key={variant.tempId || variant.id || variantIndex} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <td style={{ padding: '10px' }}>
+                                  <strong>{nText(variant.size) || '-'}</strong> / <span>{nText(variant.color) || '-'}</span>
+                                </td>
+                                <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>{variantQty}</td>
+                                {warehouses.map((wh) => (
+                                  <td key={`${variant.tempId || variant.id || variantIndex}-${wh.id}`} style={{ padding: '8px', textAlign: 'center' }}>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      className="form-input"
+                                      style={{ width: '110px', margin: '0 auto', textAlign: 'center' }}
+                                      value={getVariantWarehouseQty(variant, wh.id)}
+                                      onChange={(event) => setVariantWarehouseQty(variant, wh.id, event.target.value)}
+                                    />
+                                  </td>
+                                ))}
+                                <td style={{ padding: '10px', textAlign: 'center', color: isMismatch ? '#dc2626' : '#059669', fontWeight: '700' }}>
+                                  {rowTotal}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#64748b' }}>
+                      لازم مجموع كميات كل متغير في المخازن يساوي كمية نفس المتغير.
+                    </div>
+                  </div>
+                )}
+
+                {warehouses.length > 0 && !formData.hasVariants && (
                   <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <h3 style={{ marginBottom: '16px', fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>الكميات في المخازن</h3>
                     <div style={{ display: 'grid', gap: '12px' }}>
@@ -1115,7 +1106,7 @@ export default function ProductModal({
                 )}
 
                 <div className="stock-total-card">
-                  <span>إجمالي الرصيد الحالي (مخزن + عرض)</span>
+                  <span>{formData.hasVariants ? 'إجمالي الرصيد الحالي (من كميات المتغيرات)' : 'إجمالي الرصيد الحالي (مخزن + عرض)'}</span>
                   <strong>{stockTotalPreview}</strong>
                 </div>
 

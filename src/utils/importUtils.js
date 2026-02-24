@@ -16,6 +16,7 @@ export const IMPORT_FIELD_OPTIONS = [
     { key: 'image', label: 'صورة', aliases: ['image', 'photo', 'صورة', 'رابط الصورة'] },
     { key: 'warehouseQty', label: 'كمية المخزن', aliases: ['warehouseqty', 'warehouse', 'مخزن', 'كمية المخزن'] },
     { key: 'displayQty', label: 'كمية العرض', aliases: ['displayqty', 'display', 'عرض', 'كمية العرض'] },
+    { key: 'totalQuantity', label: 'الكمية الإجمالية', aliases: ['totalqty', 'totquantity', 'totalquantity', 'inventoryqty', 'الكمية الإجمالية'] },
     { key: 'minStock', label: 'الحد الأدنى', aliases: ['minstock', 'minimumstock', 'الحد الأدنى', 'حد البيع'] },
     { key: 'notes', label: 'ملاحظات', aliases: ['notes', 'note', 'ملاحظات'] },
     { key: 'size', label: 'المقاس', aliases: ['size', 'productsize', 'المقاس'] },
@@ -144,6 +145,7 @@ export const importGroups = (rows) => {
                     image: nText(row.image)
                 },
                 inventory: {
+                    totalQuantity: nInt(row.totalQuantity, nInt(row.warehouseQty, 0) + nInt(row.displayQty, 0)),
                     warehouseQty: nInt(row.warehouseQty, 0),
                     displayQty: nInt(row.displayQty, 0),
                     minStock: nInt(row.minStock, 5),

@@ -18,7 +18,7 @@ import BarcodeStudioModal from '../components/products/BarcodeStudioModal';
 import WarehouseTransferModal from '../components/products/WarehouseTransferModal';
 import {
   getGridHeight, nText, nKey, nInt, nNum, money, csv,
-  stock, unitsOf, mainUnitOf, salePriceOf, costPriceOf, wholesale,
+  stock, salePriceOf, costPriceOf, wholesale,
   DEFAULT_UNIT, DEFAULT_CATEGORY, GRID_COLUMNS, SORT_PRESETS,
   DEFAULT_VISIBLE_COLUMN_KEYS
 } from '../utils/productUtils';
@@ -130,7 +130,7 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
         );
       }
       case 'unit':
-        return <span>{nText(mainUnitOf(product)?.unitName) || DEFAULT_UNIT}</span>;
+        return <span>{nText(product?.unitName) || DEFAULT_UNIT}</span>;
       case 'quantity':
         return <strong>{status.total}</strong>;
       case 'salePrice':
@@ -703,34 +703,11 @@ export default function Products() {
     setSaving(true);
     try {
       const editingId = modalMode === 'edit' ? editingProduct?.id : null;
-      const rawUnits = Array.isArray(productData.units) ? productData.units : [];
-      const normalizedUnits = rawUnits
-        .map((unit, index) => {
-          const salePrice = Math.max(0, nNum(unit?.salePrice, 0));
-          const purchasePrice = Math.max(0, nNum(unit?.purchasePrice, 0));
-          const wholesalePrice = Math.min(salePrice, Math.max(0, nNum(unit?.wholesalePrice, salePrice)));
-          const minSalePrice = Math.min(salePrice, Math.max(0, nNum(unit?.minSalePrice, wholesalePrice)));
-
-          return {
-            unitName: nText(unit?.unitName) || (index === 0 ? DEFAULT_UNIT : ''),
-            conversionFactor: index === 0 ? 1 : Math.max(0.0001, nNum(unit?.conversionFactor, 1)),
-            salePrice,
-            wholesalePrice,
-            minSalePrice,
-            purchasePrice,
-            barcode: nText(unit?.barcode) || null
-          };
-        })
-        .filter((unit, index) => index === 0 || unit.unitName || unit.barcode || unit.salePrice || unit.purchasePrice);
-
-      if (!normalizedUnits.length || !nText(normalizedUnits[0].unitName)) {
-        throw new Error('يجب إدخال وحدة أساسية واحدة على الأقل.');
-      }
-
-      const unitBarcodeValues = normalizedUnits.map((unit) => nText(unit.barcode).toLowerCase()).filter(Boolean);
-      if (new Set(unitBarcodeValues).size !== unitBarcodeValues.length) {
-        throw new Error('يوجد باركود مكرر بين الوحدات.');
-      }
+      const basePrice = Math.max(0, nNum(productData.basePrice, 0));
+      const cost = Math.max(0, nNum(productData.cost, 0));
+      const wholesalePrice = Math.min(basePrice, Math.max(0, nNum(productData.wholesalePrice, basePrice)));
+      const minSalePrice = Math.min(wholesalePrice, Math.max(0, nNum(productData.minSalePrice, wholesalePrice)));
+      const unitName = nText(productData.unitName) || DEFAULT_UNIT;
 
       const normalizedVariants = (productData.hasVariants ? (Array.isArray(productData.variants) ? productData.variants : []) : [])
         .map((variant) => ({
@@ -738,8 +715,8 @@ export default function Products() {
           tempId: nText(variant?.tempId) || null,
           size: nText(variant?.size) || 'موحد',
           color: nText(variant?.color) || 'افتراضي',
-          price: Math.max(0, nNum(variant?.price, normalizedUnits[0]?.salePrice || 0)),
-          cost: Math.max(0, nNum(variant?.cost, normalizedUnits[0]?.purchasePrice || 0)),
+          price: Math.max(0, nNum(variant?.price, basePrice)),
+          cost: Math.max(0, nNum(variant?.cost, cost)),
           quantity: Math.max(0, nInt(variant?.quantity, 0)),
           barcode: nText(variant?.barcode) || null
         }))
@@ -754,18 +731,19 @@ export default function Products() {
         throw new Error('يوجد باركود مكرر بين المتغيرات.');
       }
 
+      const barcode = nText(productData.barcode);
       const allInternalBarcodes = [
-        ...unitBarcodeValues,
         ...variantBarcodeValues,
-        nText(productData.barcode).toLowerCase()
+        barcode.toLowerCase()
       ].filter(Boolean);
       if (new Set(allInternalBarcodes).size !== allInternalBarcodes.length) {
         throw new Error('يوجد تعارض باركود داخل نفس المنتج.');
       }
 
-      const mainUnit = normalizedUnits[0];
       const sku = nText(productData.sku || productData.code);
-      const barcode = nText(productData.barcode) || nText(mainUnit.barcode);
+      const variantsTotal = normalizedVariants.reduce((sum, variant) => sum + nInt(variant.quantity, 0), 0);
+      const requestedTotalQuantity = Math.max(0, nInt(productData.totalQuantity, 0));
+      const normalizedTotalQuantity = productData.hasVariants ? variantsTotal : requestedTotalQuantity;
 
       if (sku && products.some((product) => product.id !== editingId && nText(product.sku).toLowerCase() === sku.toLowerCase())) {
         throw new Error('كود الصنف (SKU) مستخدم بالفعل.');
@@ -793,14 +771,15 @@ export default function Products() {
         image: nText(productData.image) || null,
         isActive: productData.isActive !== false,
         type: nText(productData.type) || 'store',
-        basePrice: nNum(productData.basePrice, mainUnit.salePrice),
-        cost: nNum(productData.cost, mainUnit.purchasePrice),
-        openingQty: Math.max(0, nInt(productData.openingQty, 0)),
-        displayQty: Math.max(0, nInt(productData.displayQty, 0)),
+        unitName,
+        basePrice,
+        cost,
+        wholesalePrice,
+        minSalePrice,
+        totalQuantity: normalizedTotalQuantity,
         minStock: Math.max(0, nInt(productData.minStock, 5)),
         maxStock: Math.max(0, nInt(productData.maxStock, 100)),
         notes: nText(productData.notes) || null,
-        units: normalizedUnits,
         hasVariants: Boolean(productData.hasVariants),
         variants: normalizedVariants
       };
@@ -816,12 +795,17 @@ export default function Products() {
 
       const productId = modalMode === 'create' ? res?.id : editingProduct?.id;
       if (productId) {
-        // Save warehouse stocks
-        if (Array.isArray(productData.warehouseStocks) && productData.warehouseStocks.length > 0) {
-          const stocksRes = await window.api.updateMultipleWarehouseStocks(productId, productData.warehouseStocks);
-          if (stocksRes?.error) throw new Error(stocksRes.error);
-        }
         let finalVariants = [];
+        const variantIdByToken = new Map();
+        const registerVariantToken = (variantInput, variantOutput) => {
+          const savedId = nInt(variantOutput?.id, null);
+          if (!savedId) return;
+          const inputId = nInt(variantInput?.id, null);
+          const inputTempId = nText(variantInput?.tempId);
+          if (inputId) variantIdByToken.set(`id:${inputId}`, savedId);
+          if (inputTempId) variantIdByToken.set(`temp:${inputTempId}`, savedId);
+        };
+
         if (payload.hasVariants) {
           if (modalMode === 'create') {
             for (const variant of payload.variants) {
@@ -836,6 +820,7 @@ export default function Products() {
               });
               if (addVariantRes?.error) throw new Error(addVariantRes.error);
               finalVariants.push(addVariantRes);
+              registerVariantToken(variant, addVariantRes);
             }
           } else {
             const existingVariants = Array.isArray(editingProduct?.variants) ? editingProduct.variants : [];
@@ -855,6 +840,7 @@ export default function Products() {
                 if (updateVariantRes?.error) throw new Error(updateVariantRes.error);
                 keepIds.add(variant.id);
                 finalVariants.push(updateVariantRes);
+                registerVariantToken(variant, updateVariantRes);
               } else {
                 const addVariantRes = await window.api.addVariant({
                   productId,
@@ -868,6 +854,7 @@ export default function Products() {
                 if (addVariantRes?.error) throw new Error(addVariantRes.error);
                 if (addVariantRes?.id) keepIds.add(addVariantRes.id);
                 finalVariants.push(addVariantRes);
+                registerVariantToken(variant, addVariantRes);
               }
             }
 
@@ -885,21 +872,46 @@ export default function Products() {
           }
         }
 
+        if (payload.hasVariants) {
+          const rawRows = Array.isArray(productData.variantWarehouseStocks) ? productData.variantWarehouseStocks : [];
+          const resolvedRows = rawRows
+            .map((row) => {
+              const explicitVariantId = nInt(row?.variantId, null);
+              const tempId = nText(row?.tempId);
+              const resolvedVariantId = explicitVariantId
+                || variantIdByToken.get(explicitVariantId ? `id:${explicitVariantId}` : '')
+                || variantIdByToken.get(tempId ? `temp:${tempId}` : '');
+              return {
+                variantId: resolvedVariantId || null,
+                warehouseId: nInt(row?.warehouseId, null),
+                quantity: Math.max(0, nInt(row?.quantity, 0))
+              };
+            })
+            .filter((row) => row.variantId && row.warehouseId);
+
+          const stocksRes = await window.api.updateVariantWarehouseStocks(productId, resolvedRows);
+          if (stocksRes?.error) throw new Error(stocksRes.error);
+        } else if (Array.isArray(productData.warehouseStocks) && productData.warehouseStocks.length > 0) {
+          const stocksRes = await window.api.updateMultipleWarehouseStocks(productId, productData.warehouseStocks);
+          if (stocksRes?.error) throw new Error(stocksRes.error);
+        }
+
         const previousInventory = modalMode === 'edit' ? (editingProduct?.inventory || {}) : {};
-        const warehouseQty = Math.max(0, nInt(payload.openingQty, nInt(previousInventory?.warehouseQty, 0)));
-        const displayQty = Math.max(0, nInt(payload.displayQty, nInt(previousInventory?.displayQty, 0)));
-        const variantsTotal = payload.hasVariants
+        const finalVariantsTotal = payload.hasVariants
           ? finalVariants.reduce((sum, variant) => sum + nInt(variant.quantity, 0), 0)
           : 0;
+        const finalTotalQuantity = payload.hasVariants
+          ? finalVariantsTotal
+          : Math.max(0, nInt(payload.totalQuantity, nInt(previousInventory?.totalQuantity, 0)));
 
         const inventoryPayload = {
           minStock: Math.max(0, nInt(payload.minStock, nInt(previousInventory?.minStock, 5))),
           maxStock: Math.max(0, nInt(payload.maxStock, nInt(previousInventory?.maxStock, 100))),
-          warehouseQty,
-          displayQty,
-          totalQuantity: Math.max(warehouseQty + displayQty, variantsTotal),
+          warehouseQty: finalTotalQuantity,
+          displayQty: 0,
+          totalQuantity: finalTotalQuantity,
           notes: payload.notes || null,
-          lastRestock: warehouseQty + displayQty > 0 ? new Date().toISOString() : null
+          lastRestock: finalTotalQuantity > 0 ? new Date().toISOString() : null
         };
         inventoryPayload.maxStock = Math.max(inventoryPayload.maxStock, inventoryPayload.minStock);
 
@@ -934,16 +946,12 @@ export default function Products() {
   const duplicateProduct = useCallback(async (product) => {
     try {
       const sourceProduct = await fetchProductDetails(product.id);
-
-      const copiedUnits = unitsOf(sourceProduct).map((unit, index) => ({
-        unitName: nText(unit?.unitName) || (index === 0 ? DEFAULT_UNIT : ''),
-        conversionFactor: index === 0 ? 1 : Math.max(0.0001, nNum(unit?.conversionFactor, 1)),
-        salePrice: Math.max(0, nNum(unit?.salePrice, salePriceOf(sourceProduct))),
-        wholesalePrice: Math.max(0, nNum(unit?.wholesalePrice, salePriceOf(sourceProduct))),
-        minSalePrice: Math.max(0, nNum(unit?.minSalePrice, salePriceOf(sourceProduct))),
-        purchasePrice: Math.max(0, nNum(unit?.purchasePrice, costPriceOf(sourceProduct))),
-        barcode: null
-      }));
+      const sourceVariants = Array.isArray(sourceProduct.variants) ? sourceProduct.variants : [];
+      const sourceVariantsTotal = sourceVariants.reduce((sum, variant) => sum + nInt(variant.quantity, 0), 0);
+      const sourceInventoryTotal = nInt(
+        sourceProduct?.inventory?.totalQuantity,
+        nInt(sourceProduct?.inventory?.warehouseQty, 0) + nInt(sourceProduct?.inventory?.displayQty, 0)
+      );
 
       const res = await window.api.addProduct({
         name: `${sourceProduct.name} - نسخة`,
@@ -955,15 +963,18 @@ export default function Products() {
         image: sourceProduct.image || null,
         basePrice: salePriceOf(sourceProduct),
         cost: costPriceOf(sourceProduct),
+        unitName: nText(sourceProduct?.unitName) || DEFAULT_UNIT,
+        wholesalePrice: Math.max(0, nNum(sourceProduct?.wholesalePrice, salePriceOf(sourceProduct))),
+        minSalePrice: Math.max(0, nNum(sourceProduct?.minSalePrice, nNum(sourceProduct?.wholesalePrice, salePriceOf(sourceProduct)))),
         isActive: sourceProduct.isActive ?? true,
         type: sourceProduct.type || 'store',
-        openingQty: nInt(sourceProduct?.inventory?.warehouseQty, 0),
-        units: copiedUnits.length ? copiedUnits : undefined
+        hasVariants: sourceVariants.length > 0,
+        totalQuantity: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal
       });
       if (res?.error) throw new Error(res.error);
 
       const newId = res.id;
-      for (const variant of (sourceProduct.variants || [])) {
+      for (const variant of sourceVariants) {
         const add = await window.api.addVariant({
           productId: newId,
           size: variant.productSize || 'M',
@@ -979,9 +990,9 @@ export default function Products() {
       const inv = await window.api.updateInventory(newId, {
         minStock: nInt(sourceProduct?.inventory?.minStock, 5),
         maxStock: nInt(sourceProduct?.inventory?.maxStock, 100),
-        warehouseQty: nInt(sourceProduct?.inventory?.warehouseQty, 0),
-        displayQty: nInt(sourceProduct?.inventory?.displayQty, 0),
-        totalQuantity: nInt(sourceProduct?.inventory?.totalQuantity, 0),
+        warehouseQty: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal,
+        displayQty: 0,
+        totalQuantity: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal,
         notes: nText(sourceProduct?.inventory?.notes) || null,
         lastRestock: new Date().toISOString()
       });
@@ -1307,7 +1318,7 @@ export default function Products() {
     const headers = [
       'اسم المنتج', 'الفئة', 'الماركة', 'SKU', 'باركود المنتج', 'الوصف',
       'المقاس', 'اللون', 'سعر البيع', 'التكلفة', 'الكمية', 'باركود المتغير',
-      'مخزن', 'عرض', 'الحد الأدنى'
+      'الحد الأدنى'
     ];
 
     const rows = [];
@@ -1317,8 +1328,8 @@ export default function Products() {
       if (!variants.length) {
         rows.push([
           p.name || '', cat, p.brand || '', p.sku || '', p.barcode || '', p.description || '',
-          '', '', salePriceOf(p).toFixed(2), costPriceOf(p).toFixed(2), '', '',
-          nInt(p.inventory?.warehouseQty, 0), nInt(p.inventory?.displayQty, 0), nInt(p.inventory?.minStock, 5)
+          '', '', salePriceOf(p).toFixed(2), costPriceOf(p).toFixed(2), nInt(p.inventory?.totalQuantity, 0), '',
+          nInt(p.inventory?.minStock, 5)
         ]);
       } else {
         variants.forEach((v, i) => {
@@ -1326,8 +1337,6 @@ export default function Products() {
             p.name || '', cat, p.brand || '', p.sku || '', p.barcode || '', i === 0 ? p.description || '' : '',
             v.productSize || '', v.color || '', Number(v.price || p.basePrice || 0).toFixed(2), Number(v.cost || p.cost || 0).toFixed(2),
             nInt(v.quantity, 0), v.barcode || '',
-            i === 0 ? nInt(p.inventory?.warehouseQty, 0) : '',
-            i === 0 ? nInt(p.inventory?.displayQty, 0) : '',
             i === 0 ? nInt(p.inventory?.minStock, 5) : ''
           ]);
         });
@@ -1396,7 +1405,6 @@ export default function Products() {
       includeImage: false,
       includeCategory: false,
       includeInventory: false,
-      includeProductUnits: false,
       includeVariants: true
     });
     if (allRes?.error) throw new Error(allRes.error);
@@ -1428,7 +1436,8 @@ export default function Products() {
           barcode: g.product.barcode || null,
           image: g.product.image || null,
           basePrice: nNum(g.product.basePrice, 0),
-          cost: nNum(g.product.cost, 0)
+          cost: nNum(g.product.cost, 0),
+          hasVariants: Array.isArray(g.variants) && g.variants.length > 0
         };
 
         const skuKey = nText(payload.sku).toLowerCase();
@@ -1478,14 +1487,17 @@ export default function Products() {
         }
 
         const vTotal = g.variants.reduce((s, v) => s + nInt(v.quantity, 0), 0);
-        const w = nInt(g.inventory.warehouseQty, 0);
-        const dis = nInt(g.inventory.displayQty, 0);
+        const importedTotal = Math.max(
+          0,
+          nInt(g.inventory.totalQuantity, nInt(g.inventory.warehouseQty, 0) + nInt(g.inventory.displayQty, 0))
+        );
+        const totalQuantity = Math.max(vTotal, importedTotal);
         const inv = await window.api.updateInventory(productId, {
           minStock: nInt(g.inventory.minStock, 5),
           maxStock: nInt(g.inventory.maxStock, 100),
-          warehouseQty: w,
-          displayQty: dis,
-          totalQuantity: Math.max(w + dis, vTotal),
+          warehouseQty: totalQuantity,
+          displayQty: 0,
+          totalQuantity,
           notes: g.inventory.notes || null,
           lastRestock: new Date().toISOString()
         });

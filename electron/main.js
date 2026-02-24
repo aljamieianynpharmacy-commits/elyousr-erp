@@ -204,8 +204,14 @@ ipcMain.handle('db:updateWarehouseStock', async (event, productId, warehouseId, 
 ipcMain.handle('db:updateMultipleWarehouseStocks', async (event, productId, stocks) => {
     return await dbService.updateMultipleWarehouseStocks(productId, stocks);
 });
-ipcMain.handle('db:transferProductBetweenWarehouses', async (event, productId, fromWarehouseId, toWarehouseId, quantity, notes) => {
-    return await dbService.transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes);
+ipcMain.handle('db:updateVariantWarehouseStocks', async (event, productId, stocks) => {
+    return await dbService.updateVariantWarehouseStocks(productId, stocks);
+});
+ipcMain.handle('db:reconcileVariantInventoryStocks', async (event, productId) => {
+    return await dbService.reconcileVariantInventoryStocks(productId);
+});
+ipcMain.handle('db:transferProductBetweenWarehouses', async (event, productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId) => {
+    return await dbService.transferProductBetweenWarehouses(productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId);
 });
 ipcMain.handle('db:getWarehouseTransfers', async (event, productId, limit) => {
     return await dbService.getWarehouseTransfers(productId, limit);
@@ -640,8 +646,27 @@ ipcMain.handle('db:deleteVariant', async (event, id) => {
     return await dbService.deleteVariant(id);
 });
 
+const reconcileVariantInventoryStocksOnStartup = async () => {
+    try {
+        const result = await dbService.reconcileVariantInventoryStocks();
+        if (result?.error) {
+            console.warn('[startup] Failed to reconcile variant inventory stocks:', result.error);
+            return;
+        }
+
+        if ((result?.processed || 0) > 0) {
+            console.log(
+                `[startup] Reconciled variant inventory stocks: ${result.synced}/${result.processed} succeeded, ${result.failed} failed`
+            );
+        }
+    } catch (error) {
+        console.warn('[startup] Failed to reconcile variant inventory stocks:', error?.message || error);
+    }
+};
+
 app.whenReady().then(() => {
     createWindow()
+    void reconcileVariantInventoryStocksOnStartup()
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

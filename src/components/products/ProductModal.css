@@ -317,7 +317,6 @@
 
 .form-input,
 .form-select,
-.units-table input,
 .variants-table input {
   width: 100%;
   border: 1px solid var(--pm-line-strong);
@@ -331,7 +330,6 @@
 
 .form-input:focus,
 .form-select:focus,
-.units-table input:focus,
 .variants-table input:focus {
   outline: none;
   border-color: var(--pm-primary-500);
@@ -350,12 +348,6 @@ textarea.form-input {
 .field-with-button {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.field-with-buttons {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
   gap: 8px;
 }
 
@@ -435,12 +427,6 @@ textarea.form-input {
   transform: translateX(20px);
 }
 
-.units-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .pricing-calculator {
   border: 1px solid #cfe5ff;
   background: linear-gradient(145deg, #eff6ff 0%, #f8fbff 100%);
@@ -451,20 +437,6 @@ textarea.form-input {
   gap: 10px;
 }
 
-.units-table-wrap {
-  border: 1px solid #e1e9f3;
-  border-radius: 12px;
-  overflow: auto;
-  background: #fff;
-}
-
-.units-table {
-  min-width: 980px;
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.units-table th,
 .variants-table th {
   background: linear-gradient(120deg, #0f172a 0%, #1e293b 100%);
   color: #f8fafc;
@@ -473,12 +445,6 @@ textarea.form-input {
   padding: 10px;
 }
 
-.units-table td {
-  border-bottom: 1px solid #eef2f8;
-  padding: 8px;
-}
-
-.units-table tbody tr:nth-child(odd),
 .variants-table tbody tr:nth-child(odd) {
   background: #fcfdff;
 }

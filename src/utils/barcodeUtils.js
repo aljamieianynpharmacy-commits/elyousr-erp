@@ -485,12 +485,7 @@ export const barcodeRows = (products, salePriceOfFn) => {
     products.forEach((p) => {
         const sku = nText(p.sku) || `P${p.id}`;
         const vars = p.variants || [];
-        const mainUnit = (() => {
-            const units = Array.isArray(p.productUnits) ? p.productUnits : [];
-            if (!units.length) return null;
-            return units.find((u) => (parseFloat(String(u.conversionFactor ?? 1)) || 1) === 1) || units[0];
-        })();
-        const productBarcode = nText(mainUnit?.barcode) || nText(p.barcode);
+        const productBarcode = nText(p.barcode);
 
         if (!vars.length) {
             rows.push({

@@ -395,6 +395,9 @@ export default function Warehouses() {
                   </thead>
                   <tbody>
                     {inventoryItems.map(item => {
+                      const variant = item?.variant || null;
+                      const product = variant?.product || item?.product || null;
+                      const variantLabel = variant ? `${variant.productSize || "-"} / ${variant.color || "-"}` : '';
                       const registeredQty = item.quantity;
                       const actualQty = actualQuantities[item.id] ?? registeredQty;
                       const diff = actualQty - registeredQty;
@@ -402,8 +405,11 @@ export default function Warehouses() {
 
                       return (
                         <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '12px' }}>{item.product?.name || 'منتج غير معروف'}</td>
-                          <td style={{ padding: '12px', color: '#64748b' }}>{item.product?.barcode || '-'}</td>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ fontWeight: '600' }}>{product?.name || 'Unknown product'}</div>
+                            {variantLabel ? <div style={{ color: '#64748b', fontSize: '12px' }}>{variantLabel}</div> : null}
+                          </td>
+                          <td style={{ padding: '12px', color: '#64748b' }}>{variant?.barcode || product?.barcode || '-'}</td>
                           <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>{registeredQty}</td>
                           <td style={{ padding: '12px', textAlign: 'center' }}>
                             <input

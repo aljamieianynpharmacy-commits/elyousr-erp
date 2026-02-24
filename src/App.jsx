@@ -160,7 +160,10 @@ function App() {
     );
   }
 
-  if (licenseStatus?.status !== 'ACTIVE' || showLicenseManager) {
+  const isLicenseAccessAllowed =
+    licenseStatus?.status === 'ACTIVE' || licenseStatus?.status === 'TRIAL_ACTIVE';
+
+  if (!isLicenseAccessAllowed || showLicenseManager) {
     return (
       <LicensePage
         onStatusChanged={(status) => setLicenseStatus(status)}

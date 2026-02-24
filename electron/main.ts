@@ -10,6 +10,7 @@ import { machineId } from 'node-machine-id';
 type LicenseState =
   | 'NO_LICENSE'
   | 'ACTIVE'
+  | 'TRIAL_ACTIVE'
   | 'EXPIRED'
   | 'INVALID_SIGNATURE'
   | 'NOT_YET_VALID'
@@ -40,12 +41,23 @@ interface LicenseStatus {
   details?: Pick<LicensePayload, 'customerName' | 'expiresAt' | 'licenseId' | 'features'>;
 }
 
+interface TrialState {
+  startedAt: string;
+  expiresAt: string;
+}
+
 const LICENSE_PUBLIC_KEY_BASE64 = '49zTfBJpXN+35o+0kiPUuufxs3G++SyvH5yixcgbEiQ=';
 const MAX_LICENSE_FILE_BYTES = 256 * 1024;
+const MAX_TRIAL_FILE_BYTES = 16 * 1024;
+const TRIAL_PERIOD_DAYS = 7;
+const TRIAL_PERIOD_MS = TRIAL_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+const TRIAL_DURATION_TOLERANCE_MS = 60 * 1000;
+const TRIAL_EXPIRED_MESSAGE_AR = `انتهت الفترة التجريبية (${TRIAL_PERIOD_DAYS} أيام). يرجى تفعيل الترخيص للمتابعة.`;
 
 const STATUS_MESSAGES: Record<LicenseState, string> = {
   NO_LICENSE: 'لا يوجد ترخيص مفعل على هذا الجهاز.',
   ACTIVE: 'الترخيص صالح ومفعل.',
+  TRIAL_ACTIVE: 'الفترة التجريبية مفعلة.',
   EXPIRED: 'انتهت صلاحية الترخيص.',
   INVALID_SIGNATURE: 'التوقيع الرقمي غير صالح.',
   NOT_YET_VALID: 'الترخيص غير ساري حتى تاريخ البداية.',
@@ -103,8 +115,67 @@ function getLicenseFilePath(): string {
   return path.join(app.getPath('userData'), 'license.json');
 }
 
+function getTrialFilePath(): string {
+  return path.join(app.getPath('userData'), 'trial.json');
+}
+
 function isValidDateString(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function parseTrialFileText(trialJsonText: string): TrialState | null {
+  if (typeof trialJsonText !== 'string') {
+    return null;
+  }
+
+  if (Buffer.byteLength(trialJsonText, 'utf8') > MAX_TRIAL_FILE_BYTES) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trialJsonText);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  if (!isValidDateString(parsed.startedAt) || !isValidDateString(parsed.expiresAt)) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(parsed.startedAt);
+  const expiresAtMs = Date.parse(parsed.expiresAt);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(expiresAtMs)) {
+    return null;
+  }
+
+  const durationMs = expiresAtMs - startedAtMs;
+  if (durationMs <= 0) {
+    return null;
+  }
+
+  if (Math.abs(durationMs - TRIAL_PERIOD_MS) > TRIAL_DURATION_TOLERANCE_MS) {
+    return null;
+  }
+
+  return {
+    startedAt: parsed.startedAt,
+    expiresAt: parsed.expiresAt,
+  };
+}
+
+function createTrialState(): TrialState {
+  const startedAtMs = Date.now();
+  const expiresAtMs = startedAtMs + TRIAL_PERIOD_MS;
+
+  return {
+    startedAt: new Date(startedAtMs).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
 }
 
 function toLicensePayload(payload: unknown): LicensePayload | null {
@@ -289,6 +360,69 @@ async function evaluateLicenseText(licenseJsonText: string): Promise<EvaluationR
   };
 }
 
+function buildTrialDetails(trialState: TrialState): NonNullable<LicenseStatus['details']> {
+  return {
+    customerName: 'نسخة تجريبية',
+    expiresAt: trialState.expiresAt,
+    licenseId: 'TRIAL-LOCAL',
+    features: [`TRIAL_${TRIAL_PERIOD_DAYS}_DAYS`],
+  };
+}
+
+function buildTrialActiveStatus(trialState: TrialState): LicenseStatus {
+  const expiresAtMs = Date.parse(trialState.expiresAt);
+  const remainingMs = Math.max(0, expiresAtMs - Date.now());
+  const remainingDays = Math.max(1, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+
+  return {
+    status: 'TRIAL_ACTIVE',
+    messageAr: `${STATUS_MESSAGES.TRIAL_ACTIVE} متبقي ${remainingDays} يوم.`,
+    details: buildTrialDetails(trialState),
+  };
+}
+
+async function getStatusWithoutLicense(): Promise<LicenseStatus> {
+  const trialPath = getTrialFilePath();
+  let trialState: TrialState | null = null;
+
+  try {
+    const rawTrial = await fs.readFile(trialPath, 'utf8');
+    trialState = parseTrialFileText(rawTrial);
+    if (!trialState) {
+      return {
+        status: 'NO_LICENSE',
+        messageAr: TRIAL_EXPIRED_MESSAGE_AR,
+      };
+    }
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== 'ENOENT') {
+      return buildStatus('CORRUPT');
+    }
+  }
+
+  if (!trialState) {
+    trialState = createTrialState();
+    try {
+      await fs.mkdir(path.dirname(trialPath), { recursive: true });
+      await fs.writeFile(trialPath, `${JSON.stringify(trialState, null, 2)}\n`, 'utf8');
+    } catch {
+      return buildStatus('CORRUPT');
+    }
+  }
+
+  const expiresAtMs = Date.parse(trialState.expiresAt);
+  if (!Number.isFinite(expiresAtMs) || Date.now() >= expiresAtMs) {
+    return {
+      status: 'NO_LICENSE',
+      messageAr: TRIAL_EXPIRED_MESSAGE_AR,
+      details: buildTrialDetails(trialState),
+    };
+  }
+
+  return buildTrialActiveStatus(trialState);
+}
+
 async function getCurrentLicenseStatus(): Promise<LicenseStatus> {
   const licensePath = getLicenseFilePath();
 
@@ -298,7 +432,7 @@ async function getCurrentLicenseStatus(): Promise<LicenseStatus> {
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === 'ENOENT') {
-      return buildStatus('NO_LICENSE');
+      return getStatusWithoutLicense();
     }
     return buildStatus('CORRUPT');
   }
@@ -342,7 +476,7 @@ async function removeLicense(): Promise<LicenseStatus> {
     }
   }
 
-  return buildStatus('NO_LICENSE');
+  return getCurrentLicenseStatus();
 }
 
 function registerLicensingHandlers(): void {

@@ -46,7 +46,10 @@ export default function App() {
     );
   }
 
-  if (licenseStatus?.status !== 'ACTIVE') {
+  const isLicenseAccessAllowed =
+    licenseStatus?.status === 'ACTIVE' || licenseStatus?.status === 'TRIAL_ACTIVE';
+
+  if (!isLicenseAccessAllowed) {
     return (
       <LicensePage
         onStatusChanged={(status) => setLicenseStatus(status)}

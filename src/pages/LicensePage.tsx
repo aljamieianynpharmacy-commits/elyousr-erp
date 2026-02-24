@@ -10,6 +10,7 @@ interface LicensePageProps {
 const statusColorMap: Record<LicenseStatus['status'], string> = {
   NO_LICENSE: '#334155',
   ACTIVE: '#166534',
+  TRIAL_ACTIVE: '#0369a1',
   EXPIRED: '#b91c1c',
   INVALID_SIGNATURE: '#b45309',
   NOT_YET_VALID: '#7c2d12',

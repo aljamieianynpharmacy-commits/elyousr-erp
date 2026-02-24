@@ -1,6 +1,7 @@
 export type LicenseState =
   | 'NO_LICENSE'
   | 'ACTIVE'
+  | 'TRIAL_ACTIVE'
   | 'EXPIRED'
   | 'INVALID_SIGNATURE'
   | 'NOT_YET_VALID'

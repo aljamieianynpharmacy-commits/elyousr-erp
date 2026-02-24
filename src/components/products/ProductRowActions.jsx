@@ -3,7 +3,6 @@ import React, { memo, useState } from 'react';
 function ProductRowActions({
   product,
   onEdit,
-  onDuplicate,
   onPrint,
   onDelete,
   onTransfer
@@ -36,21 +35,12 @@ function ProductRowActions({
       </button>
       <button
         type="button"
-        className="icon-btn-solid orange"
-        title="نسخ"
-        onClick={() => runAction('duplicate', onDuplicate, product)}
-        disabled={isDisabled}
-      >
-        📋
-      </button>
-      <button
-        type="button"
         className="icon-btn-solid blue"
         title="طباعة باركود"
         onClick={() => runAction('print', onPrint, [product])}
         disabled={isDisabled}
       >
-        🏷️
+        🖨️
       </button>
       {onTransfer && (
         <button
@@ -60,7 +50,7 @@ function ProductRowActions({
           onClick={() => runAction('transfer', onTransfer, product)}
           disabled={isDisabled}
         >
-          🔄
+          🚚
         </button>
       )}
       <button

@@ -272,6 +272,29 @@ const withVariantWarehouseStockRelationFallback = async (context, primaryQuery, 
     }
 };
 
+const mapProductDeleteConstraintError = (error) => {
+    const text = normalizeErrorText(
+        `${error?.message || ''} ${error?.meta?.field_name || ''} ${error?.meta?.target || ''}`
+    );
+
+    if (text.includes('saleitem_variantid_fkey') || text.includes('"saleitem"') || text.includes('table "saleitem"')) {
+        return 'لا يمكن حذف المنتج لارتباطه بفواتير بيع.';
+    }
+    if (text.includes('returnitem_variantid_fkey') || text.includes('"returnitem"') || text.includes('table "returnitem"')) {
+        return 'لا يمكن حذف المنتج لارتباطه بمرتجعات بيع.';
+    }
+    if (text.includes('purchaseitem_variantid_fkey') || text.includes('"purchaseitem"') || text.includes('table "purchaseitem"')) {
+        return 'لا يمكن حذف المنتج لارتباطه بفواتير شراء.';
+    }
+    if (text.includes('purchasereturnitem_variantid_fkey') || text.includes('"purchasereturnitem"') || text.includes('table "purchasereturnitem"')) {
+        return 'لا يمكن حذف المنتج لارتباطه بمرتجعات شراء.';
+    }
+    if (String(error?.code || '').trim() === 'P2003') {
+        return 'لا يمكن حذف المنتج لوجود حركات مرتبطة به.';
+    }
+    return null;
+};
+
 const syncWarehouseStockTotalWithQuantity = async (dbClient, productId, targetTotalQuantity) => {
     const resolvedProductId = parsePositiveInt(productId);
     if (!resolvedProductId) return 0;
@@ -2302,8 +2325,8 @@ const dbService = {
                     ...(!hasVariantsRequested ? {
                         variants: {
                             create: [{
-                                productSize: 'Standard',
-                                color: 'Standard',
+                                productSize: '',
+                                color: '',
                                 price: cleanData.basePrice,
                                 cost: cleanData.cost,
                                 quantity: requestedTotalQuantity,
@@ -2364,10 +2387,56 @@ const dbService = {
 
     async deleteProduct(id) {
         try {
+            const productId = parsePositiveInt(id);
+            if (!productId) {
+                return { error: 'Invalid productId' };
+            }
+
+            const [
+                linkedSaleItem,
+                linkedReturnItem,
+                linkedPurchaseItem,
+                linkedPurchaseReturnItem
+            ] = await Promise.all([
+                prisma.saleItem.findFirst({
+                    where: { variant: { productId } },
+                    select: { saleId: true }
+                }),
+                prisma.returnItem.findFirst({
+                    where: { variant: { productId } },
+                    select: { returnId: true }
+                }),
+                prisma.purchaseItem.findFirst({
+                    where: { variant: { productId } },
+                    select: { purchaseId: true }
+                }),
+                prisma.purchaseReturnItem.findFirst({
+                    where: { variant: { productId } },
+                    select: { purchaseReturnId: true }
+                })
+            ]);
+
+            if (linkedSaleItem) {
+                return { error: 'لا يمكن حذف المنتج لارتباطه بفواتير بيع.' };
+            }
+            if (linkedReturnItem) {
+                return { error: 'لا يمكن حذف المنتج لارتباطه بمرتجعات بيع.' };
+            }
+            if (linkedPurchaseItem) {
+                return { error: 'لا يمكن حذف المنتج لارتباطه بفواتير شراء.' };
+            }
+            if (linkedPurchaseReturnItem) {
+                return { error: 'لا يمكن حذف المنتج لارتباطه بمرتجعات شراء.' };
+            }
+
             return await prisma.product.delete({
-                where: { id: parseInt(id) }
+                where: { id: productId }
             });
         } catch (error) {
+            const friendlyMessage = mapProductDeleteConstraintError(error);
+            if (friendlyMessage) {
+                return { error: friendlyMessage };
+            }
             return { error: error.message };
         }
     },
@@ -2782,8 +2851,8 @@ const dbService = {
                         const createdVariant = await prisma.variant.create({
                             data: {
                                 productId: productIdInt,
-                                productSize: 'Standard',
-                                color: 'Standard',
+                                productSize: '',
+                                color: '',
                                 price: Math.max(0, toNumber(product.basePrice, 0)),
                                 cost: Math.max(0, toNumber(product.cost, 0)),
                                 quantity: qty,
@@ -2890,8 +2959,8 @@ const dbService = {
                         const createdVariant = await prisma.variant.create({
                             data: {
                                 productId: productIdInt,
-                                productSize: 'Standard',
-                                color: 'Standard',
+                                productSize: '',
+                                color: '',
                                 price: Math.max(0, toNumber(product.basePrice, 0)),
                                 cost: Math.max(0, toNumber(product.cost, 0)),
                                 quantity: totalQuantity,
@@ -3259,8 +3328,8 @@ const dbService = {
                         return prisma.variant.create({
                             data: {
                                 productId: product.id,
-                                productSize: 'Standard',
-                                color: 'Standard',
+                                productSize: '',
+                                color: '',
                                 price: product.basePrice,
                                 cost: product.cost,
                                 quantity: qty,

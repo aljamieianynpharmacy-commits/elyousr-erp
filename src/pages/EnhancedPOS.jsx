@@ -164,6 +164,27 @@ const toInputDate = (value) => {
     return parsed.toISOString().split("T")[0];
 };
 
+const VARIANT_PLACEHOLDER_VALUES = new Set([
+    "",
+    "-",
+    "standard",
+    "default",
+    "موحد",
+    "افتراضي",
+]);
+
+const normalizeVariantLabel = (value) =>
+    String(value || "").trim().toLowerCase();
+
+const isPlaceholderVariantLabel = (value) =>
+    VARIANT_PLACEHOLDER_VALUES.has(normalizeVariantLabel(value));
+
+const hasMeaningfulVariantLabels = (size, color) =>
+    !isPlaceholderVariantLabel(size) || !isPlaceholderVariantLabel(color);
+
+const sanitizeVariantLabel = (value) =>
+    isPlaceholderVariantLabel(value) ? "" : String(value || "").trim();
+
 const createEmptyInvoice = (overrides = {}) => ({
     id: generateInvoiceId(),
     invoiceDate: getTodayDate(),
@@ -344,9 +365,11 @@ const CartItemRow = ({ item, onUpdate, onRemove, onShowDetails }) => (
             <div style={{ fontWeight: "bold", fontSize: "14px" }}>
                 {item.productName}
             </div>
-            <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {item.size} | {item.color}
-            </div>
+            {hasMeaningfulVariantLabels(item.size, item.color) ? (
+                <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    {sanitizeVariantLabel(item.size)} | {sanitizeVariantLabel(item.color)}
+                </div>
+            ) : null}
         </td>
         <td style={{ padding: "12px", textAlign: "center" }}>
             <input
@@ -562,6 +585,13 @@ export default function EnhancedPOS() {
     const [showPaymentEditModal, setShowPaymentEditModal] = useState(false);
     const [previewData, setPreviewData] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
+    const [singleQuantityModal, setSingleQuantityModal] = useState({
+        open: false,
+        product: null,
+        variant: null,
+        quantity: 1,
+        maxQuantity: 0,
+    });
 
     /**
      * ========== حالة الإشعارات ==========
@@ -579,6 +609,69 @@ export default function EnhancedPOS() {
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
     const [searchMode, setSearchMode] = useState("name"); // 'name' أو 'barcode'
     const [selectedWarehouseId, setSelectedWarehouseId] = useState("all");
+
+    const productNeedsVariantSelection = useCallback((product) => {
+        const productVariants = Array.isArray(product?.variants) ? product.variants : [];
+        if (productVariants.length === 0) return false;
+        return productVariants.some((variant) =>
+            hasMeaningfulVariantLabels(variant?.productSize, variant?.color)
+        );
+    }, []);
+
+    const openSingleQuantityModal = useCallback((product) => {
+        const productVariants = Array.isArray(product?.variants) ? product.variants : [];
+        const baseVariant = productVariants[0] || null;
+
+        if (!baseVariant) {
+            showToast("هذا المنتج غير جاهز للبيع", "error");
+            return;
+        }
+
+        const maxQuantity = Math.max(
+            0,
+            toNumberSafe(product?.totalQuantity, toNumberSafe(baseVariant?.quantity, 0))
+        );
+
+        if (maxQuantity <= 0) {
+            showToast("المخزون نفد!", "error");
+            return;
+        }
+
+        setSingleQuantityModal({
+            open: true,
+            product,
+            variant: baseVariant,
+            quantity: 1,
+            maxQuantity,
+        });
+    }, [showToast]);
+
+    const closeSingleQuantityModal = useCallback(() => {
+        setSingleQuantityModal({
+            open: false,
+            product: null,
+            variant: null,
+            quantity: 1,
+            maxQuantity: 0,
+        });
+    }, []);
+
+    const handleProductSelection = useCallback((product, index = null) => {
+        if (!product) return;
+        if (Number.isInteger(index) && index >= 0) {
+            setSelectedProductIndex(index);
+        }
+
+        if (productNeedsVariantSelection(product)) {
+            setSelectedProductForVariant(product);
+            setSelectedVariantIndex(-1);
+            return;
+        }
+
+        setSelectedProductForVariant(null);
+        setSelectedVariantIndex(-1);
+        openSingleQuantityModal(product);
+    }, [openSingleQuantityModal, productNeedsVariantSelection]);
 
     useEffect(() => {
         showPaymentEditModalRef.current = showPaymentEditModal;
@@ -773,7 +866,7 @@ export default function EnhancedPOS() {
      */
     const handleProductKeyDown = (e) => {
         // ⚠️ تجاهل أحداث الكيبورد إذا كان موديال المقاسات مفتوحاً
-        if (selectedProductForVariant) return;
+        if (selectedProductForVariant || singleQuantityModal.open) return;
 
         if (groupedProducts.length === 0) return;
 
@@ -795,7 +888,7 @@ export default function EnhancedPOS() {
                     groupedProducts[selectedProductIndex]
                 ) {
                     const selectedProduct = groupedProducts[selectedProductIndex];
-                    setSelectedProductForVariant(selectedProduct);
+                    handleProductSelection(selectedProduct, selectedProductIndex);
                 }
                 break;
             case "Escape":
@@ -1334,12 +1427,12 @@ export default function EnhancedPOS() {
                 {
                     variantId: variant.id,
                     productId: variant.productId,
-                    productName: variant.product.name,
+                    productName: variant.product?.name || variant.productName || "منتج",
                     price: variant.price,
                     costPrice: variant.cost || 0,
                     quantity: requestedQuantity,
-                    size: variant.productSize,
-                    color: variant.color,
+                    size: sanitizeVariantLabel(variant.productSize || variant.size),
+                    color: sanitizeVariantLabel(variant.color),
                     discount: 0,
                     maxQuantity: availableQuantity,
                 },
@@ -1350,6 +1443,79 @@ export default function EnhancedPOS() {
         setSearchTerm("");
         if (searchInputRef.current) searchInputRef.current.focus();
     };
+
+    const confirmSingleQuantitySelection = useCallback(() => {
+        if (!singleQuantityModal.open || !singleQuantityModal.variant) return;
+
+        const maxQuantity = Math.max(0, toNumberSafe(singleQuantityModal.maxQuantity, 0));
+        const requestedQuantity = Math.max(
+            1,
+            Math.min(maxQuantity, Math.floor(toNumberSafe(singleQuantityModal.quantity, 1)))
+        );
+
+        if (requestedQuantity <= 0) {
+            showToast("الكمية غير متاحة", "warning");
+            return;
+        }
+
+        const variantPayload = {
+            ...singleQuantityModal.variant,
+            product:
+                singleQuantityModal.variant.product ||
+                { name: singleQuantityModal.product?.name || "منتج" },
+            quantitySelected: requestedQuantity,
+            maxQuantity,
+            quantity: maxQuantity,
+            productSize: sanitizeVariantLabel(singleQuantityModal.variant.productSize),
+            color: sanitizeVariantLabel(singleQuantityModal.variant.color),
+        };
+
+        addToCart(variantPayload);
+        closeSingleQuantityModal();
+    }, [addToCart, closeSingleQuantityModal, showToast, singleQuantityModal]);
+
+    useEffect(() => {
+        if (!singleQuantityModal.open) return;
+
+        const handleQuantityModalKeyDown = (e) => {
+            if (!singleQuantityModal.open) return;
+
+            if (e.key === "Escape") {
+                e.preventDefault();
+                closeSingleQuantityModal();
+                return;
+            }
+
+            if (e.key === "Enter") {
+                e.preventDefault();
+                confirmSingleQuantitySelection();
+                return;
+            }
+
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSingleQuantityModal((prev) => ({
+                    ...prev,
+                    quantity: Math.min(
+                        prev.maxQuantity,
+                        Math.max(1, toNumberSafe(prev.quantity, 1) + 1)
+                    ),
+                }));
+                return;
+            }
+
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSingleQuantityModal((prev) => ({
+                    ...prev,
+                    quantity: Math.max(1, toNumberSafe(prev.quantity, 1) - 1),
+                }));
+            }
+        };
+
+        window.addEventListener("keydown", handleQuantityModalKeyDown);
+        return () => window.removeEventListener("keydown", handleQuantityModalKeyDown);
+    }, [closeSingleQuantityModal, confirmSingleQuantitySelection, singleQuantityModal.open]);
 
     /**
      * تحديث سعر أو كمية المنتج في السلة
@@ -1946,8 +2112,7 @@ export default function EnhancedPOS() {
                                     key={product.id}
                                     data-product-index={index}
                                     onClick={() => {
-                                        setSelectedProductIndex(index);
-                                        setSelectedProductForVariant(product);
+                                        handleProductSelection(product, index);
                                     }}
                                     onMouseEnter={() => setSelectedProductIndex(index)}
                                     style={{
@@ -1958,7 +2123,7 @@ export default function EnhancedPOS() {
                                 >
                                     <ProductCard
                                         product={product}
-                                        onClick={() => setSelectedProductForVariant(product)}
+                                        onClick={() => handleProductSelection(product, index)}
                                     />
                                     {selectedProductIndex === index && (
                                         <div
@@ -2026,8 +2191,7 @@ export default function EnhancedPOS() {
                                             key={product.id}
                                             data-product-index={index}
                                             onClick={() => {
-                                                setSelectedProductIndex(index);
-                                                setSelectedProductForVariant(product);
+                                                handleProductSelection(product, index);
                                             }}
                                             onMouseEnter={() => setSelectedProductIndex(index)}
                                             style={{
@@ -3000,6 +3164,107 @@ export default function EnhancedPOS() {
                 }}
                 onVariantIndexChange={(index) => setSelectedVariantIndex(index)}
             />
+
+            {singleQuantityModal.open && (
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        zIndex: 210,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                    }}
+                    onClick={closeSingleQuantityModal}
+                >
+                    <div
+                        style={{
+                            backgroundColor: "white",
+                            borderRadius: "12px",
+                            width: "100%",
+                            maxWidth: "380px",
+                            padding: "20px",
+                            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)",
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: 0, color: "#111827", fontSize: "20px" }}>
+                            {singleQuantityModal.product?.name || "المنتج"}
+                        </h3>
+                        <p style={{ margin: "8px 0 14px", color: "#6b7280", fontSize: "13px" }}>
+                            أدخل الكمية المطلوبة
+                        </p>
+
+                        <div style={{ marginBottom: "10px", fontSize: "13px", color: "#374151" }}>
+                            المتاح: <strong>{singleQuantityModal.maxQuantity}</strong>
+                        </div>
+
+                        <input
+                            type="number"
+                            min="1"
+                            max={singleQuantityModal.maxQuantity}
+                            value={singleQuantityModal.quantity}
+                            onChange={(e) => {
+                                const nextValue = Math.floor(toNumberSafe(e.target.value, 1));
+                                setSingleQuantityModal((prev) => ({
+                                    ...prev,
+                                    quantity: Math.min(
+                                        prev.maxQuantity,
+                                        Math.max(1, Number.isFinite(nextValue) ? nextValue : 1)
+                                    ),
+                                }));
+                            }}
+                            onFocus={(e) => e.target.select()}
+                            autoFocus
+                            style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                borderRadius: "8px",
+                                border: "1px solid #d1d5db",
+                                fontSize: "18px",
+                                fontWeight: "bold",
+                                textAlign: "center",
+                            }}
+                        />
+
+                        <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
+                            <button
+                                type="button"
+                                onClick={confirmSingleQuantitySelection}
+                                style={{
+                                    flex: 1,
+                                    padding: "10px 12px",
+                                    borderRadius: "8px",
+                                    border: "none",
+                                    backgroundColor: "#10b981",
+                                    color: "white",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                إضافة للسلة
+                            </button>
+                            <button
+                                type="button"
+                                onClick={closeSingleQuantityModal}
+                                style={{
+                                    flex: 1,
+                                    padding: "10px 12px",
+                                    borderRadius: "8px",
+                                    border: "1px solid #cbd5e1",
+                                    backgroundColor: "white",
+                                    color: "#334155",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                إلغاء
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <NewCustomerModal
                 isOpen={showNewCustomerModal}

@@ -66,7 +66,6 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
     productMetaMap,
     toggleId,
     openEdit,
-    duplicateProduct,
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
@@ -178,7 +177,6 @@ const ProductGridRow = React.memo(({ index, style, data }) => {
           <ProductRowActions
             product={product}
             onEdit={openEdit}
-            onDuplicate={duplicateProduct}
             onPrint={printBarcodes}
             onDelete={deleteProduct}
             onTransfer={openTransfer}
@@ -943,68 +941,6 @@ export default function Products() {
     notify('تم حذف المنتج', 'success');
   }, [notify, refreshVisibleProducts]);
 
-  const duplicateProduct = useCallback(async (product) => {
-    try {
-      const sourceProduct = await fetchProductDetails(product.id);
-      const sourceVariants = Array.isArray(sourceProduct.variants) ? sourceProduct.variants : [];
-      const sourceVariantsTotal = sourceVariants.reduce((sum, variant) => sum + nInt(variant.quantity, 0), 0);
-      const sourceInventoryTotal = nInt(
-        sourceProduct?.inventory?.totalQuantity,
-        nInt(sourceProduct?.inventory?.warehouseQty, 0) + nInt(sourceProduct?.inventory?.displayQty, 0)
-      );
-
-      const res = await window.api.addProduct({
-        name: `${sourceProduct.name} - نسخة`,
-        description: sourceProduct.description || null,
-        categoryId: sourceProduct.categoryId || null,
-        brand: sourceProduct.brand || null,
-        sku: null,
-        barcode: null,
-        image: sourceProduct.image || null,
-        basePrice: salePriceOf(sourceProduct),
-        cost: costPriceOf(sourceProduct),
-        unitName: nText(sourceProduct?.unitName) || DEFAULT_UNIT,
-        wholesalePrice: Math.max(0, nNum(sourceProduct?.wholesalePrice, salePriceOf(sourceProduct))),
-        minSalePrice: Math.max(0, nNum(sourceProduct?.minSalePrice, nNum(sourceProduct?.wholesalePrice, salePriceOf(sourceProduct)))),
-        isActive: sourceProduct.isActive ?? true,
-        type: sourceProduct.type || 'store',
-        hasVariants: sourceVariants.length > 0,
-        totalQuantity: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal
-      });
-      if (res?.error) throw new Error(res.error);
-
-      const newId = res.id;
-      for (const variant of sourceVariants) {
-        const add = await window.api.addVariant({
-          productId: newId,
-          size: variant.productSize || 'M',
-          color: variant.color || 'افتراضي',
-          price: Number(variant.price || salePriceOf(sourceProduct) || 0),
-          cost: Number(variant.cost || costPriceOf(sourceProduct) || 0),
-          quantity: nInt(variant.quantity, 0),
-          barcode: null
-        });
-        if (add?.error) throw new Error(add.error);
-      }
-
-      const inv = await window.api.updateInventory(newId, {
-        minStock: nInt(sourceProduct?.inventory?.minStock, 5),
-        maxStock: nInt(sourceProduct?.inventory?.maxStock, 100),
-        warehouseQty: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal,
-        displayQty: 0,
-        totalQuantity: sourceVariants.length > 0 ? sourceVariantsTotal : sourceInventoryTotal,
-        notes: nText(sourceProduct?.inventory?.notes) || null,
-        lastRestock: new Date().toISOString()
-      });
-      if (inv?.error) throw new Error(inv.error);
-
-      await refreshVisibleProducts();
-      notify('تم إنشاء نسخة من المنتج', 'success');
-    } catch (err) {
-      await safeAlert(err.message || 'فشل نسخ المنتج', null, { type: 'error', title: 'نسخ منتج' });
-    }
-  }, [fetchProductDetails, notify, refreshVisibleProducts]);
-
   const toggleId = useCallback((id) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -1617,7 +1553,6 @@ export default function Products() {
     productMetaMap,
     toggleId,
     openEdit,
-    duplicateProduct,
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
@@ -1632,7 +1567,6 @@ export default function Products() {
     productMetaMap,
     toggleId,
     openEdit,
-    duplicateProduct,
     printBarcodes,
     deleteProduct,
     showVariantsSummary,
@@ -1658,7 +1592,7 @@ export default function Products() {
             📤 {importing ? 'جاري الاستيراد...' : 'استيراد Excel'}
           </button>
           <button type="button" className="products-btn products-btn-dark" onClick={printSelected}>
-            ⚙️ استوديو باركود المحدد
+            🖨️ استوديو باركود المحدد
           </button>
           <button type="button" className="products-btn products-btn-primary" onClick={openCreate}>
             ➕ منتج جديد

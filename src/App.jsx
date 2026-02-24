@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
@@ -13,6 +13,7 @@ import Users from './pages/Users';
 import DebtReminders from './pages/DebtReminders';
 import Treasury from './pages/Treasury';
 import Warehouses from './pages/Warehouses';
+import Settings from './pages/Settings';
 import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge';
 import './index.css';
 
@@ -43,6 +44,7 @@ function App() {
       'suppliers',
       'treasury',
       'debtreminders',
+      'settings',
       'users'
     ]);
 
@@ -124,6 +126,8 @@ function App() {
         return <Treasury />;
       case 'debtreminders':
         return <DebtReminders />;
+      case 'settings':
+        return <Settings />;
       case 'users':
         return user?.role === 'ADMIN' ? <Users /> : <div>ليس لديك صلاحية</div>;
       default:
@@ -181,7 +185,7 @@ function App() {
         <nav style={{ flex: 1 }}>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             <NavItem page="pos" icon="🛒" label="فاتورة البيع" />
-            <NavItem page="purchases" icon="📥" label="فاتوره المشتريات" />
+            <NavItem page="purchases" icon="📥" label="فاتورة المشتريات" />
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
@@ -193,6 +197,7 @@ function App() {
             <NavItem page="suppliers" icon="🚚" label="الموردين" />
             <NavItem page="treasury" icon="🏦" label="الحسابات" />
             <NavItem page="debtreminders" icon="⚠️" label="تذكيرات الديون" />
+            <NavItem page="settings" icon="⚙️" label="الإعدادات" />
             {user?.role === 'ADMIN' && <NavItem page="users" icon="👤" label="المستخدمين" />}
           </ul>
         </nav>
@@ -245,3 +250,4 @@ function App() {
 }
 
 export default App;
+

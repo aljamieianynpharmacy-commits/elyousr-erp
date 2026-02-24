@@ -1,6 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Barcode, Camera, Plus, Save, Shuffle, Trash2, X } from 'lucide-react';
+import { AlertCircle, Barcode, Camera, Plus, Save, Shuffle, Trash2, X, Settings } from 'lucide-react';
 import './ProductModal.css';
+import UnitManagerModal from './UnitManagerModal';
 
 const TABS = {
   BASIC: 'basic',
@@ -76,6 +77,16 @@ const makeEan13 = () => {
   const partB = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
   const code12 = `20${partA}${partB}`;
   return `${code12}${calcEan13CheckDigit(code12)}`;
+};
+
+const DEFAULT_UNITS = ['قطعة', 'كرتونة', 'علبة', 'كيلو', 'لتر', 'متر', 'جرام', 'رزمة'];
+const loadCustomUnits = () => {
+  try {
+    const stored = localStorage.getItem('erp_custom_units');
+    return stored ? JSON.parse(stored) : DEFAULT_UNITS;
+  } catch {
+    return DEFAULT_UNITS;
+  }
 };
 
 const normalizeUnit = (unit, index) => {
@@ -179,7 +190,8 @@ export default function ProductModal({
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
   const [formData, setFormData] = useState(() => buildInitialState(initialData));
   const [validationMessage, setValidationMessage] = useState('');
-  const fileInputRef = useRef(null);
+  const [unitOptions, setUnitOptions] = useState(loadCustomUnits);
+  const [isUnitManagerOpen, setIsUnitManagerOpen] = useState(false);
 
   const isEditMode = mode === 'edit';
   const isBusy = isSaving || (isEditMode && isLoadingProduct);
@@ -797,13 +809,23 @@ export default function ProductModal({
                   <div className="form-row">
                     <label className="form-group">
                       <span>الوحدة الافتراضية</span>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={mainUnit.unitName}
-                        onChange={(event) => setUnitField('unitName', event.target.value)}
-                        placeholder="مثال: قطعة"
-                      />
+                      <div className="field-with-button">
+                        <select
+                          className="form-select"
+                          value={mainUnit.unitName}
+                          onChange={(event) => setUnitField('unitName', event.target.value)}
+                        >
+                          {!unitOptions.includes(mainUnit.unitName) && mainUnit.unitName ? (
+                            <option value={mainUnit.unitName}>{mainUnit.unitName}</option>
+                          ) : null}
+                          {unitOptions.map(u => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                        <button type="button" className="btn-icon" onClick={() => setIsUnitManagerOpen(true)} title="إدارة الوحدات">
+                          <Settings size={14} />
+                        </button>
+                      </div>
                     </label>
                     <label className="form-group">
                       <span>سعر الجملة</span>
@@ -992,6 +1014,18 @@ export default function ProductModal({
           </button>
         </div>
       </div>
+
+      <UnitManagerModal
+        isOpen={isUnitManagerOpen}
+        onClose={() => setIsUnitManagerOpen(false)}
+        units={unitOptions}
+        onUpdateUnits={(newUnits) => {
+          setUnitOptions(newUnits);
+          try {
+            localStorage.setItem('erp_custom_units', JSON.stringify(newUnits));
+          } catch (e) { }
+        }}
+      />
     </div>
   );
 }

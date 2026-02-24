@@ -224,6 +224,9 @@ ipcMain.handle('db:getVariants', async () => {
 ipcMain.handle('db:addVariant', async (event, variantData) => {
     return await dbService.addVariant(variantData);
 });
+ipcMain.handle('db:getProductHistory', async (event, variantId) => {
+    return await dbService.getProductHistory(variantId);
+});
 
 // Sales
 ipcMain.handle('db:getSales', async (event, options) => {

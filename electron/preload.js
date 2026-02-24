@@ -33,7 +33,6 @@ contextBridge.exposeInMainWorld('api', {
     updateVariantWarehouseStocks: (productId, stocks) => ipcRenderer.invoke('db:updateVariantWarehouseStocks', productId, stocks),
     transferProductBetweenWarehouses: (productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId) => ipcRenderer.invoke('db:transferProductBetweenWarehouses', productId, fromWarehouseId, toWarehouseId, quantity, notes, variantId),
     getWarehouseTransfers: (productId, limit) => ipcRenderer.invoke('db:getWarehouseTransfers', productId, limit),
-
     // Inventory
     getInventory: (productId) => ipcRenderer.invoke('db:getInventory', productId),
     updateInventory: (productId, inventoryData) => ipcRenderer.invoke('db:updateInventory', productId, inventoryData),
@@ -44,6 +43,7 @@ contextBridge.exposeInMainWorld('api', {
     addVariant: (variantData) => ipcRenderer.invoke('db:addVariant', variantData),
     updateVariant: (id, variantData) => ipcRenderer.invoke('db:updateVariant', id, variantData),
     deleteVariant: (id) => ipcRenderer.invoke('db:deleteVariant', id),
+    getProductHistory: (variantId) => ipcRenderer.invoke('db:getProductHistory', variantId),
 
     // Sales
     getSales: (options) => ipcRenderer.invoke('db:getSales', options),

@@ -8234,6 +8234,48 @@ const dbService = {
         }
     },
 
+    // ==================== PRODUCT HISTORY ====================
+    async getProductHistory(variantId) {
+        const perf = startPerfTimer('db:getProductHistory', { variantId });
+        try {
+            const id = parsePositiveInt(variantId);
+            if (!id) return { error: 'Invalid variant ID' };
+
+            const [firstPurchase, lastPurchase, lastSale] = await Promise.all([
+                // First Purchase
+                prisma.purchaseItem.findFirst({
+                    where: { variantId: id },
+                    orderBy: { purchase: { invoiceDate: 'asc' } },
+                    include: { purchase: { select: { invoiceDate: true } } }
+                }),
+                // Last Purchase
+                prisma.purchaseItem.findFirst({
+                    where: { variantId: id },
+                    orderBy: { purchase: { invoiceDate: 'desc' } },
+                    include: { purchase: { select: { invoiceDate: true } } }
+                }),
+                // Last Sale
+                prisma.saleItem.findFirst({
+                    where: { variantId: id },
+                    orderBy: { sale: { invoiceDate: 'desc' } },
+                    include: { sale: { select: { invoiceDate: true } } }
+                })
+            ]);
+
+            const history = {
+                firstPurchaseDate: firstPurchase?.purchase?.invoiceDate || null,
+                lastPurchaseDate: lastPurchase?.purchase?.invoiceDate || null,
+                lastSaleDate: lastSale?.sale?.invoiceDate || null
+            };
+
+            perf({ rows: 1 });
+            return history;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
     // ==================== USERS ====================
     async getUsers() {
         try {

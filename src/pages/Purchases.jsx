@@ -461,7 +461,7 @@ const CartItemRow = ({ item, onUpdate, onRemove, onShowDetails }) => (
                         justifyContent: "center",
                         fontSize: "16px",
                     }}
-                    title="تفاصيل المنتج والربح"
+                    title="تفاصيل المنتج السابقة"
                 >
                     ℹ️
                 </button>
@@ -2740,9 +2740,15 @@ export default function Purchases() {
                                                     updateCartItem(item.variantId, updates)
                                                 }
                                                 onRemove={() => removeFromCart(item.variantId)}
-                                                onShowDetails={() =>
-                                                    setProductDetailsModal({ open: true, item })
-                                                }
+                                                onShowDetails={async () => {
+                                                    try {
+                                                        const history = await window.api.getProductHistory(item.variantId);
+                                                        setProductDetailsModal({ open: true, item: { ...item, history } });
+                                                    } catch (err) {
+                                                        setProductDetailsModal({ open: true, item: { ...item, history: null } });
+                                                        console.error("Failed to load product history", err);
+                                                    }
+                                                }}
                                             />
                                         ))
                                     )}
@@ -3299,11 +3305,14 @@ export default function Purchases() {
                                     padding: "10px",
                                     backgroundColor: "#f9fafb",
                                     borderRadius: "8px",
+                                    border: "1px solid #e5e7eb",
                                 }}
                             >
-                                <span style={{ color: "#4b5563" }}>💰 سعر التكلفة:</span>
+                                <span style={{ color: "#4b5563" }}>📅 آخر بيع:</span>
                                 <span style={{ fontWeight: "bold", color: "#111827" }}>
-                                    {(productDetailsModal.item.costPrice || 0).toFixed(2)}
+                                    {productDetailsModal.item.history?.lastSaleDate
+                                        ? new Date(productDetailsModal.item.history.lastSaleDate).toLocaleDateString("ar-EG")
+                                        : "لا يوجد"}
                                 </span>
                             </div>
                             <div
@@ -3314,11 +3323,14 @@ export default function Purchases() {
                                     padding: "10px",
                                     backgroundColor: "#f9fafb",
                                     borderRadius: "8px",
+                                    border: "1px solid #e5e7eb",
                                 }}
                             >
-                                <span style={{ color: "#4b5563" }}>🏷️ سعر البيع:</span>
+                                <span style={{ color: "#4b5563" }}>⏳ أول شراء:</span>
                                 <span style={{ fontWeight: "bold", color: "#111827" }}>
-                                    {productDetailsModal.item.price.toFixed(2)}
+                                    {productDetailsModal.item.history?.firstPurchaseDate
+                                        ? new Date(productDetailsModal.item.history.firstPurchaseDate).toLocaleDateString("ar-EG")
+                                        : "لا يوجد"}
                                 </span>
                             </div>
                             <div
@@ -3327,20 +3339,16 @@ export default function Purchases() {
                                     justifyContent: "space-between",
                                     alignItems: "center",
                                     padding: "10px",
-                                    backgroundColor: "#ecfdf5",
+                                    backgroundColor: "#f9fafb",
                                     borderRadius: "8px",
-                                    border: "1px solid #d1fae5",
+                                    border: "1px solid #e5e7eb",
                                 }}
                             >
-                                <span style={{ color: "#059669", fontWeight: "bold" }}>
-                                    📈 الربح المتوقع:
-                                </span>
-                                <span style={{ fontWeight: "bold", color: "#059669" }}>
-                                    {(
-                                        (productDetailsModal.item.price -
-                                            (productDetailsModal.item.costPrice || 0)) *
-                                        productDetailsModal.item.quantity
-                                    ).toFixed(2)}{" "}
+                                <span style={{ color: "#4b5563" }}>🆕 أحدث شراء:</span>
+                                <span style={{ fontWeight: "bold", color: "#111827" }}>
+                                    {productDetailsModal.item.history?.lastPurchaseDate
+                                        ? new Date(productDetailsModal.item.history.lastPurchaseDate).toLocaleDateString("ar-EG")
+                                        : "لا يوجد"}
                                 </span>
                             </div>
                         </div>

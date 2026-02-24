@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
-import { safePrint } from '../printing/safePrint';
-import { generateInvoiceHTML } from '../printing/invoiceTemplate';
+import { safePrint } from '../../printing/safePrint';
+import { generateInvoiceHTML } from '../../printing/invoiceTemplate';
 import { APP_NAVIGATE_EVENT, emitPosEditorRequest } from '../utils/posEditorBridge';
 import { getCompanyPrintSettings } from '../utils/appSettings';
 import SaleActions from '../components/sales/SaleActions';

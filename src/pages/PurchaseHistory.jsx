@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
-import { safePrint } from '../printing/safePrint';
+import { safePrint } from '../../printing/safePrint';
 import { emitPurchaseEditorRequest } from '../utils/posEditorBridge';
 import SaleActions from '../components/sales/SaleActions';
 import './Sales.css';

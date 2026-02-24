@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>فاتورة البيع</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            direction: rtl;
+            background: white;
+            width: 80mm;
+            margin: 0 auto;
+            padding: 4mm;
+            color: #000;
+            font-size: 13px;
+            text-align: right;
+            line-height: 1.4;
+        }
+
+        .text-center { text-align: center; }
+        .text-left { text-align: left; }
+        .font-bold { font-weight: bold; }
+        .text-sm { font-size: 11px; }
+
+        .divider {
+            border-bottom: 1px dashed #000;
+            margin: 8px 0;
+        }
+        
+        .divider-thick {
+            border-bottom: 2px solid #000;
+            margin: 8px 0;
+        }
+
+        /* Header */
+        .receipt-header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .store-logo {
+            margin-bottom: 4px;
+        }
+        
+        .store-logo svg {
+            width: 36px;
+            height: 36px;
+        }
+
+        .store-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .store-info {
+            font-size: 12px;
+            color: #222;
+        }
+
+        /* Invoice Meta */
+        .invoice-meta {
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+
+        /* Customer Box */
+        .customer-box {
+            border: 1px solid #000;
+            border-radius: 4px;
+            padding: 6px;
+            margin: 8px 0;
+            font-size: 12px;
+        }
+        
+        .customer-title {
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .customer-title svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Items */
+        .items-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 4px 0;
+            border-bottom: 2px solid #000;
+            margin-bottom: 6px;
+        }
+        
+        .item-row {
+            padding: 5px 0;
+            border-bottom: 1px dotted #888;
+            page-break-inside: avoid;
+        }
+        
+        .item-row:last-child {
+            border-bottom: none;
+        }
+
+        .item-main {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 2px;
+        }
+        
+        .item-name {
+            flex: 1;
+            padding-left: 5px;
+        }
+
+        .item-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #333;
+        }
+        
+        .item-discount {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #000;
+        }
+
+        /* Totals */
+        .totals-section {
+            margin-top: 6px;
+        }
+        
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        
+        .total-row.discount-row {
+            font-size: 12px;
+        }
+        
+        .total-row.final-total {
+            font-size: 17px;
+            font-weight: bold;
+            padding: 6px 0;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            margin: 6px 0;
+        }
+        
+        .total-row.payment-info {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .total-row.remaining-info {
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px dashed #000;
+            padding: 4px;
+            margin-top: 4px;
+            border-radius: 4px;
+        }
+
+        /* Barcode & Footer */
+        .receipt-footer {
+            text-align: center;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px dashed #000;
+        }
+        
+        .barcode-container {
+            margin: 10px 0;
+            text-align: center;
+        }
+        
+        .barcode {
+            font-family: 'Libre Barcode 128', 'Courier New', monospace;
+            font-size: 38px;
+            line-height: 1;
+            letter-spacing: 0;
+        }
+        
+        .barcode-text {
+            font-family: monospace;
+            font-size: 13px;
+            letter-spacing: 3px;
+            margin-top: 2px;
+            font-weight: bold;
+        }
+        
+        .thank-you {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .system-info {
+            font-size: 10px;
+            margin-top: 10px;
+            color: #555;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 30px;
+            font-size: 15px;
+            font-weight: bold;
+        }
+
+        /* Print Specifics */
+        @media print {
+            @page {
+                margin: 0;
+                size: 80mm auto;
+            }
+            body {
+                width: 80mm;
+                padding: 4mm;
+            }
+        }
+        @media print and (max-width: 60mm) {
+            body {
+                width: 58mm;
+                padding: 3mm;
+                font-size: 12px;
+            }
+            .store-name { font-size: 16px; }
+            .total-row.final-total { font-size: 15px; }
+            .barcode { font-size: 32px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="content" class="loading">
+        جاري تجهيز الفاتورة...
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        function formatCurrency(amount) {
+            return Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function formatDateTime(date) {
+            const d = new Date(date);
+            const dateStr = d.toLocaleDateString('ar-EG', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            });
+            const timeStr = d.toLocaleTimeString('ar-EG', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+            return { date: dateStr, time: timeStr, full: `${dateStr} ${timeStr}` };
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        const icons = {
+            store: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>`,
+            user: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`
+        };
+
+        ipcRenderer.on('print-data', (event, payload) => {
+            const sale = payload?.sale || payload;
+            const company = payload?.company || {};
+            
+            if (!sale) {
+                document.getElementById('content').innerHTML = `
+                    <div class="text-center font-bold">خطأ في استلام بيانات الفاتورة</div>
+                `;
+                return;
+            }
+
+            try {
+                const dateTime = formatDateTime(sale.createdAt || new Date());
+                const customerName = sale.customer ? sale.customer.name : 'عميل نقدي';
+                const customerPhone = sale.customer?.phone || '';
+                const paymentType = sale.paymentMethod?.name || (sale.payment === 'Credit' ? 'آجل' : 'نقدي');
+                
+                const storeName = escapeHtml(company?.name || 'ERP SYSTEM');
+                const storeContactNumbers = escapeHtml(company?.contactNumbers || '');
+                const storeAddress = escapeHtml(company?.address || '');
+                const safeCustomerName = escapeHtml(customerName);
+                const safeCustomerPhone = escapeHtml(customerPhone);
+
+                // Build Items
+                let itemsHtml = '';
+                let itemsTotalQty = 0;
+                
+                sale.items.forEach((item, index) => {
+                    const name = item.variant?.product?.name || 'صنف غير معروف';
+                    const size = item.variant?.productSize || '';
+                    const color = item.variant?.color || '';
+                    const specs = [size, color].filter(s => s).join(' - ');
+                    
+                    const qty = Number(item.quantity) || 0;
+                    const price = Number(item.price) || 0;
+                    const discount = (Number(item.discount) || 0) * qty;
+                    
+                    const itemSubtotal = qty * price;
+                    const itemTotal = itemSubtotal - discount;
+                    itemsTotalQty += qty;
+
+                    itemsHtml += `
+                        <div class="item-row">
+                            <div class="item-main">
+                                <span class="item-name">${index + 1}. ${escapeHtml(name)} ${specs ? `<span class="text-sm">(${escapeHtml(specs)})</span>` : ''}</span>
+                                <span>${formatCurrency(itemTotal)}</span>
+                            </div>
+                            <div class="item-details">
+                                <span>الكمية: ${qty} × ${formatCurrency(price)}</span>
+                            </div>
+                            ${discount > 0 ? `
+                            <div class="item-discount">
+                                <span>خصم:</span>
+                                <span>-${formatCurrency(discount)}</span>
+                            </div>` : ''}
+                        </div>
+                    `;
+                });
+
+                // Calculate Totals
+                const subTotal = sale.items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
+                const itemsDiscount = sale.items.reduce((sum, item) => sum + (Number(item.discount) * Number(item.quantity)), 0);
+                const invoiceDiscount = Number(sale.discount) || 0;
+                const totalDiscount = itemsDiscount + invoiceDiscount;
+                
+                // Fallback to sale.total if calculated mismatch
+                const computedTotal = subTotal - totalDiscount;
+                const finalTotal = Number(sale.total) || computedTotal;
+                
+                const paidAmount = Number(sale.paid) || 0;
+                let remaining = finalTotal - paidAmount;
+                // Avoid -0.00
+                if(Math.abs(remaining) < 0.01) remaining = 0;
+
+                const saleIdStr = String(sale.id || '0').padStart(8, '0');
+
+                let contentHtml = `
+                    <div class="receipt-header">
+                        <div class="store-logo">${icons.store}</div>
+                        <div class="store-name">${storeName}</div>
+                        ${storeAddress ? `<div class="store-info">📍 ${storeAddress}</div>` : ''}
+                        ${storeContactNumbers ? `<div class="store-info">📞 ${storeContactNumbers}</div>` : ''}
+                    </div>
+
+                    <div class="divider-thick"></div>
+
+                    <div class="invoice-meta">
+                        <div class="meta-row font-bold" style="font-size: 14px; border-bottom: 1px dotted #ccc; padding-bottom: 3px; margin-bottom: 5px;">
+                            <span>فاتورة رقم:</span>
+                            <span>#${sale.id}</span>
+                        </div>
+                        <div class="meta-row">
+                            <span>التاريخ:</span>
+                            <span>${dateTime.date}</span>
+                        </div>
+                        <div class="meta-row">
+                            <span>الوقت:</span>
+                            <span>${dateTime.time}</span>
+                        </div>
+                        ${sale.user ? `
+                        <div class="meta-row">
+                            <span>الكاشير:</span>
+                            <span>${escapeHtml(sale.user.name || sale.user.username)}</span>
+                        </div>` : ''}
+                    </div>
+                `;
+
+                if (sale.customer || safeCustomerPhone) {
+                    contentHtml += `
+                        <div class="customer-box">
+                            <div class="customer-title">
+                                ${icons.user} ${safeCustomerName}
+                            </div>
+                            ${safeCustomerPhone ? `<div>الهاتف: ${safeCustomerPhone}</div>` : ''}
+                            ${sale.customer && Math.abs(Number(sale.customer.balance)) > 0 ? `
+                                <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #999;">
+                                    رصيد سابق: <span class="font-bold">${formatCurrency(Math.abs(sale.customer.balance))}</span> 
+                                    ${sale.customer.balance > 0 ? '(مديون)' : '(دائن)'}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    contentHtml += `
+                        <div class="customer-box">
+                            <div class="customer-title">${icons.user} عميل نقدي</div>
+                        </div>
+                    `;
+                }
+
+                contentHtml += `
+                    <div class="items-header">
+                        <span>الصنف</span>
+                        <span>الإجمالي</span>
+                    </div>
+
+                    <div class="items-list">
+                        ${itemsHtml}
+                    </div>
+
+                    <div class="divider-thick"></div>
+
+                    <div class="totals-section">
+                        <div class="total-row">
+                            <span>إجمالي الأصناف (${itemsTotalQty}):</span>
+                            <span>${formatCurrency(subTotal)}</span>
+                        </div>
+                `;
+                        
+                if (totalDiscount > 0) {
+                    contentHtml += `
+                        <div class="total-row discount-row">
+                            <span>خصم (${formatCurrency(itemsDiscount)} أصناف + ${formatCurrency(invoiceDiscount)} إضافي):</span>
+                            <span>-${formatCurrency(totalDiscount)}</span>
+                        </div>
+                    `;
+                }
+
+                contentHtml += `
+                        <div class="total-row final-total">
+                            <span>الصافي المطلوب:</span>
+                            <span>${formatCurrency(finalTotal)} ج.م</span>
+                        </div>
+
+                        <div class="total-row payment-info">
+                            <span>المدفوع (${paymentType}):</span>
+                            <span>${formatCurrency(paidAmount)} ج.م</span>
+                        </div>
+                `;
+
+                if (remaining !== 0) {
+                    contentHtml += `
+                        <div class="total-row remaining-info">
+                            <span>${remaining > 0 ? 'المتبقي (عليه):' : 'الباقي (له):'}</span>
+                            <span>${formatCurrency(Math.abs(remaining))} ج.م</span>
+                        </div>
+                    `;
+                } else {
+                    contentHtml += `
+                        <div class="text-center font-bold" style="margin-top: 10px; font-size: 14px;">
+                            ✓ تم السداد بالكامل
+                        </div>
+                    `;
+                }
+                        
+                if (sale.customer && remaining > 0) {
+                    const newBalance = Number(sale.customer.balance) + remaining;
+                    contentHtml += `
+                        <div class="text-center text-sm" style="margin-top: 8px;">
+                            إجمالي الحساب للسداد: <span class="font-bold">${formatCurrency(Math.abs(newBalance))}</span>
+                        </div>
+                    `;
+                }
+
+                contentHtml += `
+                    </div>
+
+                    <div class="receipt-footer">
+                        <div class="thank-you">شكراً لثقتكم بنا!</div>
+                        <div class="text-sm">احتفظ بالفاتورة لضمان حقوقك</div>
+                        
+                        <div class="barcode-container">
+                            <div class="barcode-text">*${saleIdStr}*</div>
+                        </div>
+
+                        <div class="system-info">
+                            ${dateTime.full} - Powered by ERP System
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('content').innerHTML = contentHtml;
+
+                // Wait for styles/fonts to apply then print
+                setTimeout(() => {
+                    window.print();
+                }, 300);
+
+            } catch (error) {
+                console.error('Print Layout Error:', error);
+                document.getElementById('content').innerHTML = `
+                    <div class="text-center">
+                        <div class="font-bold">عذراً، حدث خطأ أثناء إعداد الفاتورة</div>
+                        <div class="text-sm" style="margin-top:5px">${escapeHtml(error.message)}</div>
+                    </div>
+                `;
+            }
+        });
+    </script>
+</body>
+</html>

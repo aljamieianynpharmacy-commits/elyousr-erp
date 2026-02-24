@@ -698,7 +698,7 @@ ipcMain.handle('print:html', async (event, options) => {
             show: true,
             title: options.title || 'معاينة الطباعة',
             webPreferences: {
-                preload: path.join(__dirname, 'print-preload.js'),
+                preload: path.join(__dirname, '..', 'printing', 'print-preload.js'),
                 nodeIntegration: false,
                 contextIsolation: true
             }
@@ -803,7 +803,7 @@ ipcMain.handle('print:sale', async (event, saleId, companyInfo) => {
             }
         });
 
-        const printPath = path.join(__dirname, 'print.html');
+        const printPath = path.join(__dirname, '..', 'printing', 'print.html');
         await printWindow.loadFile(printPath);
 
         printWindow.webContents.send('print-data', {

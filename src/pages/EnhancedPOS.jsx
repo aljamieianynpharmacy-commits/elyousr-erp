@@ -2891,7 +2891,7 @@ export default function EnhancedPOS() {
                                                 onClick={() => updateInvoice({ paymentMethod: String(method.buttonValue) })}
                                                 style={{
                                                     flex: 1,
-                                                    padding: "11px", // Increased padding
+                                                    padding: "8px", // Increased padding
                                                     borderRadius: "6px",
                                                     border: `2px solid ${String(activeInvoice.paymentMethod || "") === String(method.buttonValue) ? method.color : "#e5e7eb"}`,
                                                     backgroundColor: String(activeInvoice.paymentMethod || "") === String(method.buttonValue) ? method.bg : "white",

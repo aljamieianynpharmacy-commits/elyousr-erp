@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { safeAlert } from '../utils/safeAlert';
-import { safePrint } from '../printing/safePrint';
+import { safePrint } from '../../printing/safePrint';
 import { safeConfirm } from '../utils/safeConfirm';
 import './Treasury.css';
 
@@ -1662,4 +1662,3 @@ export default function Treasury() {
     </div>
   );
 }
-

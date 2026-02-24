@@ -3,7 +3,7 @@
  * Returns pure HTML string for printing
  */
 
-import { CustomerLedgerService } from '../services/customerLedgerService';
+import { CustomerLedgerService } from '../src/services/customerLedgerService';
 
 export const generateReceiptHTML = (payment, customer) => {
   return `

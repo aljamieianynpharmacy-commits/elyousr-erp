@@ -3,7 +3,7 @@
  * Returns pure HTML string for printing
  */
 
-import { getCompanyPrintSettings } from '../utils/appSettings';
+import { getCompanyPrintSettings } from '../src/utils/appSettings';
 
 const escapeHtml = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')

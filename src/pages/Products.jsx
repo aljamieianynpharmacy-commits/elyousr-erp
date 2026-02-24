@@ -4,7 +4,7 @@ import JsBarcode from 'jsbarcode';
 import { FixedSizeList as List } from 'react-window';
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
-import { safePrint } from '../printing/safePrint';
+import { safePrint } from '../../printing/safePrint';
 import './Products.css';
 
 // Extracted components

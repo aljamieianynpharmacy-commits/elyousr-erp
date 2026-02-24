@@ -13,6 +13,7 @@ import {
     filterPosPaymentMethods,
     normalizePaymentMethodCode
 } from "../utils/paymentMethodFilters";
+import { getDefaultSaleType } from '../utils/appSettings';
 
 /**
  * Toast Notification Component
@@ -193,7 +194,7 @@ const createEmptyInvoice = (overrides = {}) => ({
     discount: 0,
     discountType: "value",
     paidAmount: "",
-    saleType: "نقدي",
+    saleType: getDefaultSaleType(),
     paymentMethod: "CASH",
     notes: "",
     editorMode: "sale",

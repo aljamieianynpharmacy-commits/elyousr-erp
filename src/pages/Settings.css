@@ -1,7 +1,7 @@
 .settings-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   padding-bottom: 20px;
 }
 
@@ -15,6 +15,30 @@
   margin: 8px 0 0;
   color: #64748b;
   font-size: 0.95rem;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-tab-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.settings-tab-btn.is-active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
 }
 
 .settings-card {
@@ -35,6 +59,25 @@
   margin: 8px 0 14px;
   color: #64748b;
   font-size: 0.88rem;
+}
+
+.settings-sale-type-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-sale-option {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .settings-range-wrap {
@@ -156,6 +199,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
 }
 
 .settings-mapping-row span {
@@ -178,6 +225,28 @@
   font-size: 0.73rem;
 }
 
+.settings-suggestions {
+  margin-top: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.settings-suggestions h3 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 0.96rem;
+}
+
+.settings-suggestions ul {
+  margin: 0;
+  padding-inline-start: 18px;
+  color: #334155;
+  font-size: 0.86rem;
+  line-height: 1.9;
+}
+
 @media (max-width: 768px) {
   .settings-card {
     padding: 14px;
@@ -189,5 +258,10 @@
 
   .settings-btn {
     width: 100%;
+  }
+
+  .settings-tab-btn {
+    width: 100%;
+    text-align: center;
   }
 }

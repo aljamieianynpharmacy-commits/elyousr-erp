@@ -359,7 +359,7 @@ export default function ProductModal({
       const marginPercent = Math.max(-100, toNum(value, 0));
       const salePrice = money(current.purchasePrice * (1 + (marginPercent / 100)));
       current.salePrice = salePrice;
-      current.wholesalePrice = Math.min(current.wholesalePrice, salePrice);
+      current.wholesalePrice = salePrice;
       current.minSalePrice = Math.min(current.minSalePrice, salePrice);
       return { ...prev, unit: current };
     });
@@ -890,6 +890,7 @@ export default function ProductModal({
                             <th>سعر الشراء</th>
                             <th>النسبة %</th>
                             <th>سعر البيع</th>
+                            <th>سعر الجملة</th>
                             {warehouses.length === 0 && <th>الكمية</th>}
                             {warehouses.map(wh => (<th key={wh.id}>{wh.icon || '🏭'} {wh.name}</th>))}
                             {warehouses.length > 0 && <th>الإجمالي</th>}
@@ -920,6 +921,17 @@ export default function ProductModal({
                                 </td>
                                 <td>
                                   <input type="number" min="0" step="0.01" value={variant.price} onChange={(event) => setVariantField(index, 'price', event.target.value)} />
+                                </td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    className="form-input"
+                                    value={mainUnit.wholesalePrice}
+                                    disabled={true}
+                                    title="السعر محدد للوحدة الافتراضية"
+                                  />
                                 </td>
                                 {warehouses.length === 0 && (
                                   <td>
@@ -959,6 +971,9 @@ export default function ProductModal({
                               </td>
                               <td>
                                 <input type="number" min="0" step="0.01" value={mainUnit.salePrice} onChange={(event) => setUnitField('salePrice', event.target.value)} />
+                              </td>
+                              <td>
+                                <input type="number" min="0" step="0.01" value={mainUnit.wholesalePrice} onChange={(event) => setUnitField('wholesalePrice', event.target.value)} />
                               </td>
                               {warehouses.length === 0 && (
                                 <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{stockTotalPreview}</td>

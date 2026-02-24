@@ -9,18 +9,35 @@ import {
   mapRowsWithCustomerImportMapping,
   sanitizeImportedCustomer
 } from '../utils/customerImportUtils';
+import { getAppSettings, saveAppSettings, normalizeSaleType } from '../utils/appSettings';
 import './Settings.css';
+
+const SETTINGS_TABS = [
+  { id: 'basic', label: 'الإعدادات الأساسية' },
+  { id: 'customers', label: 'إعدادات العملاء' },
+  { id: 'import', label: 'استيراد العملاء' }
+];
 
 const normalizeCustomerNameKey = (value) => String(value ?? '').trim().toLowerCase();
 const normalizeCustomerPhoneKey = (value) => String(value ?? '')
   .replace(/[^\d+]/g, '')
   .trim();
 
+const getRowStartIndex = (index, session) => {
+  const startAt = Number(session?.dataStartRowIndex || 2);
+  return startAt + index;
+};
+
 export default function Settings() {
   const customerImportInputRef = useRef(null);
 
+  const [activeTab, setActiveTab] = useState('basic');
+  const [savingBasicSettings, setSavingBasicSettings] = useState(false);
+  const [defaultSaleType, setDefaultSaleType] = useState(() => normalizeSaleType(getAppSettings().defaultSaleType));
+
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [allCustomers, setAllCustomers] = useState([]);
+
   const [overdueThreshold, setOverdueThreshold] = useState(() => {
     const saved = localStorage.getItem('overdueThreshold');
     return saved ? parseInt(saved, 10) : 30;
@@ -71,8 +88,8 @@ export default function Settings() {
   const customerStats = useMemo(() => {
     let debtedCount = 0;
     let compliantCount = 0;
-    let totalDebt = 0;
     let overdueCount = 0;
+    let totalDebt = 0;
 
     for (const customer of allCustomers) {
       const balance = Number(customer?.balance || 0);
@@ -91,8 +108,8 @@ export default function Settings() {
       totalItems: allCustomers.length,
       debtedCount,
       compliantCount,
-      totalDebt,
-      overdueCount
+      overdueCount,
+      totalDebt
     };
   }, [allCustomers, overdueThreshold]);
 
@@ -118,6 +135,35 @@ export default function Settings() {
 
     return sampleMap;
   }, [customerImportSession]);
+
+  const saveBasicSettings = async () => {
+    try {
+      setSavingBasicSettings(true);
+      saveAppSettings({
+        defaultSaleType: normalizeSaleType(defaultSaleType)
+      });
+      await safeAlert('تم حفظ الإعدادات الأساسية بنجاح', null, {
+        type: 'success',
+        title: 'الإعدادات الأساسية'
+      });
+    } catch (error) {
+      await safeAlert(error?.message || 'تعذر حفظ الإعدادات الأساسية', null, {
+        type: 'error',
+        title: 'الإعدادات الأساسية'
+      });
+    } finally {
+      setSavingBasicSettings(false);
+    }
+  };
+
+  const saveOverdueThreshold = async () => {
+    localStorage.setItem('overdueThreshold', String(tempThreshold));
+    setOverdueThreshold(tempThreshold);
+    await safeAlert('تم حفظ إعدادات العملاء بنجاح', null, {
+      type: 'success',
+      title: 'إعدادات العملاء'
+    });
+  };
 
   const closeCustomerImportSession = useCallback(() => {
     if (importingCustomers) return;
@@ -165,7 +211,7 @@ export default function Settings() {
     if (!headers.length) throw new Error('تعذر قراءة الأعمدة من الملف');
     if (!rows.length) throw new Error('الملف لا يحتوي على صفوف بيانات');
 
-    return { headers, rows };
+    return { headers, rows, dataStartRowIndex: 2 };
   }, []);
 
   const parseWorkbookCustomerRows = useCallback(async (file) => {
@@ -206,7 +252,12 @@ export default function Settings() {
     if (!headers.length) throw new Error('تعذر قراءة أعمدة ملف Excel');
     if (!dataRows.length) throw new Error('ورقة Excel لا تحتوي على بيانات');
 
-    return { headers, rows: dataRows, sheetName: firstSheetName };
+    return {
+      headers,
+      rows: dataRows,
+      sheetName: firstSheetName,
+      dataStartRowIndex: firstNonEmptyIndex + 2
+    };
   }, []);
 
   const importCustomersFile = async (event) => {
@@ -231,6 +282,7 @@ export default function Settings() {
         headers: parsed.headers,
         rows: parsed.rows,
         sheetName: parsed.sheetName || null,
+        dataStartRowIndex: parsed.dataStartRowIndex || 2,
         mapping: buildCustomerImportAutoMapping(parsed.headers)
       });
     } catch (err) {
@@ -253,6 +305,7 @@ export default function Settings() {
       'creditLimit',
       'customerType'
     ];
+
     const rows = [
       headers.join(','),
       [
@@ -296,7 +349,7 @@ export default function Settings() {
         customerImportSession.rows,
         customerImportSession.mapping
       ).map((mapped, index) => ({
-        sourceIndex: index + 2,
+        sourceIndex: getRowStartIndex(index, customerImportSession),
         customer: sanitizeImportedCustomer(mapped)
       }));
 
@@ -390,8 +443,8 @@ export default function Settings() {
           detail: rowErrors.length ? rowErrors.join('\n') : undefined
         }
       );
-    } catch (err) {
-      await safeAlert(err?.message || 'تعذر استيراد العملاء', null, {
+    } catch (error) {
+      await safeAlert(error?.message || 'تعذر استيراد العملاء', null, {
         type: 'error',
         title: 'استيراد العملاء'
       });
@@ -400,175 +453,243 @@ export default function Settings() {
     }
   }, [customerImportSession, importingCustomers, updateExistingOnImport, allCustomers, loadAllCustomers]);
 
-  const saveOverdueThreshold = () => {
-    localStorage.setItem('overdueThreshold', String(tempThreshold));
-    setOverdueThreshold(tempThreshold);
-    safeAlert('تم حفظ إعدادات العملاء بنجاح', null, { type: 'success', title: 'الإعدادات' });
-  };
-
   return (
     <div className="settings-page">
       <header className="settings-header">
         <h1>⚙️ الإعدادات</h1>
-        <p>إعدادات عامة للنظام مع أدوات إدارة العملاء والاستيراد.</p>
+        <p>إدارة إعدادات النظام بشكل مركزي.</p>
       </header>
 
-      <section className="settings-card">
-        <h2>👥 إعدادات العملاء</h2>
-        <p className="settings-hint">
-          التحكم في عدد الأيام التي بعدها يظهر العميل كمتأخر في الدفع.
-        </p>
-
-        <div className="settings-range-wrap">
-          <input
-            type="range"
-            min="7"
-            max="90"
-            step="1"
-            value={tempThreshold}
-            onChange={(event) => setTempThreshold(parseInt(event.target.value, 10))}
-            className="settings-range"
-          />
-          <div className="settings-range-value">{tempThreshold} يوم</div>
-        </div>
-
-        <div className="settings-stats-grid">
-          <div className="settings-stat-box">
-            <span>إجمالي العملاء</span>
-            <strong>{customerStats.totalItems}</strong>
-          </div>
-          <div className="settings-stat-box">
-            <span>عملاء مدينين</span>
-            <strong>{customerStats.debtedCount}</strong>
-          </div>
-          <div className="settings-stat-box">
-            <span>متأخرين (حسب الإعداد الحالي)</span>
-            <strong>{customerStats.overdueCount}</strong>
-          </div>
-          <div className="settings-stat-box">
-            <span>متأخرين (حسب القيمة الجديدة)</span>
-            <strong>{overduePreviewCount}</strong>
-          </div>
-        </div>
-
-        <div className="settings-actions">
-          <button type="button" onClick={saveOverdueThreshold} className="settings-btn settings-btn-primary">
-            حفظ إعدادات العملاء
-          </button>
-          <button type="button" onClick={loadAllCustomers} className="settings-btn settings-btn-secondary" disabled={loadingCustomers}>
-            {loadingCustomers ? 'جاري التحديث...' : 'تحديث البيانات'}
-          </button>
-        </div>
-      </section>
-
-      <section className="settings-card">
-        <h2>📤 استيراد العملاء</h2>
-        <p className="settings-hint">الملفات المدعومة: XLSX / XLS / CSV / TSV.</p>
-
-        <div className="settings-actions">
-          <button type="button" onClick={downloadCustomerImportTemplate} className="settings-btn settings-btn-secondary">
-            تنزيل قالب CSV
-          </button>
+      <div className="settings-tabs">
+        {SETTINGS_TABS.map((tab) => (
           <button
+            key={tab.id}
             type="button"
-            onClick={() => customerImportInputRef.current?.click()}
-            className="settings-btn settings-btn-primary"
-            disabled={importingCustomers}
+            className={`settings-tab-btn ${activeTab === tab.id ? 'is-active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
           >
-            {importingCustomers ? 'جاري الاستيراد...' : 'اختيار ملف'}
+            {tab.label}
           </button>
-        </div>
+        ))}
+      </div>
 
-        <input
-          ref={customerImportInputRef}
-          type="file"
-          accept=".xlsx,.xls,.csv,.tsv,.txt"
-          style={{ display: 'none' }}
-          onChange={importCustomersFile}
-        />
+      {activeTab === 'basic' && (
+        <section className="settings-card">
+          <h2>إعدادات البيع الأساسية</h2>
+          <p className="settings-hint">
+            نوع البيع الافتراضي يُطبّق على الفواتير الجديدة في شاشة نقطة البيع.
+          </p>
 
-        <label className="settings-check">
+          <div className="settings-sale-type-options">
+            <label className="settings-sale-option">
+              <input
+                type="radio"
+                name="defaultSaleType"
+                value="نقدي"
+                checked={defaultSaleType === 'نقدي'}
+                onChange={(event) => setDefaultSaleType(event.target.value)}
+              />
+              نقدي
+            </label>
+            <label className="settings-sale-option">
+              <input
+                type="radio"
+                name="defaultSaleType"
+                value="آجل"
+                checked={defaultSaleType === 'آجل'}
+                onChange={(event) => setDefaultSaleType(event.target.value)}
+              />
+              آجل
+            </label>
+          </div>
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              onClick={saveBasicSettings}
+              className="settings-btn settings-btn-primary"
+              disabled={savingBasicSettings}
+            >
+              {savingBasicSettings ? 'جاري الحفظ...' : 'حفظ الإعدادات الأساسية'}
+            </button>
+          </div>
+
+          <div className="settings-suggestions">
+            <h3>اقتراحات إعدادات إضافية</h3>
+            <ul>
+              <li>تحديد طريقة الدفع الافتراضية للفاتورة الجديدة.</li>
+              <li>تفعيل الطباعة التلقائية بعد حفظ الفاتورة.</li>
+              <li>إعداد نسبة ضريبة افتراضية قابلة للتعديل.</li>
+              <li>تحديد حد خصم أقصى للمستخدم العادي.</li>
+              <li>تفعيل التحذير عند تجاوز حد ائتمان العميل.</li>
+            </ul>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'customers' && (
+        <section className="settings-card">
+          <h2>إعدادات العملاء</h2>
+          <p className="settings-hint">التحكم في عدد الأيام قبل اعتبار العميل متأخرًا في الدفع.</p>
+
+          <div className="settings-range-wrap">
+            <input
+              type="range"
+              min="7"
+              max="90"
+              step="1"
+              value={tempThreshold}
+              onChange={(event) => setTempThreshold(parseInt(event.target.value, 10))}
+              className="settings-range"
+            />
+            <div className="settings-range-value">{tempThreshold} يوم</div>
+          </div>
+
+          <div className="settings-stats-grid">
+            <div className="settings-stat-box">
+              <span>إجمالي العملاء</span>
+              <strong>{customerStats.totalItems}</strong>
+            </div>
+            <div className="settings-stat-box">
+              <span>عملاء مدينين</span>
+              <strong>{customerStats.debtedCount}</strong>
+            </div>
+            <div className="settings-stat-box">
+              <span>متأخرون حاليًا</span>
+              <strong>{customerStats.overdueCount}</strong>
+            </div>
+            <div className="settings-stat-box">
+              <span>متأخرون بعد التعديل</span>
+              <strong>{overduePreviewCount}</strong>
+            </div>
+          </div>
+
+          <div className="settings-actions">
+            <button type="button" onClick={saveOverdueThreshold} className="settings-btn settings-btn-primary">
+              حفظ إعدادات العملاء
+            </button>
+            <button
+              type="button"
+              onClick={loadAllCustomers}
+              className="settings-btn settings-btn-secondary"
+              disabled={loadingCustomers}
+            >
+              {loadingCustomers ? 'جاري التحديث...' : 'تحديث البيانات'}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'import' && (
+        <section className="settings-card">
+          <h2>استيراد العملاء</h2>
+          <p className="settings-hint">الصيغ المدعومة: XLSX / XLS / CSV / TSV.</p>
+
+          <div className="settings-actions">
+            <button type="button" onClick={downloadCustomerImportTemplate} className="settings-btn settings-btn-secondary">
+              تنزيل قالب CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => customerImportInputRef.current?.click()}
+              className="settings-btn settings-btn-primary"
+              disabled={importingCustomers}
+            >
+              {importingCustomers ? 'جاري الاستيراد...' : 'اختيار ملف'}
+            </button>
+          </div>
+
           <input
-            type="checkbox"
-            checked={updateExistingOnImport}
-            onChange={(event) => setUpdateExistingOnImport(event.target.checked)}
-            disabled={importingCustomers}
+            ref={customerImportInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,.tsv,.txt"
+            style={{ display: 'none' }}
+            onChange={importCustomersFile}
           />
-          تحديث العميل الموجود عند تطابق الاسم أو الهاتف
-        </label>
 
-        {!customerImportSession && <div className="settings-empty">لم يتم اختيار ملف استيراد بعد.</div>}
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={updateExistingOnImport}
+              onChange={(event) => setUpdateExistingOnImport(event.target.checked)}
+              disabled={importingCustomers}
+            />
+            تحديث العميل الموجود عند تطابق الاسم أو الهاتف
+          </label>
 
-        {customerImportSession && (
-          <>
-            <div className="settings-import-meta">
-              <div><strong>الملف:</strong> {customerImportSession.fileName}</div>
-              <div>
-                <strong>الأعمدة:</strong> {customerImportSession.headers.length}
-                {' | '}
-                <strong>الصفوف:</strong> {customerImportSession.rows.length}
-                {customerImportSession.sheetName ? ` | Sheet: ${customerImportSession.sheetName}` : ''}
+          {!customerImportSession && <div className="settings-empty">لم يتم اختيار ملف استيراد بعد.</div>}
+
+          {customerImportSession && (
+            <>
+              <div className="settings-import-meta">
+                <div><strong>الملف:</strong> {customerImportSession.fileName}</div>
+                <div>
+                  <strong>الأعمدة:</strong> {customerImportSession.headers.length}
+                  {' | '}
+                  <strong>الصفوف:</strong> {customerImportSession.rows.length}
+                  {customerImportSession.sheetName ? ` | الورقة: ${customerImportSession.sheetName}` : ''}
+                </div>
               </div>
-            </div>
 
-            <div className="settings-mapping-grid">
-              {CUSTOMER_IMPORT_FIELD_OPTIONS.map((field) => {
-                const selectedColumn = customerImportSession.mapping?.[field.key] ?? '';
-                const sampleValue = selectedColumn ? customerImportColumnSamples.get(selectedColumn) : '';
+              <div className="settings-mapping-grid">
+                {CUSTOMER_IMPORT_FIELD_OPTIONS.map((field) => {
+                  const selectedColumn = customerImportSession.mapping?.[field.key] ?? '';
+                  const sampleValue = selectedColumn ? customerImportColumnSamples.get(selectedColumn) : '';
 
-                return (
-                  <label key={field.key} className="settings-mapping-row">
-                    <span>
-                      {field.label}
-                      {field.required ? ' *' : ''}
-                    </span>
-                    <select
-                      value={selectedColumn}
-                      onChange={(event) => updateCustomerImportFieldMapping(field.key, event.target.value)}
-                      disabled={importingCustomers}
-                    >
-                      <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
-                      {customerImportSession.headers.map((header) => (
-                        <option key={`${field.key}-${header.id}`} value={header.id}>
-                          {header.label}
-                        </option>
-                      ))}
-                    </select>
-                    <small>{sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}</small>
-                  </label>
-                );
-              })}
-            </div>
+                  return (
+                    <label key={field.key} className="settings-mapping-row">
+                      <span>
+                        {field.label}
+                        {field.required ? ' *' : ''}
+                      </span>
+                      <select
+                        value={selectedColumn}
+                        onChange={(event) => updateCustomerImportFieldMapping(field.key, event.target.value)}
+                        disabled={importingCustomers}
+                      >
+                        <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
+                        {customerImportSession.headers.map((header) => (
+                          <option key={`${field.key}-${header.id}`} value={header.id}>
+                            {header.label}
+                          </option>
+                        ))}
+                      </select>
+                      <small>{sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}</small>
+                    </label>
+                  );
+                })}
+              </div>
 
-            <div className="settings-actions">
-              <button
-                type="button"
-                onClick={applyCustomerImportAutoMapping}
-                className="settings-btn settings-btn-secondary"
-                disabled={importingCustomers}
-              >
-                مطابقة تلقائية
-              </button>
-              <button
-                type="button"
-                onClick={closeCustomerImportSession}
-                className="settings-btn settings-btn-secondary"
-                disabled={importingCustomers}
-              >
-                إلغاء الملف
-              </button>
-              <button
-                type="button"
-                onClick={startCustomerImport}
-                className="settings-btn settings-btn-primary"
-                disabled={importingCustomers}
-              >
-                {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  onClick={applyCustomerImportAutoMapping}
+                  className="settings-btn settings-btn-secondary"
+                  disabled={importingCustomers}
+                >
+                  مطابقة تلقائية
+                </button>
+                <button
+                  type="button"
+                  onClick={closeCustomerImportSession}
+                  className="settings-btn settings-btn-secondary"
+                  disabled={importingCustomers}
+                >
+                  إلغاء الملف
+                </button>
+                <button
+                  type="button"
+                  onClick={startCustomerImport}
+                  className="settings-btn settings-btn-primary"
+                  disabled={importingCustomers}
+                >
+                  {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
     </div>
   );
 }

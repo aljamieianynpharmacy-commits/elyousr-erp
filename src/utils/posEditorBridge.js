@@ -1,8 +1,9 @@
 export const APP_NAVIGATE_EVENT = 'erp:navigate';
+export const APP_OPEN_LICENSE_EVENT = 'erp:open-license';
 export const POS_EDITOR_REQUEST_EVENT = 'erp:pos-editor-request';
 export const POS_EDITOR_REQUEST_KEY = 'erp.posEditorRequest';
 
-export const emitPosEditorRequest = (payload) => {
+const emitEditorRequest = (payload, page = 'pos') => {
   if (typeof window === 'undefined' || !payload) return;
 
   const request = {
@@ -19,9 +20,17 @@ export const emitPosEditorRequest = (payload) => {
   window.dispatchEvent(new CustomEvent(POS_EDITOR_REQUEST_EVENT, { detail: request }));
   window.dispatchEvent(
     new CustomEvent(APP_NAVIGATE_EVENT, {
-      detail: { page: 'pos', reason: 'open-editor' }
+      detail: { page, reason: 'open-editor' }
     })
   );
+};
+
+export const emitPosEditorRequest = (payload) => {
+  emitEditorRequest(payload, 'pos');
+};
+
+export const emitPurchaseEditorRequest = (payload) => {
+  emitEditorRequest(payload, 'purchases');
 };
 
 export const readPosEditorRequest = () => {
@@ -43,4 +52,14 @@ export const clearPosEditorRequest = () => {
   } catch (error) {
     console.error('Failed to clear POS editor request:', error);
   }
+};
+
+export const emitOpenLicenseManagerRequest = () => {
+  if (typeof window === 'undefined') return;
+
+  window.dispatchEvent(
+    new CustomEvent(APP_OPEN_LICENSE_EVENT, {
+      detail: { source: 'settings', requestedAt: Date.now() }
+    })
+  );
 };

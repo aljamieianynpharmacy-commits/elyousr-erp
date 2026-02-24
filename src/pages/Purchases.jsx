@@ -95,8 +95,9 @@ const useInvoiceCalculations = (invoice) => {
             0,
             subTotal - totalDiscount - billDiscount,
         );
-        const paid = parseFloat(invoice.paidAmount) || 0;
-        const remaining = total - paid;
+        const rawPaid = parseFloat(invoice.paidAmount);
+        const paid = Math.max(0, Math.min(Number.isFinite(rawPaid) ? rawPaid : 0, total));
+        const remaining = Math.max(0, total - paid);
 
         return { subTotal, totalDiscount, total, paid, remaining, billDiscount };
     }, [invoice.cart, invoice.discount, invoice.discountType, invoice.paidAmount]);
@@ -1094,7 +1095,8 @@ export default function Purchases() {
         const resolvedCustomer =
             request?.customer ||
             sale?.customer ||
-            customers.find((item) => String(item.id) === String(sale.customerId)) ||
+            sale?.supplier ||
+            customers.find((item) => String(item.id) === String(sale.customerId || sale.supplierId)) ||
             null;
 
         const saleItems = Array.isArray(sale.items) ? sale.items : [];
@@ -1151,6 +1153,7 @@ export default function Purchases() {
             sourceSaleId: sale.id,
             sourcePaymentId: null,
             paymentEdit: null,
+            warehouseId: sale?.warehouseId || null,
         });
     }, [customers, variantQuantityById]);
 
@@ -1188,7 +1191,7 @@ export default function Purchases() {
     const openIncomingEditorRequest = useCallback((request) => {
         if (!request?.type) return false;
 
-        if (request.type === "sale") {
+        if (request.type === "sale" || request.type === "purchase") {
             const invoice = buildSaleEditInvoice(request);
             if (!invoice) return false;
 
@@ -1521,6 +1524,11 @@ export default function Purchases() {
             }
 
             if (!currentInvoice || currentInvoice.cart.length === 0) return;
+            const isEditingPurchase = Boolean(
+                currentInvoice.isEditMode &&
+                currentInvoice.editorMode === "sale" &&
+                currentInvoice.sourceSaleId
+            );
 
             // إجبار المستخدم على اختيار مخزن
             if (!currentInvoice.warehouseId) {
@@ -1543,7 +1551,8 @@ export default function Purchases() {
                 0,
                 subTotal - totalDiscount - (parseFloat(currentInvoice.discount) || 0),
             );
-            const paid = parseFloat(currentInvoice.paidAmount) || 0;
+            const rawPaid = parseFloat(currentInvoice.paidAmount);
+            const paid = Math.max(0, Math.min(Number.isFinite(rawPaid) ? rawPaid : 0, total));
             const remaining = total - paid;
 
             let finalSaleType = currentInvoice.saleType;
@@ -1601,7 +1610,11 @@ export default function Purchases() {
                     : [],
             };
 
-            if (shouldPreview) {
+            if (shouldPreview && isEditingPurchase) {
+                showToast("معاينة الطباعة متاحة عند إنشاء فاتورة جديدة فقط", "warning");
+            }
+
+            if (shouldPreview && !isEditingPurchase) {
                 const result = await window.api.createPurchase(saleData);
                 if (result.error) {
                     showToast("خطأ: " + result.error, "error");
@@ -1637,7 +1650,12 @@ export default function Purchases() {
                 return;
             }
 
-            const result = await window.api.createPurchase(saleData);
+            const result = isEditingPurchase
+                ? await window.api.updatePurchase(currentInvoice.sourceSaleId, saleData)
+                : await window.api.createPurchase(saleData);
+            const persistedPurchaseId = isEditingPurchase
+                ? currentInvoice.sourceSaleId
+                : (result.id || result.saleId || result?.data?.id);
             if (result.error) {
                 showToast("خطأ: " + result.error, "error");
                 return;
@@ -1645,7 +1663,7 @@ export default function Purchases() {
 
             if (shouldPrint) {
                 const previewSale = {
-                    id: result.id || result.saleId,
+                    id: persistedPurchaseId,
                     createdAt: new Date().toISOString(),
                     invoiceDate:
                         currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
@@ -1673,16 +1691,30 @@ export default function Purchases() {
             }
 
             loadData(true);
-            resetInvoice();
+            if (isEditingPurchase) {
+                closeEditTabAndGoToFreshInvoice(currentInvoice.id);
+            } else {
+                resetInvoice();
+            }
 
             setTimeout(() => {
                 if (searchInputRef.current) searchInputRef.current.focus();
             }, 100);
 
-            showToast("✅ تم حفظ فاتورة المشتريات بنجاح", "success");
+            showToast(
+                isEditingPurchase
+                    ? "✅ تم تعديل فاتورة المشتريات بنجاح"
+                    : "✅ تم حفظ فاتورة المشتريات بنجاح",
+                "success"
+            );
         } catch (err) {
             console.error(err);
-            showToast("خطأ في الاتصال بالقاعدة", "error");
+            const errMessage = String(err?.message || "");
+            if (errMessage.includes("No handler registered for 'db:updatePurchase'")) {
+                showToast("لازم تقفل التطبيق وتفتحه تاني بعد التحديث عشان التعديل يشتغل", "error");
+            } else {
+                showToast("خطأ في الاتصال بالقاعدة", "error");
+            }
         } finally {
             isFirstOpenRef.current = false;
             setIsSaving(false);

@@ -38,3 +38,11 @@ contextBridge.exposeInMainWorld('api', {
   // UI
   showMessageBox: (options) => ipcRenderer.invoke('ui:messageBox', options)
 });
+
+contextBridge.exposeInMainWorld('licensing', {
+  getStatus: () => ipcRenderer.invoke('licensing:getStatus'),
+  activateFromJson: (licenseJsonText, options) =>
+    ipcRenderer.invoke('licensing:activateFromJson', licenseJsonText, options),
+  remove: () => ipcRenderer.invoke('licensing:remove'),
+  getDeviceFingerprint: () => ipcRenderer.invoke('licensing:getDeviceFingerprint')
+});

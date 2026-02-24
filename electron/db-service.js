@@ -1408,6 +1408,90 @@ const resolvePaymentSplits = async (
     return resolvedSplits;
 };
 
+const buildPurchasePaymentPresentationMap = async (txOrClient, purchaseIds = []) => {
+    const uniquePurchaseIds = [...new Set(
+        (Array.isArray(purchaseIds) ? purchaseIds : [])
+            .map((id) => parsePositiveInt(id))
+            .filter(Boolean)
+    )];
+
+    if (uniquePurchaseIds.length === 0) return new Map();
+
+    const treasuryEntries = await txOrClient.treasuryEntry.findMany({
+        where: {
+            referenceType: 'PURCHASE',
+            referenceId: { in: uniquePurchaseIds },
+            entryType: TREASURY_ENTRY_TYPE.PURCHASE_PAYMENT
+        },
+        select: {
+            referenceId: true,
+            paymentMethod: {
+                select: {
+                    id: true,
+                    name: true,
+                    code: true
+                }
+            }
+        },
+        orderBy: [
+            { referenceId: 'asc' },
+            { id: 'asc' }
+        ]
+    });
+
+    const groupedByPurchaseId = new Map();
+    for (const entry of treasuryEntries) {
+        const purchaseId = parsePositiveInt(entry?.referenceId);
+        if (!purchaseId) continue;
+        if (!groupedByPurchaseId.has(purchaseId)) {
+            groupedByPurchaseId.set(purchaseId, []);
+        }
+        groupedByPurchaseId.get(purchaseId).push(entry);
+    }
+
+    const presentationMap = new Map();
+    for (const purchaseId of uniquePurchaseIds) {
+        const entries = groupedByPurchaseId.get(purchaseId) || [];
+        let primaryMethod = null;
+        const methodNames = [];
+        const seenMethodIds = new Set();
+
+        for (const entry of entries) {
+            const method = entry?.paymentMethod;
+            const methodId = parsePositiveInt(method?.id);
+            if (!methodId) continue;
+
+            if (!primaryMethod) {
+                primaryMethod = {
+                    id: methodId,
+                    name: method?.name || null,
+                    code: method?.code || null
+                };
+            }
+
+            if (seenMethodIds.has(methodId)) continue;
+            seenMethodIds.add(methodId);
+
+            const methodLabel = String(method?.name || method?.code || '').trim();
+            if (methodLabel) {
+                methodNames.push(methodLabel);
+            }
+        }
+
+        const payment = methodNames.length > 0
+            ? methodNames.join(' + ')
+            : null;
+
+        presentationMap.set(purchaseId, {
+            payment,
+            paymentMethod: primaryMethod,
+            paymentMethodCode: primaryMethod?.code || null
+        });
+    }
+
+    return presentationMap;
+};
+
 const getSaleOutstandingRowsForAllocation = async (
     txOrClient,
     customerId,
@@ -4488,15 +4572,32 @@ const dbService = {
                 orderBy: { createdAt: 'desc' }
             });
 
-            return purchases.map((purchase) => ({
-                ...purchase,
-                items: Array.isArray(purchase.items)
-                    ? purchase.items.map((item) => ({
-                        ...item,
-                        price: toNumber(item.cost, 0)
-                    }))
-                    : []
-            }));
+            const paymentPresentationByPurchaseId = await buildPurchasePaymentPresentationMap(
+                prisma,
+                purchases.map((purchase) => purchase?.id)
+            );
+
+            return purchases.map((purchase) => {
+                const paymentPresentation = paymentPresentationByPurchaseId.get(purchase.id) || {};
+                const totalAmount = Math.max(0, toNumber(purchase?.total, 0));
+                const paidAmount = Math.max(0, toNumber(purchase?.paid, 0));
+                const fallbackPaymentLabel = paidAmount <= 0
+                    ? (totalAmount > 0 ? 'آجل' : null)
+                    : (paidAmount + 0.01 >= totalAmount ? 'نقدي' : 'جزئي');
+
+                return {
+                    ...purchase,
+                    payment: paymentPresentation.payment || fallbackPaymentLabel || null,
+                    paymentMethod: paymentPresentation.paymentMethod || null,
+                    paymentMethodCode: paymentPresentation.paymentMethodCode || null,
+                    items: Array.isArray(purchase.items)
+                        ? purchase.items.map((item) => ({
+                            ...item,
+                            price: toNumber(item.cost, 0)
+                        }))
+                        : []
+                };
+            });
         } catch (error) {
             return { error: error.message };
         }
@@ -4528,8 +4629,22 @@ const dbService = {
             });
 
             if (!purchase) return { error: 'Purchase not found' };
+            const paymentPresentationByPurchaseId = await buildPurchasePaymentPresentationMap(
+                prisma,
+                [purchase.id]
+            );
+            const paymentPresentation = paymentPresentationByPurchaseId.get(purchase.id) || {};
+            const totalAmount = Math.max(0, toNumber(purchase?.total, 0));
+            const paidAmount = Math.max(0, toNumber(purchase?.paid, 0));
+            const fallbackPaymentLabel = paidAmount <= 0
+                ? (totalAmount > 0 ? 'آجل' : null)
+                : (paidAmount + 0.01 >= totalAmount ? 'نقدي' : 'جزئي');
+
             return {
                 ...purchase,
+                payment: paymentPresentation.payment || fallbackPaymentLabel || null,
+                paymentMethod: paymentPresentation.paymentMethod || null,
+                paymentMethodCode: paymentPresentation.paymentMethodCode || null,
                 items: Array.isArray(purchase.items)
                     ? purchase.items.map((item) => ({
                         ...item,
@@ -4715,6 +4830,375 @@ const dbService = {
                 return newPurchase;
             });
         } catch (error) {
+            return { error: error.message };
+        }
+    },
+
+    // ==================== PURCHASES (MANAGE) ====================
+    async deletePurchase(purchaseId) {
+        const perf = startPerfTimer('db:deletePurchase', {
+            purchaseId: parseInt(purchaseId, 10) || null
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedPurchaseId = parsePositiveInt(purchaseId);
+                if (!parsedPurchaseId) {
+                    return { error: 'Invalid purchase id' };
+                }
+
+                const purchase = await tx.purchase.findUnique({
+                    where: { id: parsedPurchaseId },
+                    include: {
+                        items: true,
+                        returns: {
+                            select: { id: true }
+                        }
+                    }
+                });
+                if (!purchase) {
+                    return { error: 'Purchase not found' };
+                }
+
+                if (Array.isArray(purchase.returns) && purchase.returns.length > 0) {
+                    return { error: 'لا يمكن حذف فاتورة مشتريات مرتبطة بمرتجع مشتريات.' };
+                }
+
+                const oldOutstanding = Math.max(0, toNumber(purchase.total, 0) - toNumber(purchase.paid, 0));
+                const affectedProductIds = new Set();
+
+                for (const item of purchase.items || []) {
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(0, toInteger(item?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variantRecord = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true, quantity: true }
+                    });
+                    if (!variantRecord) {
+                        throw new Error(`Variant not found (id: ${variantId})`);
+                    }
+
+                    if (toNumber(variantRecord.quantity, 0) < quantity) {
+                        throw new Error('لا يمكن حذف الفاتورة لأن بعض الأصناف تم استخدامها من المخزون.');
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+
+                    if (variantRecord.productId) {
+                        affectedProductIds.add(variantRecord.productId);
+                    }
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PURCHASE', parsedPurchaseId);
+                throwIfResultError(rollbackResult, 'Failed to rollback purchase treasury entries');
+
+                await tx.purchaseItem.deleteMany({
+                    where: { purchaseId: parsedPurchaseId }
+                });
+
+                const deletedPurchase = await tx.purchase.delete({
+                    where: { id: parsedPurchaseId }
+                });
+
+                if (purchase.supplierId && oldOutstanding > 0) {
+                    await tx.supplier.update({
+                        where: { id: purchase.supplierId },
+                        data: { balance: { increment: oldOutstanding } }
+                    });
+                }
+
+                return { success: true, data: deletedPurchase };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async updatePurchase(purchaseId, purchaseData) {
+        const perf = startPerfTimer('db:updatePurchase', {
+            purchaseId: parseInt(purchaseId, 10) || null,
+            hasSupplier: Object.prototype.hasOwnProperty.call(purchaseData || {}, 'supplierId'),
+            itemCount: Array.isArray(purchaseData?.items) ? purchaseData.items.length : 0
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedPurchaseId = parsePositiveInt(purchaseId);
+                if (!parsedPurchaseId) {
+                    return { error: 'Invalid purchase id' };
+                }
+
+                const currentPurchase = await tx.purchase.findUnique({
+                    where: { id: parsedPurchaseId },
+                    include: {
+                        items: true,
+                        returns: {
+                            select: { id: true }
+                        }
+                    }
+                });
+                if (!currentPurchase) {
+                    return { error: 'Purchase not found' };
+                }
+
+                if (Array.isArray(currentPurchase.returns) && currentPurchase.returns.length > 0) {
+                    return { error: 'لا يمكن تعديل فاتورة مشتريات مرتبطة بمرتجع مشتريات.' };
+                }
+
+                if (!Array.isArray(purchaseData?.items) || purchaseData.items.length === 0) {
+                    return { error: 'Purchase items are required' };
+                }
+
+                const newSupplierId = Object.prototype.hasOwnProperty.call(purchaseData || {}, 'supplierId')
+                    ? parsePositiveInt(purchaseData?.supplierId)
+                    : currentPurchase.supplierId;
+
+                const safeTotal = Math.max(0, toNumber(
+                    Object.prototype.hasOwnProperty.call(purchaseData || {}, 'total')
+                        ? purchaseData.total
+                        : currentPurchase.total,
+                    0
+                ));
+                const safePaid = Math.max(0, Math.min(
+                    toNumber(
+                        Object.prototype.hasOwnProperty.call(purchaseData || {}, 'paid')
+                            ? purchaseData.paid
+                            : currentPurchase.paid,
+                        0
+                    ),
+                    safeTotal
+                ));
+                const invoiceDate = parseDateOrDefault(
+                    purchaseData?.invoiceDate ?? currentPurchase.createdAt,
+                    currentPurchase.createdAt || new Date()
+                );
+                const oldOutstanding = Math.max(0, toNumber(currentPurchase.total, 0) - toNumber(currentPurchase.paid, 0));
+
+                const resolvedPaymentMethodId = await resolvePaymentMethodId(
+                    tx,
+                    purchaseData?.paymentMethodId ?? purchaseData?.paymentMethod ?? purchaseData?.payment,
+                    1
+                );
+                const affectedProductIds = new Set();
+
+                // Remove old purchase impact from stock first.
+                for (const item of currentPurchase.items || []) {
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(0, toInteger(item?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variantRecord = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true, quantity: true }
+                    });
+                    if (!variantRecord) {
+                        throw new Error(`Variant not found (id: ${variantId})`);
+                    }
+
+                    if (toNumber(variantRecord.quantity, 0) < quantity) {
+                        throw new Error('لا يمكن تعديل الفاتورة لأن بعض الأصناف تم استخدامها من المخزون.');
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+
+                    if (variantRecord.productId) {
+                        affectedProductIds.add(variantRecord.productId);
+                    }
+                }
+
+                await tx.purchaseItem.deleteMany({
+                    where: { purchaseId: parsedPurchaseId }
+                });
+
+                const parsedWarehouseId = parsePositiveInt(purchaseData?.warehouseId);
+
+                // Apply new purchase items.
+                for (let i = 0; i < purchaseData.items.length; i++) {
+                    const item = purchaseData.items[i];
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(1, toInteger(item?.quantity, 1));
+                    const cost = Math.max(0, toNumber(item?.cost ?? item?.price, 0));
+
+                    if (!variantId) {
+                        throw new Error('Invalid variantId in purchase items');
+                    }
+
+                    const variantRecord = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true }
+                    });
+                    if (!variantRecord) {
+                        throw new Error(`Variant not found (id: ${variantId})`);
+                    }
+
+                    await tx.purchaseItem.create({
+                        data: {
+                            id: i + 1,
+                            purchaseId: parsedPurchaseId,
+                            variantId,
+                            quantity,
+                            cost
+                        }
+                    });
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { increment: quantity },
+                            cost
+                        }
+                    });
+
+                    if (variantRecord.productId) {
+                        affectedProductIds.add(variantRecord.productId);
+                    }
+
+                    if (parsedWarehouseId && variantRecord.productId) {
+                        try {
+                            await tx.variantWarehouseStock.upsert({
+                                where: {
+                                    variantId_warehouseId: {
+                                        variantId,
+                                        warehouseId: parsedWarehouseId
+                                    }
+                                },
+                                update: { quantity: { increment: quantity } },
+                                create: {
+                                    variantId,
+                                    warehouseId: parsedWarehouseId,
+                                    quantity
+                                }
+                            });
+                        } catch (warehouseError) {
+                            if (isVariantWarehouseStockTableMissingError(warehouseError)) {
+                                await tx.warehouseStock.upsert({
+                                    where: {
+                                        productId_warehouseId: {
+                                            productId: variantRecord.productId,
+                                            warehouseId: parsedWarehouseId
+                                        }
+                                    },
+                                    update: { quantity: { increment: quantity } },
+                                    create: {
+                                        productId: variantRecord.productId,
+                                        warehouseId: parsedWarehouseId,
+                                        quantity
+                                    }
+                                });
+                            } else if (!isWarehouseSchemaMissingError(warehouseError)) {
+                                throw warehouseError;
+                            } else {
+                                logWarehouseSchemaFallback('updatePurchase', warehouseError);
+                            }
+                        }
+                    }
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                if (currentPurchase.supplierId && oldOutstanding > 0) {
+                    await tx.supplier.update({
+                        where: { id: currentPurchase.supplierId },
+                        data: { balance: { increment: oldOutstanding } }
+                    });
+                }
+
+                const newOutstanding = Math.max(0, safeTotal - safePaid);
+                if (newSupplierId && newOutstanding > 0) {
+                    await tx.supplier.update({
+                        where: { id: newSupplierId },
+                        data: { balance: { decrement: newOutstanding } }
+                    });
+                }
+
+                const updatedPurchase = await tx.purchase.update({
+                    where: { id: parsedPurchaseId },
+                    data: {
+                        supplierId: newSupplierId || null,
+                        total: safeTotal,
+                        paid: safePaid,
+                        notes: purchaseData?.notes || null,
+                        createdAt: invoiceDate
+                    },
+                    include: {
+                        supplier: true,
+                        items: true,
+                        returns: true
+                    }
+                });
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PURCHASE', parsedPurchaseId);
+                throwIfResultError(rollbackResult, 'Failed to rollback purchase treasury entries');
+
+                if (safePaid > 0) {
+                    const purchaseTreasuryId = await resolveTreasuryId(tx, purchaseData?.treasuryId);
+                    const splitRows = await resolvePaymentSplits(tx, {
+                        splitPayments: purchaseData?.splitPayments ?? purchaseData?.payments,
+                        fallbackPaymentMethodId: resolvedPaymentMethodId || 1,
+                        totalAmount: safePaid
+                    });
+                    if (splitRows?.error) {
+                        throw new Error(splitRows.error);
+                    }
+
+                    for (const splitRow of splitRows) {
+                        const splitAmount = Math.max(0, toNumber(splitRow.amount));
+                        if (splitAmount <= 0) continue;
+
+                        const treasuryEntryResult = await createTreasuryEntry(tx, {
+                            treasuryId: purchaseTreasuryId,
+                            entryType: TREASURY_ENTRY_TYPE.PURCHASE_PAYMENT,
+                            direction: TREASURY_DIRECTION.OUT,
+                            amount: splitAmount,
+                            notes: `Purchase update #${updatedPurchase.id}${purchaseData?.notes ? ` - ${purchaseData.notes}` : ''}`,
+                            note: splitRow?.note || null,
+                            referenceType: 'PURCHASE',
+                            referenceId: updatedPurchase.id,
+                            paymentMethodId: splitRow.paymentMethodId,
+                            entryDate: invoiceDate,
+                            idempotencyKey: generateIdempotencyKey('PURCHASE_PAYMENT', [
+                                updatedPurchase.id,
+                                splitRow.paymentMethodId,
+                                normalizeAmountForKey(splitAmount),
+                                splitRow.index,
+                                'UPDATE'
+                            ]),
+                            createdByUserId: parsePositiveInt(purchaseData?.createdByUserId ?? purchaseData?.userId),
+                            meta: {
+                                source: 'updatePurchase',
+                                splitIndex: splitRow.index,
+                                splitCount: splitRows.length
+                            }
+                        });
+                        throwIfResultError(treasuryEntryResult);
+                    }
+                }
+
+                return { success: true, data: updatedPurchase };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
             return { error: error.message };
         }
     },

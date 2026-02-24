@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import EnhancedPOS from './pages/EnhancedPOS';
 import Sales, { prefetchSalesPage } from './pages/Sales';
+import PurchaseHistory from './pages/PurchaseHistory';
 import Purchases from './pages/Purchases';
 import Returns from './pages/Returns';
 import PurchaseReturns from './pages/PurchaseReturns';
@@ -13,13 +14,48 @@ import Users from './pages/Users';
 import Treasury from './pages/Treasury';
 import Warehouses from './pages/Warehouses';
 import Settings from './pages/Settings';
-import { APP_NAVIGATE_EVENT } from './utils/posEditorBridge';
+import LicensePage from './pages/LicensePage';
+import { APP_NAVIGATE_EVENT, APP_OPEN_LICENSE_EVENT } from './utils/posEditorBridge';
 import './index.css';
 
 function App() {
+  const [licenseStatus, setLicenseStatus] = useState(null);
+  const [isLicenseLoading, setIsLicenseLoading] = useState(true);
+  const [showLicenseManager, setShowLicenseManager] = useState(false);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [currentPage, setCurrentPage] = useState('pos');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadLicenseStatus = async () => {
+      try {
+        const status = await window.licensing.getStatus();
+        if (isMounted) {
+          setLicenseStatus(status);
+        }
+      } catch (error) {
+        console.error('License status check failed:', error);
+        if (isMounted) {
+          setLicenseStatus({
+            status: 'CORRUPT',
+            messageAr: 'تعذر قراءة حالة الترخيص. يرجى إعادة المحاولة.',
+          });
+        }
+      } finally {
+        if (isMounted) {
+          setIsLicenseLoading(false);
+        }
+      }
+    };
+
+    loadLicenseStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
@@ -34,6 +70,7 @@ function App() {
       'pos',
       'dashboard',
       'sales',
+      'purchaseHistory',
       'purchases',
       'purchaseReturns',
       'returns',
@@ -54,6 +91,15 @@ function App() {
 
     window.addEventListener(APP_NAVIGATE_EVENT, handleNavigate);
     return () => window.removeEventListener(APP_NAVIGATE_EVENT, handleNavigate);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenLicenseManager = () => {
+      setShowLicenseManager(true);
+    };
+
+    window.addEventListener(APP_OPEN_LICENSE_EVENT, handleOpenLicenseManager);
+    return () => window.removeEventListener(APP_OPEN_LICENSE_EVENT, handleOpenLicenseManager);
   }, []);
 
   useEffect(() => {
@@ -94,6 +140,39 @@ function App() {
     setUser(null);
   };
 
+  if (isLicenseLoading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          direction: 'rtl',
+          backgroundColor: '#0f172a',
+          color: '#e2e8f0',
+          fontSize: '18px',
+          fontWeight: '600',
+        }}
+      >
+        جاري التحقق من الترخيص...
+      </div>
+    );
+  }
+
+  if (licenseStatus?.status !== 'ACTIVE' || showLicenseManager) {
+    return (
+      <LicensePage
+        onStatusChanged={(status) => setLicenseStatus(status)}
+        onActivated={(status) => {
+          setLicenseStatus(status);
+          setShowLicenseManager(false);
+        }}
+        onClose={() => setShowLicenseManager(false)}
+      />
+    );
+  }
+
   if (!token) {
     return <Login onLogin={handleLogin} />;
   }
@@ -106,6 +185,8 @@ function App() {
         return <EnhancedPOS />;
       case 'sales':
         return <Sales />;
+      case 'purchaseHistory':
+        return <PurchaseHistory />;
       case 'purchases':
         return <Purchases />;
       case 'returns':
@@ -182,6 +263,7 @@ function App() {
           <ul style={{ listStyle: 'none', padding: 0 }}>
             <NavItem page="pos" icon="🛒" label="فاتورة البيع" />
             <NavItem page="purchases" icon="📥" label="فاتورة المشتريات" />
+            <NavItem page="purchaseHistory" icon="📚" label="المشتريات السابقة" />
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
             <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
@@ -235,7 +317,7 @@ function App() {
           flex: 1,
           padding: '30px 30px 10px 30px',
           backgroundColor: '#f9fafb',
-          overflowY: currentPage === 'sales' || currentPage === 'products' ? 'hidden' : 'auto'
+          overflowY: currentPage === 'sales' || currentPage === 'purchaseHistory' || currentPage === 'products' ? 'hidden' : 'auto'
         }}
       >
         {renderPage()}

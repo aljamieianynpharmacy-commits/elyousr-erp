@@ -17,9 +17,10 @@ import {
   normalizeSearchMode,
   normalizeProductDisplayMode
 } from '../utils/appSettings';
+import { emitOpenLicenseManagerRequest } from '../utils/posEditorBridge';
 import './Settings.css';
 
-import { Settings as SettingsIcon, Users, Upload, Store, Box, UserCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Upload, Store, Box, UserCheck, ShieldCheck } from 'lucide-react';
 
 const SETTINGS_TABS = [
   { id: 'basic', label: 'الإعدادات العامة', icon: <SettingsIcon /> },
@@ -69,6 +70,10 @@ export default function Settings() {
   const [customerImportSession, setCustomerImportSession] = useState(null);
   const [importingCustomers, setImportingCustomers] = useState(false);
   const [updateExistingOnImport, setUpdateExistingOnImport] = useState(true);
+
+  const openLicenseManager = () => {
+    emitOpenLicenseManagerRequest();
+  };
 
   const loadWarehouses = useCallback(async () => {
     if (!window.api?.getWarehouses) {
@@ -545,6 +550,18 @@ export default function Settings() {
               <div className="settings-empty">
                 <Box size={40} className="mb-2 opacity-50 mx-auto" />
                 <p>مساحة مخصصة لإعدادات النظام العامة المستقبلية (مثل معلومات الشركة، العملة الافتراضية، وغيرها).</p>
+              </div>
+
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  onClick={openLicenseManager}
+                  className="settings-btn settings-btn-secondary"
+                >
+                  <ShieldCheck size={18} />
+                  {' '}
+                  إدارة الترخيص
+                </button>
               </div>
             </section>
           )}

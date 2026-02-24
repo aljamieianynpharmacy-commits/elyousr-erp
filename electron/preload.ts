@@ -1,4 +1,5 @@
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
+import type { LicenseStatus } from '../src/license/types';
 
 contextBridge.exposeInMainWorld('api', {
     // Auth
@@ -136,8 +137,9 @@ contextBridge.exposeInMainWorld('api', {
 });
 
 contextBridge.exposeInMainWorld('licensing', {
-    getStatus: () => ipcRenderer.invoke('licensing:getStatus'),
-    activateFromJson: (licenseJsonText, options) => ipcRenderer.invoke('licensing:activateFromJson', licenseJsonText, options),
-    remove: () => ipcRenderer.invoke('licensing:remove'),
-    getDeviceFingerprint: () => ipcRenderer.invoke('licensing:getDeviceFingerprint')
+    getStatus: () => ipcRenderer.invoke('licensing:getStatus') as Promise<LicenseStatus>,
+    activateFromJson: (licenseJsonText: string, options?: { dryRun?: boolean }) =>
+        ipcRenderer.invoke('licensing:activateFromJson', licenseJsonText, options) as Promise<LicenseStatus>,
+    remove: () => ipcRenderer.invoke('licensing:remove') as Promise<LicenseStatus>,
+    getDeviceFingerprint: () => ipcRenderer.invoke('licensing:getDeviceFingerprint') as Promise<string>
 });

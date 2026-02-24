@@ -2,9 +2,15 @@ require('dotenv').config();
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const { createHash } = require('crypto');
 const { PrismaClient } = require('@prisma/client');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const nacl = require('tweetnacl');
+const naclUtil = require('tweetnacl-util');
+const { machineId } = require('node-machine-id');
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -53,6 +59,253 @@ app.on('activate', () => {
   }
 });
 
+const LICENSE_PUBLIC_KEY_BASE64 = '49zTfBJpXN+35o+0kiPUuufxs3G++SyvH5yixcgbEiQ=';
+const LICENSE_FILE_NAME = 'license.json';
+const MAX_LICENSE_FILE_BYTES = 256 * 1024;
+
+const LICENSE_STATUS_MESSAGES_AR = {
+  NO_LICENSE: 'لا يوجد ترخيص مفعل على هذا الجهاز.',
+  ACTIVE: 'الترخيص صالح ومفعل.',
+  EXPIRED: 'انتهت صلاحية الترخيص.',
+  INVALID_SIGNATURE: 'التوقيع الرقمي غير صالح.',
+  NOT_YET_VALID: 'الترخيص غير ساري حتى تاريخ البداية.',
+  DEVICE_MISMATCH: 'الترخيص لا يطابق بصمة هذا الجهاز.',
+  CORRUPT: 'ملف الترخيص تالف أو بصيغة غير صحيحة.'
+};
+
+const isRecord = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+const stableCanonicalStringify = (value) => {
+  const canonicalize = (input) => {
+    if (Array.isArray(input)) {
+      return input.map(canonicalize);
+    }
+
+    if (isRecord(input)) {
+      return Object.keys(input)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = canonicalize(input[key]);
+          return acc;
+        }, {});
+    }
+
+    return input;
+  };
+
+  return JSON.stringify(canonicalize(value));
+};
+
+const buildLicenseStatus = (status, payload) => {
+  if (!payload) {
+    return {
+      status,
+      messageAr: LICENSE_STATUS_MESSAGES_AR[status]
+    };
+  }
+
+  return {
+    status,
+    messageAr: LICENSE_STATUS_MESSAGES_AR[status],
+    details: {
+      customerName: payload.customerName,
+      expiresAt: payload.expiresAt,
+      licenseId: payload.licenseId,
+      features: payload.features
+    }
+  };
+};
+
+const getLicenseFilePath = () => path.join(app.getPath('userData'), LICENSE_FILE_NAME);
+const isValidDateString = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+const toLicensePayload = (payload) => {
+  if (!isRecord(payload)) return null;
+
+  const hasRequiredStrings =
+    typeof payload.licenseId === 'string' &&
+    typeof payload.customerName === 'string' &&
+    typeof payload.deviceFingerprint === 'string';
+  const hasRequiredDates =
+    isValidDateString(payload.issuedAt) &&
+    isValidDateString(payload.validFrom) &&
+    isValidDateString(payload.expiresAt);
+  const hasBooleansAndNumbers =
+    typeof payload.deviceBinding === 'boolean' &&
+    typeof payload.maxDevices === 'number' &&
+    Number.isInteger(payload.maxDevices) &&
+    payload.maxDevices >= 1 &&
+    typeof payload.version === 'number' &&
+    Number.isInteger(payload.version);
+  const hasFeatures =
+    Array.isArray(payload.features) &&
+    payload.features.length > 0 &&
+    payload.features.every((item) => typeof item === 'string' && item.trim().length > 0);
+
+  if (!hasRequiredStrings || !hasRequiredDates || !hasBooleansAndNumbers || !hasFeatures) {
+    return null;
+  }
+
+  if (payload.deviceBinding && payload.deviceFingerprint.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    licenseId: payload.licenseId,
+    customerName: payload.customerName,
+    issuedAt: payload.issuedAt,
+    validFrom: payload.validFrom,
+    expiresAt: payload.expiresAt,
+    deviceBinding: payload.deviceBinding,
+    deviceFingerprint: payload.deviceFingerprint,
+    maxDevices: payload.maxDevices,
+    features: payload.features,
+    version: payload.version
+  };
+};
+
+const safeDecodeBase64 = (value) => {
+  try {
+    return naclUtil.decodeBase64(value);
+  } catch {
+    return null;
+  }
+};
+
+const verifyLicenseSignature = (payload, signatureBase64) => {
+  const signatureBytes = safeDecodeBase64(signatureBase64);
+  const publicKeyBytes = safeDecodeBase64(LICENSE_PUBLIC_KEY_BASE64);
+  if (!signatureBytes || !publicKeyBytes) return false;
+  if (signatureBytes.length !== nacl.sign.signatureLength) return false;
+  if (publicKeyBytes.length !== nacl.sign.publicKeyLength) return false;
+
+  const payloadBytes = naclUtil.decodeUTF8(stableCanonicalStringify(payload));
+  return nacl.sign.detached.verify(payloadBytes, signatureBytes, publicKeyBytes);
+};
+
+const getDeviceFingerprint = async () => {
+  let deviceId = 'unknown-device-id';
+  try {
+    deviceId = await machineId();
+  } catch {
+    deviceId = 'unknown-device-id';
+  }
+
+  const source = stableCanonicalStringify({
+    machineId: deviceId,
+    platform: process.platform,
+    cpuModel: os.cpus()[0]?.model || 'unknown-cpu-model',
+    totalmem: os.totalmem(),
+    hostname: os.hostname()
+  });
+
+  return createHash('sha256').update(source, 'utf8').digest('hex');
+};
+
+const parseLicenseFileText = (licenseJsonText) => {
+  if (typeof licenseJsonText !== 'string') return null;
+  if (Buffer.byteLength(licenseJsonText, 'utf8') > MAX_LICENSE_FILE_BYTES) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(licenseJsonText);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed) || typeof parsed.signature !== 'string') {
+    return null;
+  }
+
+  const payload = toLicensePayload(parsed.payload);
+  if (!payload) return null;
+
+  return { payload, signature: parsed.signature };
+};
+
+const evaluateLicenseText = async (licenseJsonText) => {
+  const licenseFile = parseLicenseFileText(licenseJsonText);
+  if (!licenseFile) {
+    return { status: buildLicenseStatus('CORRUPT') };
+  }
+
+  if (!verifyLicenseSignature(licenseFile.payload, licenseFile.signature)) {
+    return { status: buildLicenseStatus('INVALID_SIGNATURE', licenseFile.payload) };
+  }
+
+  const validFromMs = Date.parse(licenseFile.payload.validFrom);
+  const expiresAtMs = Date.parse(licenseFile.payload.expiresAt);
+  const nowMs = Date.now();
+
+  if (!Number.isFinite(validFromMs) || !Number.isFinite(expiresAtMs)) {
+    return { status: buildLicenseStatus('CORRUPT', licenseFile.payload) };
+  }
+
+  if (nowMs < validFromMs) {
+    return { status: buildLicenseStatus('NOT_YET_VALID', licenseFile.payload) };
+  }
+
+  if (nowMs > expiresAtMs) {
+    return { status: buildLicenseStatus('EXPIRED', licenseFile.payload) };
+  }
+
+  if (licenseFile.payload.deviceBinding) {
+    const currentFingerprint = await getDeviceFingerprint();
+    if (currentFingerprint !== licenseFile.payload.deviceFingerprint) {
+      return { status: buildLicenseStatus('DEVICE_MISMATCH', licenseFile.payload) };
+    }
+  }
+
+  return {
+    status: buildLicenseStatus('ACTIVE', licenseFile.payload),
+    normalized: licenseFile
+  };
+};
+
+const getCurrentLicenseStatus = async () => {
+  try {
+    const raw = await fs.promises.readFile(getLicenseFilePath(), 'utf8');
+    const evaluated = await evaluateLicenseText(raw);
+    return evaluated.status;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return buildLicenseStatus('NO_LICENSE');
+    }
+    return buildLicenseStatus('CORRUPT');
+  }
+};
+
+const activateLicenseFromJson = async (licenseJsonText, options = {}) => {
+  const evaluated = await evaluateLicenseText(licenseJsonText);
+  if (evaluated.status.status !== 'ACTIVE') {
+    return evaluated.status;
+  }
+
+  if (options?.dryRun) {
+    return evaluated.status;
+  }
+
+  if (!evaluated.normalized) {
+    return buildLicenseStatus('CORRUPT');
+  }
+
+  const licensePath = getLicenseFilePath();
+  await fs.promises.mkdir(path.dirname(licensePath), { recursive: true });
+  await fs.promises.writeFile(licensePath, `${JSON.stringify(evaluated.normalized, null, 2)}\n`, 'utf8');
+  return getCurrentLicenseStatus();
+};
+
+const removeCurrentLicense = async () => {
+  try {
+    await fs.promises.unlink(getLicenseFilePath());
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      return buildLicenseStatus('CORRUPT');
+    }
+  }
+  return buildLicenseStatus('NO_LICENSE');
+};
+
 // ==================== IPC Handlers ====================
 
 // UI dialogs (replace window.alert)
@@ -74,6 +327,22 @@ ipcMain.handle('ui:messageBox', async (event, options = {}) => {
   }
 
   return dialog.showMessageBox(targetWindow, safeOptions);
+});
+
+ipcMain.handle('licensing:getStatus', async () => {
+  return await getCurrentLicenseStatus();
+});
+
+ipcMain.handle('licensing:activateFromJson', async (event, licenseJsonText, options = {}) => {
+  return await activateLicenseFromJson(licenseJsonText, options);
+});
+
+ipcMain.handle('licensing:remove', async () => {
+  return await removeCurrentLicense();
+});
+
+ipcMain.handle('licensing:getDeviceFingerprint', async () => {
+  return await getDeviceFingerprint();
 });
 
 // 🔐 Authentication

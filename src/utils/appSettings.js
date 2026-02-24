@@ -1,7 +1,8 @@
 export const APP_SETTINGS_STORAGE_KEY = 'erp.appSettings.v1';
 
 const DEFAULT_APP_SETTINGS = {
-  defaultSaleType: 'نقدي'
+  defaultSaleType: 'نقدي',
+  defaultWarehouseId: null
 };
 
 export const normalizeSaleType = (value) => {
@@ -10,6 +11,11 @@ export const normalizeSaleType = (value) => {
     return 'آجل';
   }
   return 'نقدي';
+};
+
+export const normalizeWarehouseId = (value) => {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
 export const getAppSettings = () => {
@@ -25,7 +31,8 @@ export const getAppSettings = () => {
     return {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
-      defaultSaleType: normalizeSaleType(parsed?.defaultSaleType)
+      defaultSaleType: normalizeSaleType(parsed?.defaultSaleType),
+      defaultWarehouseId: normalizeWarehouseId(parsed?.defaultWarehouseId)
     };
   } catch (error) {
     return { ...DEFAULT_APP_SETTINGS };
@@ -37,7 +44,8 @@ export const saveAppSettings = (partialSettings = {}) => {
   const merged = {
     ...current,
     ...partialSettings,
-    defaultSaleType: normalizeSaleType(partialSettings?.defaultSaleType ?? current.defaultSaleType)
+    defaultSaleType: normalizeSaleType(partialSettings?.defaultSaleType ?? current.defaultSaleType),
+    defaultWarehouseId: normalizeWarehouseId(partialSettings?.defaultWarehouseId ?? current.defaultWarehouseId)
   };
 
   if (typeof window !== 'undefined' && window.localStorage) {
@@ -48,3 +56,4 @@ export const saveAppSettings = (partialSettings = {}) => {
 };
 
 export const getDefaultSaleType = () => getAppSettings().defaultSaleType;
+export const getDefaultWarehouseId = () => getAppSettings().defaultWarehouseId;

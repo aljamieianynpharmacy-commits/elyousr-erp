@@ -93,8 +93,8 @@ const normalizeUnit = (unit, index) => {
   const unitName = nText(unit?.unitName) || 'قطعة';
   const salePrice = money(unit?.salePrice);
   const purchasePrice = money(unit?.purchasePrice);
-  const wholesalePrice = money(Math.min(Math.max(0, toNum(unit?.wholesalePrice, salePrice)), salePrice));
-  const minSalePrice = money(Math.min(Math.max(0, toNum(unit?.minSalePrice, wholesalePrice)), wholesalePrice));
+  const wholesalePrice = money(Math.max(0, toNum(unit?.wholesalePrice, salePrice)));
+  const minSalePrice = money(Math.max(0, toNum(unit?.minSalePrice, wholesalePrice)));
 
   return {
     unitName,
@@ -334,18 +334,13 @@ export default function ProductModal({
         const recalculatedSale = money(newPurchase * (1 + (currentMargin / 100)));
         current.purchasePrice = newPurchase;
         current.salePrice = recalculatedSale;
-        current.wholesalePrice = Math.min(current.wholesalePrice, recalculatedSale);
-        current.minSalePrice = Math.min(current.minSalePrice, recalculatedSale);
       } else if (field === 'salePrice') {
         const newSale = money(value);
         current.salePrice = newSale;
-        current.wholesalePrice = Math.min(current.wholesalePrice, newSale);
-        current.minSalePrice = Math.min(current.minSalePrice, newSale);
       } else if (field === 'wholesalePrice') {
-        current.wholesalePrice = money(Math.min(toNum(value, 0), current.salePrice));
-        current.minSalePrice = Math.min(current.minSalePrice, current.wholesalePrice);
+        current.wholesalePrice = money(value);
       } else if (field === 'minSalePrice') {
-        current.minSalePrice = money(Math.min(toNum(value, 0), current.wholesalePrice));
+        current.minSalePrice = money(value);
       } else {
         current[field] = NUMERIC_UNIT_FIELDS.has(field) ? toNum(value, 0) : value;
       }

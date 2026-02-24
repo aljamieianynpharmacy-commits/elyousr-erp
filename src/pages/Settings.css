@@ -80,6 +80,42 @@
   cursor: pointer;
 }
 
+.settings-form-row {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-form-label {
+  color: #1f2937;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.settings-inline-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-select {
+  min-width: 220px;
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 0.88rem;
+  color: #0f172a;
+  background: #fff;
+}
+
+.settings-form-help {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
 .settings-range-wrap {
   display: flex;
   align-items: center;
@@ -258,6 +294,11 @@
 
   .settings-btn {
     width: 100%;
+  }
+
+  .settings-inline-controls {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .settings-tab-btn {

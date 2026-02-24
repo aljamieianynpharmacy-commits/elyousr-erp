@@ -9,7 +9,12 @@ import {
   mapRowsWithCustomerImportMapping,
   sanitizeImportedCustomer
 } from '../utils/customerImportUtils';
-import { getAppSettings, saveAppSettings, normalizeSaleType } from '../utils/appSettings';
+import {
+  getAppSettings,
+  saveAppSettings,
+  normalizeSaleType,
+  normalizeWarehouseId
+} from '../utils/appSettings';
 import './Settings.css';
 
 const SETTINGS_TABS = [
@@ -30,10 +35,16 @@ const getRowStartIndex = (index, session) => {
 
 export default function Settings() {
   const customerImportInputRef = useRef(null);
+  const initialAppSettings = getAppSettings();
 
   const [activeTab, setActiveTab] = useState('basic');
   const [savingBasicSettings, setSavingBasicSettings] = useState(false);
-  const [defaultSaleType, setDefaultSaleType] = useState(() => normalizeSaleType(getAppSettings().defaultSaleType));
+  const [defaultSaleType, setDefaultSaleType] = useState(() => normalizeSaleType(initialAppSettings.defaultSaleType));
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState(() =>
+    normalizeWarehouseId(initialAppSettings.defaultWarehouseId)
+  );
+  const [warehouses, setWarehouses] = useState([]);
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
 
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [allCustomers, setAllCustomers] = useState([]);
@@ -47,6 +58,30 @@ export default function Settings() {
   const [customerImportSession, setCustomerImportSession] = useState(null);
   const [importingCustomers, setImportingCustomers] = useState(false);
   const [updateExistingOnImport, setUpdateExistingOnImport] = useState(true);
+
+  const loadWarehouses = useCallback(async () => {
+    if (!window.api?.getWarehouses) {
+      setWarehouses([]);
+      return;
+    }
+
+    try {
+      setLoadingWarehouses(true);
+      const result = await window.api.getWarehouses();
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      setWarehouses(Array.isArray(result) ? result : []);
+    } catch (error) {
+      setWarehouses([]);
+      await safeAlert(error?.message || 'تعذر تحميل بيانات المخازن', null, {
+        type: 'error',
+        title: 'الإعدادات الأساسية'
+      });
+    } finally {
+      setLoadingWarehouses(false);
+    }
+  }, []);
 
   const loadAllCustomers = useCallback(async () => {
     try {
@@ -80,6 +115,10 @@ export default function Settings() {
       setLoadingCustomers(false);
     }
   }, [overdueThreshold]);
+
+  useEffect(() => {
+    loadWarehouses();
+  }, [loadWarehouses]);
 
   useEffect(() => {
     loadAllCustomers();
@@ -117,6 +156,10 @@ export default function Settings() {
     () => allCustomers.filter((customer) => (customer?.lastPaymentDays || 0) > tempThreshold).length,
     [allCustomers, tempThreshold]
   );
+  const activeWarehouses = useMemo(
+    () => warehouses.filter((warehouse) => warehouse?.isActive !== false),
+    [warehouses]
+  );
 
   const customerImportColumnSamples = useMemo(() => {
     const sampleMap = new Map();
@@ -140,7 +183,8 @@ export default function Settings() {
     try {
       setSavingBasicSettings(true);
       saveAppSettings({
-        defaultSaleType: normalizeSaleType(defaultSaleType)
+        defaultSaleType: normalizeSaleType(defaultSaleType),
+        defaultWarehouseId: normalizeWarehouseId(defaultWarehouseId)
       });
       await safeAlert('تم حفظ الإعدادات الأساسية بنجاح', null, {
         type: 'success',
@@ -477,7 +521,7 @@ export default function Settings() {
         <section className="settings-card">
           <h2>إعدادات البيع الأساسية</h2>
           <p className="settings-hint">
-            نوع البيع الافتراضي يُطبّق على الفواتير الجديدة في شاشة نقطة البيع.
+            نوع البيع والمخزن الافتراضيان يُطبّقان على الفواتير الجديدة في شاشة نقطة البيع.
           </p>
 
           <div className="settings-sale-type-options">
@@ -501,6 +545,39 @@ export default function Settings() {
               />
               آجل
             </label>
+          </div>
+
+          <div className="settings-form-row">
+            <label htmlFor="defaultWarehouseId" className="settings-form-label">
+              المخزن الافتراضي في نقطة البيع
+            </label>
+            <div className="settings-inline-controls">
+              <select
+                id="defaultWarehouseId"
+                className="settings-select"
+                value={defaultWarehouseId ? String(defaultWarehouseId) : ''}
+                onChange={(event) => setDefaultWarehouseId(normalizeWarehouseId(event.target.value))}
+                disabled={loadingWarehouses}
+              >
+                <option value="">كل المخازن (بدون تحديد)</option>
+                {activeWarehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {(warehouse.icon || '🏭')} {warehouse.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={loadWarehouses}
+                className="settings-btn settings-btn-secondary"
+                disabled={loadingWarehouses || savingBasicSettings}
+              >
+                {loadingWarehouses ? 'جاري تحميل المخازن...' : 'تحديث المخازن'}
+              </button>
+            </div>
+            <small className="settings-form-help">
+              يُستخدم هذا المخزن تلقائيًا في الفواتير الجديدة، ويمكن تغييره يدويًا داخل نقطة البيع.
+            </small>
           </div>
 
           <div className="settings-actions">

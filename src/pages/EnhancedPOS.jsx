@@ -13,7 +13,7 @@ import {
     filterPosPaymentMethods,
     normalizePaymentMethodCode
 } from "../utils/paymentMethodFilters";
-import { getDefaultSaleType } from '../utils/appSettings';
+import { getDefaultSaleType, getDefaultWarehouseId } from '../utils/appSettings';
 
 /**
  * Toast Notification Component
@@ -72,6 +72,21 @@ const Toast = ({ message, type = "info", onClose }) => {
  * ============================================
  */
 
+const isCashSaleType = (saleType) => {
+    const normalized = String(saleType || "").trim().toLowerCase();
+    return normalized === "نقدي" || normalized === "cash";
+};
+
+const resolveInvoicePaidAmount = (invoice, total) => {
+    const rawPaidAmount = String(invoice?.paidAmount ?? "").trim();
+    if (isCashSaleType(invoice?.saleType) && rawPaidAmount === "") {
+        return Math.max(0, Number(total) || 0);
+    }
+
+    const parsedPaidAmount = parseFloat(rawPaidAmount);
+    return Number.isFinite(parsedPaidAmount) ? Math.max(0, parsedPaidAmount) : 0;
+};
+
 /**
  * Hook لحساب إجمالي الفاتورة
  * يحسب: المجموع، الخصم، المتبقي، المدفوع، والربح
@@ -100,12 +115,12 @@ const useInvoiceCalculations = (invoice) => {
             0,
             subTotal - totalDiscount - billDiscount,
         );
-        const paid = parseFloat(invoice.paidAmount) || 0;
+        const paid = resolveInvoicePaidAmount(invoice, total);
         const remaining = total - paid;
         const profit = Math.max(0, total - totalCost);
 
         return { subTotal, totalDiscount, total, paid, remaining, totalCost, profit, billDiscount };
-    }, [invoice.cart, invoice.discount, invoice.discountType, invoice.paidAmount]);
+    }, [invoice.cart, invoice.discount, invoice.discountType, invoice.paidAmount, invoice.saleType]);
 };
 
 /**
@@ -157,6 +172,11 @@ const toNumberSafe = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toWarehouseIdOrNull = (value) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 const toInputDate = (value) => {
     if (!value) return getTodayDate();
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -202,10 +222,13 @@ const createEmptyInvoice = (overrides = {}) => ({
     sourceSaleId: null,
     sourcePaymentId: null,
     paymentEdit: null,
+    warehouseId: getDefaultWarehouseId(),
     ...overrides,
 });
 
 const normalizeStoredInvoice = (invoice = {}) => {
+    const hasStoredWarehouseId = Object.prototype.hasOwnProperty.call(invoice || {}, "warehouseId");
+    const normalizedWarehouseId = toWarehouseIdOrNull(invoice?.warehouseId);
     const normalizedPaymentEdit = invoice?.paymentEdit
         ? {
             ...invoice.paymentEdit,
@@ -222,6 +245,7 @@ const normalizeStoredInvoice = (invoice = {}) => {
         cart: Array.isArray(invoice.cart) ? invoice.cart : [],
         customer: invoice.customer || null,
         paymentEdit: normalizedPaymentEdit,
+        warehouseId: hasStoredWarehouseId ? normalizedWarehouseId : getDefaultWarehouseId(),
     });
 };
 
@@ -609,7 +633,6 @@ export default function EnhancedPOS() {
      */
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
     const [searchMode, setSearchMode] = useState("name"); // 'name' أو 'barcode'
-    const [selectedWarehouseId, setSelectedWarehouseId] = useState("all");
 
     const productNeedsVariantSelection = useCallback((product) => {
         const productVariants = Array.isArray(product?.variants) ? product.variants : [];
@@ -685,6 +708,16 @@ export default function EnhancedPOS() {
     const activeInvoice =
         invoices.find((inv) => inv.id === activeInvoiceId) || invoices[0];
     const calculations = useInvoiceCalculations(activeInvoice);
+    const displayPaidAmount = useMemo(() => {
+        if (!activeInvoice) return "";
+
+        const rawPaidAmount = String(activeInvoice.paidAmount ?? "").trim();
+        if (activeInvoice.editorMode !== "payment" && isCashSaleType(activeInvoice.saleType) && rawPaidAmount === "") {
+            return calculations.total.toFixed(2);
+        }
+
+        return activeInvoice.paidAmount;
+    }, [activeInvoice, calculations.total]);
     const variantQuantityById = useMemo(() => {
         const map = new Map();
         variants.forEach((variant) => {
@@ -815,10 +848,10 @@ export default function EnhancedPOS() {
         // التصفية النهائية وتطبيق الفلتر الخاص بالمخزن
         let result = Object.values(groups);
 
-        if (selectedWarehouseId !== "all") {
-            const whId = parseInt(selectedWarehouseId, 10);
+        const activeWarehouseId = toWarehouseIdOrNull(activeInvoice?.warehouseId);
+        if (activeWarehouseId) {
             result = result.map(product => {
-                const stockRecord = product.warehouseStocks.find(s => s.warehouseId === whId);
+                const stockRecord = product.warehouseStocks.find(s => s.warehouseId === activeWarehouseId);
                 const warehouseQty = stockRecord ? stockRecord.quantity : 0;
                 return { ...product, totalQuantity: warehouseQty };
             }).filter(product => product.totalQuantity > 0);
@@ -836,7 +869,7 @@ export default function EnhancedPOS() {
                 return product.name.toLowerCase().includes(searchLower);
             }
         });
-    }, [variants, searchTerm, searchMode, selectedWarehouseId]);
+    }, [variants, searchTerm, searchMode, activeInvoice?.warehouseId]);
 
     /**
      * فلترة العملاء حسب البحث
@@ -1157,6 +1190,7 @@ export default function EnhancedPOS() {
             sourceSaleId: sale.id,
             sourcePaymentId: null,
             paymentEdit: null,
+            warehouseId: toWarehouseIdOrNull(sale?.warehouseId) ?? getDefaultWarehouseId(),
         });
     }, [customers, variantQuantityById]);
 
@@ -1325,6 +1359,7 @@ export default function EnhancedPOS() {
     const addTab = () => {
         const newInvoice = createEmptyInvoice({
             paymentMethod: String(getDefaultPaymentMethodId()),
+            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices((prev) => [...prev, newInvoice]);
         setActiveInvoiceId(newInvoice.id);
@@ -1357,6 +1392,7 @@ export default function EnhancedPOS() {
 
         const freshInvoice = createEmptyInvoice({
             paymentMethod: String(getDefaultPaymentMethodId()),
+            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices([...remainingTabs, freshInvoice]);
         setActiveInvoiceId(freshInvoice.id);
@@ -1589,7 +1625,7 @@ export default function EnhancedPOS() {
                 0,
                 subTotal - totalDiscount - (parseFloat(currentInvoice.discount) || 0),
             );
-            const paid = parseFloat(currentInvoice.paidAmount) || 0;
+            const paid = resolveInvoicePaidAmount(currentInvoice, total);
             const remaining = total - paid;
 
             let finalSaleType = currentInvoice.saleType;
@@ -1645,6 +1681,7 @@ export default function EnhancedPOS() {
                 customerId: currentInvoice.customer?.id,
                 total: total,
                 paid: paid,
+                warehouseId: toWarehouseIdOrNull(currentInvoice.warehouseId),
                 paymentMethodId: resolvedPaymentMethodId,
                 paymentMethod: paymentCode,
                 payment: paymentLabel,
@@ -1747,6 +1784,7 @@ export default function EnhancedPOS() {
         const normalized = createEmptyInvoice({
             id: activeInvoiceId,
             paymentMethod: String(getDefaultPaymentMethodId()),
+            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices((prev) =>
             prev.map((inv) => (inv.id === activeInvoiceId ? normalized : inv))
@@ -2426,8 +2464,10 @@ export default function EnhancedPOS() {
                                 }}
                             >
                                 <select
-                                    value={selectedWarehouseId}
-                                    onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                                    value={activeInvoice?.warehouseId ? String(activeInvoice.warehouseId) : "all"}
+                                    onChange={(e) => updateInvoice({
+                                        warehouseId: e.target.value === "all" ? null : toWarehouseIdOrNull(e.target.value)
+                                    })}
                                     style={{
                                         border: "none",
                                         outline: "none",
@@ -2900,7 +2940,7 @@ export default function EnhancedPOS() {
                                 <label style={{ fontSize: "14px", color: "#111827", fontWeight: "bold" }}>المدفوع:</label>
                                 <input
                                     type="number"
-                                    value={activeInvoice.paidAmount}
+                                    value={displayPaidAmount}
                                     onChange={(e) => updateInvoice({ paidAmount: e.target.value })}
                                     min="0"
                                     step="0.01"

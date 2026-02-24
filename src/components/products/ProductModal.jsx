@@ -1001,22 +1001,7 @@ export default function ProductModal({
                     </div>
                   )}
 
-                  <div className="stock-layout" style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '24px' }}>
-                    <div className="stock-total-card">
-                      <span>{formData.hasVariants ? 'إجمالي الرصيد الحالي (من كميات المتغيرات)' : 'إجمالي الرصيد الحالي'}</span>
-                      <strong>{stockTotalPreview}</strong>
-                    </div>
 
-                    <details className="stock-advanced-panel">
-                      <summary>إعدادات الملاحظات</summary>
-                      <div className="stock-advanced-content">
-                        <label className="form-group form-grow">
-                          <span>ملاحظات المخزون</span>
-                          <textarea className="form-input" rows={3} value={formData.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="أي ملاحظة تخص التخزين أو التجهيز" />
-                        </label>
-                      </div>
-                    </details>
-                  </div>
                 </div>
               ) : null}
             </>

@@ -128,7 +128,11 @@ const buildInitialState = (initialData) => {
   };
   const unit = normalizeUnit(primaryUnit, 0);
   const sourceVariants = Array.isArray(initialData.variants) ? initialData.variants : [];
-  const variants = sourceVariants.map((variant) => ({
+  const validVariants = sourceVariants.filter(
+    (v) => nText(v.productSize) || nText(v.color)
+  );
+
+  const variants = validVariants.map((variant) => ({
     tempId: makeTempVariantId(),
     id: variant.id || null,
     size: nText(variant.productSize),
@@ -850,38 +854,9 @@ export default function ProductModal({
                             <Plus size={14} />
                             إضافة متغير
                           </button>
-                          <button type="button" className="btn-inline btn-inline-ghost" onClick={generateVariantCombinations}>
-                            <Shuffle size={14} />
-                            توليد تركيبات
-                          </button>
                         </div>
                       ) : null}
                     </div>
-
-                    {formData.hasVariants && (
-                      <div className="variants-generator-grid">
-                        <label className="form-group">
-                          <span>المقاسات (فاصلة)</span>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={formData.variantSizeDraft}
-                            onChange={(event) => setField('variantSizeDraft', event.target.value)}
-                            placeholder="S, M, L, XL"
-                          />
-                        </label>
-                        <label className="form-group">
-                          <span>الألوان (فاصلة)</span>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={formData.variantColorDraft}
-                            onChange={(event) => setField('variantColorDraft', event.target.value)}
-                            placeholder="أسود, أبيض"
-                          />
-                        </label>
-                      </div>
-                    )}
 
                     <div className="variants-table-wrap">
                       <table className="variants-table">
@@ -943,9 +918,11 @@ export default function ProductModal({
                                   </div>
                                 </td>
                                 <td>
-                                  <button type="button" className="delete-btn" onClick={() => removeVariantRow(index)} aria-label="حذف المتغير">
-                                    <Trash2 size={16} />
-                                  </button>
+                                  {formData.variants.length > 1 && (
+                                    <button type="button" className="delete-btn" onClick={() => removeVariantRow(index)} aria-label="حذف المتغير">
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             );

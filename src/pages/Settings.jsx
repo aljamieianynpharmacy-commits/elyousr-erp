@@ -15,12 +15,14 @@ import {
   normalizeSaleType,
   normalizeWarehouseId,
   normalizeSearchMode,
-  normalizeProductDisplayMode
+  normalizeProductDisplayMode,
+  normalizeCompanyName,
+  normalizeCompanyContactNumbers
 } from '../utils/appSettings';
 import { emitOpenLicenseManagerRequest } from '../utils/posEditorBridge';
 import './Settings.css';
 
-import { Settings as SettingsIcon, Users, Upload, Store, Box, UserCheck, ShieldCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Upload, Store, UserCheck, ShieldCheck } from 'lucide-react';
 
 const SETTINGS_TABS = [
   { id: 'basic', label: 'الإعدادات العامة', icon: <SettingsIcon /> },
@@ -54,6 +56,12 @@ export default function Settings() {
   );
   const [defaultProductDisplayMode, setDefaultProductDisplayMode] = useState(() =>
     normalizeProductDisplayMode(initialAppSettings.defaultProductDisplayMode)
+  );
+  const [companyName, setCompanyName] = useState(() =>
+    normalizeCompanyName(initialAppSettings.companyName)
+  );
+  const [companyContactNumbers, setCompanyContactNumbers] = useState(() =>
+    normalizeCompanyContactNumbers(initialAppSettings.companyContactNumbers)
   );
   const [warehouses, setWarehouses] = useState([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
@@ -202,7 +210,9 @@ export default function Settings() {
         defaultSaleType: normalizeSaleType(defaultSaleType),
         defaultWarehouseId: normalizeWarehouseId(defaultWarehouseId),
         defaultSearchMode: normalizeSearchMode(defaultSearchMode),
-        defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode)
+        defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode),
+        companyName: normalizeCompanyName(companyName),
+        companyContactNumbers: normalizeCompanyContactNumbers(companyContactNumbers)
       });
       await safeAlert('تم حفظ الإعدادات الأساسية بنجاح', null, {
         type: 'success',
@@ -544,19 +554,58 @@ export default function Settings() {
             <section className="settings-card">
               <h2><SettingsIcon className="w-5 h-5" /> الإعدادات العامة</h2>
               <p className="settings-hint">
-                الإعدادات العامة للنظام سيتم إضافتها هنا قريباً.
+                بيانات الشركة الأساسية المستخدمة داخل النظام.
               </p>
 
-              <div className="settings-empty">
-                <Box size={40} className="mb-2 opacity-50 mx-auto" />
-                <p>مساحة مخصصة لإعدادات النظام العامة المستقبلية (مثل معلومات الشركة، العملة الافتراضية، وغيرها).</p>
+              <div className="settings-form-group">
+                <label htmlFor="companyName" className="settings-form-label">
+                  اسم الشركة
+                </label>
+                <input
+                  id="companyName"
+                  type="text"
+                  className="settings-input"
+                  value={companyName}
+                  onChange={(event) => setCompanyName(event.target.value)}
+                  placeholder="مثال: شركة النور للتجارة"
+                  maxLength={120}
+                  disabled={savingBasicSettings}
+                />
+              </div>
+
+              <div className="settings-form-group">
+                <label htmlFor="companyContactNumbers" className="settings-form-label">
+                  أرقام التواصل
+                </label>
+                <textarea
+                  id="companyContactNumbers"
+                  className="settings-textarea"
+                  value={companyContactNumbers}
+                  onChange={(event) => setCompanyContactNumbers(event.target.value)}
+                  placeholder="مثال: 01000000000, 0222222222"
+                  rows={3}
+                  maxLength={500}
+                  disabled={savingBasicSettings}
+                />
+                <small className="settings-form-help">
+                  يمكنك كتابة أكثر من رقم، وافصل بينها بفاصلة أو سطر جديد.
+                </small>
               </div>
 
               <div className="settings-actions">
                 <button
                   type="button"
+                  onClick={saveBasicSettings}
+                  className="settings-btn settings-btn-primary"
+                  disabled={savingBasicSettings}
+                >
+                  {savingBasicSettings ? 'جاري الحفظ...' : 'حفظ الإعدادات العامة'}
+                </button>
+                <button
+                  type="button"
                   onClick={openLicenseManager}
                   className="settings-btn settings-btn-secondary"
+                  disabled={savingBasicSettings}
                 >
                   <ShieldCheck size={18} />
                   {' '}

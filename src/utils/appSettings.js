@@ -4,12 +4,19 @@ const DEFAULT_APP_SETTINGS = {
   defaultSaleType: 'نقدي',
   defaultWarehouseId: null,
   defaultSearchMode: 'name',
-  defaultProductDisplayMode: 'list'
+  defaultProductDisplayMode: 'list',
+  companyName: '',
+  companyContactNumbers: ''
 };
 
 export const normalizeSaleType = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'آجل' || normalized === 'اجل' || normalized === 'credit' || normalized === 'deferred') {
+  if (
+    normalized === 'آجل' ||
+    normalized === 'اجل' ||
+    normalized === 'credit' ||
+    normalized === 'deferred'
+  ) {
     return 'آجل';
   }
   return 'نقدي';
@@ -30,6 +37,14 @@ export const normalizeProductDisplayMode = (value) => {
   return normalized === 'grid' ? 'grid' : 'list';
 };
 
+export const normalizeCompanyName = (value) => String(value ?? '')
+  .trim()
+  .slice(0, 120);
+
+export const normalizeCompanyContactNumbers = (value) => String(value ?? '')
+  .trim()
+  .slice(0, 500);
+
 export const getAppSettings = () => {
   if (typeof window === 'undefined' || !window.localStorage) {
     return { ...DEFAULT_APP_SETTINGS };
@@ -46,7 +61,9 @@ export const getAppSettings = () => {
       defaultSaleType: normalizeSaleType(parsed?.defaultSaleType),
       defaultWarehouseId: normalizeWarehouseId(parsed?.defaultWarehouseId),
       defaultSearchMode: normalizeSearchMode(parsed?.defaultSearchMode),
-      defaultProductDisplayMode: normalizeProductDisplayMode(parsed?.defaultProductDisplayMode)
+      defaultProductDisplayMode: normalizeProductDisplayMode(parsed?.defaultProductDisplayMode),
+      companyName: normalizeCompanyName(parsed?.companyName),
+      companyContactNumbers: normalizeCompanyContactNumbers(parsed?.companyContactNumbers)
     };
   } catch (error) {
     return { ...DEFAULT_APP_SETTINGS };
@@ -63,6 +80,10 @@ export const saveAppSettings = (partialSettings = {}) => {
     defaultSearchMode: normalizeSearchMode(partialSettings?.defaultSearchMode ?? current.defaultSearchMode),
     defaultProductDisplayMode: normalizeProductDisplayMode(
       partialSettings?.defaultProductDisplayMode ?? current.defaultProductDisplayMode
+    ),
+    companyName: normalizeCompanyName(partialSettings?.companyName ?? current.companyName),
+    companyContactNumbers: normalizeCompanyContactNumbers(
+      partialSettings?.companyContactNumbers ?? current.companyContactNumbers
     )
   };
 
@@ -77,3 +98,5 @@ export const getDefaultSaleType = () => getAppSettings().defaultSaleType;
 export const getDefaultWarehouseId = () => getAppSettings().defaultWarehouseId;
 export const getDefaultSearchMode = () => getAppSettings().defaultSearchMode;
 export const getDefaultProductDisplayMode = () => getAppSettings().defaultProductDisplayMode;
+export const getCompanyName = () => getAppSettings().companyName;
+export const getCompanyContactNumbers = () => getAppSettings().companyContactNumbers;

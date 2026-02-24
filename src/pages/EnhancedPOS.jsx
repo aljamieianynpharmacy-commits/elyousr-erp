@@ -1359,7 +1359,6 @@ export default function EnhancedPOS() {
     const addTab = () => {
         const newInvoice = createEmptyInvoice({
             paymentMethod: String(getDefaultPaymentMethodId()),
-            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices((prev) => [...prev, newInvoice]);
         setActiveInvoiceId(newInvoice.id);
@@ -1392,7 +1391,6 @@ export default function EnhancedPOS() {
 
         const freshInvoice = createEmptyInvoice({
             paymentMethod: String(getDefaultPaymentMethodId()),
-            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices([...remainingTabs, freshInvoice]);
         setActiveInvoiceId(freshInvoice.id);
@@ -1784,7 +1782,6 @@ export default function EnhancedPOS() {
         const normalized = createEmptyInvoice({
             id: activeInvoiceId,
             paymentMethod: String(getDefaultPaymentMethodId()),
-            warehouseId: toWarehouseIdOrNull(activeInvoice?.warehouseId) ?? getDefaultWarehouseId(),
         });
         setInvoices((prev) =>
             prev.map((inv) => (inv.id === activeInvoiceId ? normalized : inv))

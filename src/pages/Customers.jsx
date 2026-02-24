@@ -7,6 +7,15 @@ import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
 import { filterPosPaymentMethods } from '../utils/paymentMethodFilters';
+import {
+  CUSTOMER_IMPORT_FIELD_OPTIONS,
+  delimiter as detectImportDelimiter,
+  parseLine as parseImportLine,
+  toImportHeaders as toCustomerImportHeaders,
+  buildCustomerImportAutoMapping,
+  mapRowsWithCustomerImportMapping,
+  sanitizeImportedCustomer
+} from '../utils/customerImportUtils';
 import './Customers.css';
 
 // Utility functions - moved outside component for better performance
@@ -127,6 +136,11 @@ const formatCurrency = (value) => {
     return value;
   }
 };
+
+const normalizeCustomerNameKey = (value) => String(value ?? '').trim().toLowerCase();
+const normalizeCustomerPhoneKey = (value) => String(value ?? '')
+  .replace(/[^\d+]/g, '')
+  .trim();
 
 const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, style, data }) {
   const {
@@ -545,6 +559,10 @@ export default function Customers() {
     return saved ? parseInt(saved) : 30;
   });
   const [tempThreshold, setTempThreshold] = useState(overdueThreshold);
+  const customerImportInputRef = useRef(null);
+  const [customerImportSession, setCustomerImportSession] = useState(null);
+  const [importingCustomers, setImportingCustomers] = useState(false);
+  const [updateExistingOnImport, setUpdateExistingOnImport] = useState(true);
 
   // Client-side pagination & sorting state
   const [currentPage, setCurrentPage] = useState(1);
@@ -845,6 +863,305 @@ export default function Customers() {
     () => allCustomers.filter(c => (c.lastPaymentDays || 0) > tempThreshold).length,
     [allCustomers, tempThreshold]
   );
+
+  const customerImportColumnSamples = useMemo(() => {
+    const sampleMap = new Map();
+    if (!customerImportSession?.headers?.length || !customerImportSession?.rows?.length) return sampleMap;
+
+    const previewRows = customerImportSession.rows.slice(0, 120);
+    customerImportSession.headers.forEach((header) => {
+      for (const row of previewRows) {
+        const value = String(row?.[header.index] ?? '').trim();
+        if (value) {
+          sampleMap.set(header.id, value.slice(0, 120));
+          break;
+        }
+      }
+    });
+
+    return sampleMap;
+  }, [customerImportSession]);
+
+  const closeCustomerImportSession = useCallback(() => {
+    if (importingCustomers) return;
+    setCustomerImportSession(null);
+  }, [importingCustomers]);
+
+  const updateCustomerImportFieldMapping = useCallback((fieldKey, columnId) => {
+    setCustomerImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: {
+          ...prev.mapping,
+          [fieldKey]: columnId
+        }
+      };
+    });
+  }, []);
+
+  const applyCustomerImportAutoMapping = useCallback(() => {
+    setCustomerImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: buildCustomerImportAutoMapping(prev.headers)
+      };
+    });
+  }, []);
+
+  const parseDelimitedCustomerRows = useCallback((rawText) => {
+    const lines = String(rawText || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) throw new Error('الملف لا يحتوي على بيانات كافية');
+
+    const delim = detectImportDelimiter(lines[0]);
+    const headers = toCustomerImportHeaders(parseImportLine(lines[0], delim));
+    const rows = lines
+      .slice(1)
+      .map((line) => parseImportLine(line, delim))
+      .filter((row) => row.some((cell) => String(cell ?? '').trim() !== ''));
+
+    if (!headers.length) throw new Error('تعذر قراءة الأعمدة من الملف');
+    if (!rows.length) throw new Error('الملف لا يحتوي على صفوف بيانات');
+
+    return { headers, rows };
+  }, []);
+
+  const parseWorkbookCustomerRows = useCallback(async (file) => {
+    const xlsxModule = await import('xlsx');
+    const XLSX = xlsxModule?.default || xlsxModule;
+
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, {
+      type: 'array',
+      cellDates: false
+    });
+
+    const firstSheetName = workbook?.SheetNames?.[0];
+    if (!firstSheetName) throw new Error('ملف Excel لا يحتوي على أي ورقة بيانات');
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const matrix = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: '',
+      raw: false
+    });
+
+    const rows = Array.isArray(matrix) ? matrix : [];
+    const hasAnyValue = (row) => (
+      Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')
+    );
+    const firstNonEmptyIndex = rows.findIndex(hasAnyValue);
+
+    if (firstNonEmptyIndex === -1) throw new Error('ورقة Excel فارغة');
+
+    const headerRow = rows[firstNonEmptyIndex] || [];
+    const dataRows = rows
+      .slice(firstNonEmptyIndex + 1)
+      .map((row) => (Array.isArray(row) ? row : []))
+      .filter(hasAnyValue);
+
+    const headers = toCustomerImportHeaders(headerRow);
+    if (!headers.length) throw new Error('تعذر قراءة أعمدة ملف Excel');
+    if (!dataRows.length) throw new Error('ورقة Excel لا تحتوي على بيانات');
+
+    return { headers, rows: dataRows, sheetName: firstSheetName };
+  }, []);
+
+  const importCustomersFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const fileName = String(file.name || '').toLowerCase();
+      let parsed = null;
+
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        parsed = await parseWorkbookCustomerRows(file);
+      } else if (fileName.endsWith('.csv') || fileName.endsWith('.tsv') || fileName.endsWith('.txt')) {
+        parsed = parseDelimitedCustomerRows(await file.text());
+      } else {
+        throw new Error('صيغة الملف غير مدعومة. استخدم Excel أو CSV أو TSV');
+      }
+
+      setCustomerImportSession({
+        fileName: file.name,
+        headers: parsed.headers,
+        rows: parsed.rows,
+        sheetName: parsed.sheetName || null,
+        mapping: buildCustomerImportAutoMapping(parsed.headers)
+      });
+    } catch (err) {
+      await safeAlert(err?.message || 'تعذر قراءة الملف', null, {
+        type: 'error',
+        title: 'استيراد العملاء'
+      });
+    }
+  };
+
+  const downloadCustomerImportTemplate = () => {
+    const headers = [
+      'name',
+      'phone',
+      'phone2',
+      'address',
+      'city',
+      'district',
+      'notes',
+      'creditLimit',
+      'customerType'
+    ];
+    const rows = [
+      headers.join(','),
+      [
+        'عميل تجريبي',
+        '01000000000',
+        '',
+        'القاهرة - شارع النصر',
+        'القاهرة',
+        'مدينة نصر',
+        'ملاحظة اختيارية',
+        '5000',
+        'VIP'
+      ].join(',')
+    ];
+
+    const blob = new Blob([`\uFEFF${rows.join('\r\n')}`], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'customers-import-template.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const startCustomerImport = useCallback(async () => {
+    if (!customerImportSession || importingCustomers) return;
+
+    if (!customerImportSession.mapping?.name) {
+      await safeAlert('اختَر عمود "اسم العميل" قبل بدء الاستيراد', null, {
+        type: 'warning',
+        title: 'مطابقة الأعمدة'
+      });
+      return;
+    }
+
+    setImportingCustomers(true);
+    try {
+      const mappedRows = mapRowsWithCustomerImportMapping(
+        customerImportSession.rows,
+        customerImportSession.mapping
+      ).map((mapped, index) => ({
+        sourceIndex: index + 2,
+        customer: sanitizeImportedCustomer(mapped)
+      }));
+
+      const validRows = mappedRows.filter((item) => item.customer.name);
+      const skipped = Math.max(0, mappedRows.length - validRows.length);
+
+      if (!validRows.length) {
+        throw new Error('لم يتم العثور على صفوف صالحة تحتوي على اسم عميل');
+      }
+
+      const existingByName = new Map();
+      const existingByPhone = new Map();
+      if (updateExistingOnImport) {
+        for (const customer of allCustomers) {
+          const nameKey = normalizeCustomerNameKey(customer?.name);
+          const phoneKey = normalizeCustomerPhoneKey(customer?.phone);
+          if (nameKey && !existingByName.has(nameKey)) existingByName.set(nameKey, customer);
+          if (phoneKey && !existingByPhone.has(phoneKey)) existingByPhone.set(phoneKey, customer);
+        }
+      }
+
+      let created = 0;
+      let updated = 0;
+      let failed = 0;
+      const rowErrors = [];
+
+      for (const item of validRows) {
+        const row = item.customer;
+        const nameKey = normalizeCustomerNameKey(row.name);
+        const phoneKey = normalizeCustomerPhoneKey(row.phone);
+
+        try {
+          let existingCustomer = null;
+          if (updateExistingOnImport) {
+            if (phoneKey) existingCustomer = existingByPhone.get(phoneKey) || null;
+            if (!existingCustomer && nameKey) existingCustomer = existingByName.get(nameKey) || null;
+          }
+
+          if (existingCustomer) {
+            const updatePayload = {
+              name: row.name || existingCustomer.name || '',
+              phone: row.phone || existingCustomer.phone || '',
+              phone2: row.phone2 || existingCustomer.phone2 || '',
+              address: row.address || existingCustomer.address || '',
+              city: row.city || existingCustomer.city || '',
+              district: row.district || existingCustomer.district || '',
+              notes: row.notes || existingCustomer.notes || '',
+              creditLimit: row.creditLimit ?? existingCustomer.creditLimit ?? 0,
+              customerType: row.customerType || existingCustomer.customerType || 'عادي'
+            };
+            const updateResult = await window.api.updateCustomer(existingCustomer.id, updatePayload);
+            if (updateResult?.error) throw new Error(updateResult.error);
+
+            updated += 1;
+            const mergedCustomer = { ...existingCustomer, ...updatePayload };
+            const mergedNameKey = normalizeCustomerNameKey(mergedCustomer.name);
+            const mergedPhoneKey = normalizeCustomerPhoneKey(mergedCustomer.phone);
+            if (mergedNameKey) existingByName.set(mergedNameKey, mergedCustomer);
+            if (mergedPhoneKey) existingByPhone.set(mergedPhoneKey, mergedCustomer);
+          } else {
+            const addResult = await window.api.addCustomer({
+              ...row,
+              customerType: row.customerType || 'عادي'
+            });
+            if (addResult?.error) throw new Error(addResult.error);
+
+            created += 1;
+            const inserted = { ...row, ...(addResult || {}) };
+            const insertedNameKey = normalizeCustomerNameKey(inserted.name);
+            const insertedPhoneKey = normalizeCustomerPhoneKey(inserted.phone);
+            if (insertedNameKey) existingByName.set(insertedNameKey, inserted);
+            if (insertedPhoneKey) existingByPhone.set(insertedPhoneKey, inserted);
+          }
+        } catch (rowError) {
+          failed += 1;
+          if (rowErrors.length < 10) {
+            rowErrors.push(`صف ${item.sourceIndex}: ${rowError?.message || 'خطأ غير متوقع'}`);
+          }
+        }
+      }
+
+      await refreshCustomers();
+      setCustomerImportSession(null);
+
+      await safeAlert(
+        `نتيجة الاستيراد:\nجديد: ${created}\nتم تحديثه: ${updated}\nتم تجاهله (بدون اسم): ${skipped}\nفشل: ${failed}`,
+        null,
+        {
+          type: failed > 0 ? 'warning' : 'success',
+          title: 'استيراد العملاء',
+          detail: rowErrors.length ? rowErrors.join('\n') : undefined
+        }
+      );
+    } catch (err) {
+      await safeAlert(err?.message || 'تعذر استيراد العملاء', null, {
+        type: 'error',
+        title: 'استيراد العملاء'
+      });
+    } finally {
+      setImportingCustomers(false);
+    }
+  }, [customerImportSession, importingCustomers, updateExistingOnImport, allCustomers, refreshCustomers]);
 
   // Callbacks للأزرار - تمنع إعادة إنشاء الدوال في كل render
   const handleShowLedger = useCallback((customerId) => {
@@ -2061,8 +2378,10 @@ export default function Customers() {
               style={{
                 backgroundColor: 'white',
                 borderRadius: '12px',
-                padding: '30px',
-                width: '500px'
+                padding: '24px',
+                width: 'min(920px, calc(100vw - 40px))',
+                maxHeight: '90vh',
+                overflowY: 'auto'
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -2117,6 +2436,178 @@ export default function Customers() {
                   </div>
                   <div style={{ marginTop: '8px' }}>• عملاء ملتزمين: <strong>{customerStats.compliantCount}</strong></div>
                 </div>
+              </div>
+
+              <div style={{ marginBottom: '20px', backgroundColor: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <div>
+                    <h3 style={{ margin: 0, color: '#0f172a' }}>📤 استيراد العملاء من Excel</h3>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#64748b' }}>
+                      الصيغ المدعومة: XLSX / XLS / CSV / TSV
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={downloadCustomerImportTemplate}
+                      style={{
+                        padding: '10px 12px',
+                        backgroundColor: '#e2e8f0',
+                        color: '#0f172a',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      تنزيل قالب CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => customerImportInputRef.current?.click()}
+                      disabled={importingCustomers}
+                      style={{
+                        padding: '10px 12px',
+                        backgroundColor: importingCustomers ? '#94a3b8' : '#0f766e',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: importingCustomers ? 'not-allowed' : 'pointer',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      {importingCustomers ? 'جاري الاستيراد...' : 'اختيار ملف'}
+                    </button>
+                  </div>
+                </div>
+
+                <input
+                  ref={customerImportInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.tsv,.txt"
+                  style={{ display: 'none' }}
+                  onChange={importCustomersFile}
+                />
+
+                <label style={{ marginTop: '12px', display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#1f2937' }}>
+                  <input
+                    type="checkbox"
+                    checked={updateExistingOnImport}
+                    onChange={(event) => setUpdateExistingOnImport(event.target.checked)}
+                    disabled={importingCustomers}
+                  />
+                  تحديث العملاء الموجودين عند تطابق الاسم أو الهاتف
+                </label>
+
+                {!customerImportSession && (
+                  <div style={{ marginTop: '12px', fontSize: '13px', color: '#64748b' }}>
+                    لم يتم اختيار ملف استيراد بعد.
+                  </div>
+                )}
+
+                {customerImportSession && (
+                  <>
+                    <div style={{ marginTop: '12px', fontSize: '13px', color: '#334155', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '6px', padding: '10px' }}>
+                      <div><strong>الملف:</strong> {customerImportSession.fileName}</div>
+                      <div style={{ marginTop: '6px' }}>
+                        <strong>الأعمدة:</strong> {customerImportSession.headers.length}
+                        {' | '}
+                        <strong>الصفوف:</strong> {customerImportSession.rows.length}
+                        {customerImportSession.sheetName ? ` | Sheet: ${customerImportSession.sheetName}` : ''}
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
+                      {CUSTOMER_IMPORT_FIELD_OPTIONS.map((field) => {
+                        const selectedColumn = customerImportSession.mapping?.[field.key] ?? '';
+                        const sampleValue = selectedColumn ? customerImportColumnSamples.get(selectedColumn) : '';
+
+                        return (
+                          <label key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#1f2937' }}>
+                              {field.label}
+                              {field.required ? ' *' : ''}
+                            </span>
+                            <select
+                              value={selectedColumn}
+                              onChange={(event) => updateCustomerImportFieldMapping(field.key, event.target.value)}
+                              disabled={importingCustomers}
+                              style={{
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '6px',
+                                padding: '8px',
+                                fontSize: '13px',
+                                backgroundColor: 'white'
+                              }}
+                            >
+                              <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
+                              {customerImportSession.headers.map((header) => (
+                                <option key={`${field.key}-${header.id}`} value={header.id}>
+                                  {header.label}
+                                </option>
+                              ))}
+                            </select>
+                            <span style={{ minHeight: '20px', fontSize: '11px', color: '#64748b' }}>
+                              {sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ marginTop: '14px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={applyCustomerImportAutoMapping}
+                        disabled={importingCustomers}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#e2e8f0',
+                          color: '#0f172a',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: importingCustomers ? 'not-allowed' : 'pointer',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        مطابقة تلقائية
+                      </button>
+                      <button
+                        type="button"
+                        onClick={closeCustomerImportSession}
+                        disabled={importingCustomers}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#f1f5f9',
+                          color: '#334155',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          cursor: importingCustomers ? 'not-allowed' : 'pointer',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        إلغاء الملف
+                      </button>
+                      <button
+                        type="button"
+                        onClick={startCustomerImport}
+                        disabled={importingCustomers}
+                        style={{
+                          padding: '10px 14px',
+                          backgroundColor: importingCustomers ? '#94a3b8' : '#0f766e',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: importingCustomers ? 'not-allowed' : 'pointer',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px' }}>

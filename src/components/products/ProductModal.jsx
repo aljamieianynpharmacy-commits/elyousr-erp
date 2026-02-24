@@ -190,6 +190,7 @@ export default function ProductModal({
   const [activeTab, setActiveTab] = useState(TABS.BASIC);
   const [formData, setFormData] = useState(() => buildInitialState(initialData));
   const [validationMessage, setValidationMessage] = useState('');
+  const fileInputRef = useRef(null);
   const [unitOptions, setUnitOptions] = useState(loadCustomUnits);
   const [isUnitManagerOpen, setIsUnitManagerOpen] = useState(false);
 
@@ -887,8 +888,8 @@ export default function ProductModal({
                             {formData.hasVariants && <th>المقاس</th>}
                             {formData.hasVariants && <th>اللون</th>}
                             <th>سعر الشراء</th>
-                            <th>سعر البيع</th>
                             <th>النسبة %</th>
+                            <th>سعر البيع</th>
                             {warehouses.length === 0 && <th>الكمية</th>}
                             {warehouses.map(wh => (<th key={wh.id}>{wh.icon || '🏭'} {wh.name}</th>))}
                             {warehouses.length > 0 && <th>الإجمالي</th>}
@@ -912,13 +913,13 @@ export default function ProductModal({
                                   <input type="number" min="0" step="0.01" value={variant.cost} onChange={(event) => setVariantField(index, 'cost', event.target.value)} />
                                 </td>
                                 <td>
-                                  <input type="number" min="0" step="0.01" value={variant.price} onChange={(event) => setVariantField(index, 'price', event.target.value)} />
-                                </td>
-                                <td>
                                   <input type="number" step="0.01" value={margin} onChange={(e) => {
                                     const m = toNum(e.target.value, 0);
                                     setVariantField(index, 'price', money(variant.cost * (1 + m / 100)));
                                   }} />
+                                </td>
+                                <td>
+                                  <input type="number" min="0" step="0.01" value={variant.price} onChange={(event) => setVariantField(index, 'price', event.target.value)} />
                                 </td>
                                 {warehouses.length === 0 && (
                                   <td>
@@ -954,10 +955,10 @@ export default function ProductModal({
                                 <input type="number" min="0" step="0.01" value={mainUnit.purchasePrice} onChange={(event) => setUnitField('purchasePrice', event.target.value)} />
                               </td>
                               <td>
-                                <input type="number" min="0" step="0.01" value={mainUnit.salePrice} onChange={(event) => setUnitField('salePrice', event.target.value)} />
+                                <input type="number" step="0.01" value={marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice)} onChange={(e) => setUnitMarginPercent(e.target.value)} />
                               </td>
                               <td>
-                                <input type="number" step="0.01" value={marginPercentOf(mainUnit.purchasePrice, mainUnit.salePrice)} onChange={(e) => setUnitMarginPercent(e.target.value)} />
+                                <input type="number" min="0" step="0.01" value={mainUnit.salePrice} onChange={(event) => setUnitField('salePrice', event.target.value)} />
                               </td>
                               {warehouses.length === 0 && (
                                 <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{stockTotalPreview}</td>

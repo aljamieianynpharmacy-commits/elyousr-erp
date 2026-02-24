@@ -326,7 +326,7 @@ const InvoiceTab = ({ invoice, isActive, onSelect, onClose, canClose }) => {
  * بطاقة المنتج
  * تعرض: الاسم، السعر، المخزون المتاح
  */
-const ProductCard = ({ product, onClick }) => (
+const ProductCard = React.memo(({ product, onClick }) => (
     <div
         onClick={onClick}
         style={{
@@ -383,7 +383,79 @@ const ProductCard = ({ product, onClick }) => (
             المخزون: {product.totalQuantity}
         </div>
     </div>
-);
+));
+
+const MemoizedProductGridItem = React.memo(({ product, index, isSelected, onSelect, onMouseEnter }) => (
+    <div
+        data-product-index={index}
+        onClick={() => onSelect(product, index)}
+        onMouseEnter={() => onMouseEnter(index)}
+        style={{
+            cursor: "pointer",
+            position: "relative",
+            transition: "transform 0.2s",
+        }}
+    >
+        <ProductCard
+            product={product}
+            onClick={() => onSelect(product, index)}
+        />
+        {isSelected && (
+            <div
+                style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    border: "3px solid #3b82f6",
+                    borderRadius: "10px",
+                    pointerEvents: "none",
+                }}
+            />
+        )}
+    </div>
+));
+
+const MemoizedProductRowItem = React.memo(({ product, index, isSelected, onSelect, onMouseEnter }) => (
+    <tr
+        data-product-index={index}
+        onClick={() => onSelect(product, index)}
+        onMouseEnter={() => onMouseEnter(index)}
+        style={{
+            backgroundColor: isSelected ? "#eff6ff" : "white",
+            cursor: "pointer",
+            borderBottom: "1px solid #e5e7eb",
+            transition: "background-color 0.2s",
+            borderLeft: isSelected ? "4px solid #3b82f6" : "none",
+        }}
+    >
+        <td style={{ padding: "12px", textAlign: "right" }}>
+            <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+                {product.name}
+            </div>
+        </td>
+        <td style={{ padding: "12px", textAlign: "center" }}>
+            <span style={{ color: "#059669", fontWeight: "bold" }}>
+                {product.basePrice.toFixed(2)}
+            </span>
+        </td>
+        <td style={{ padding: "12px", textAlign: "center" }}>
+            <span
+                style={{
+                    fontSize: "11px",
+                    color: product.totalQuantity > 0 ? "#6b7280" : "#ef4444",
+                    backgroundColor: product.totalQuantity > 0 ? "#f3f4f6" : "#fee2e2",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    display: "inline-block",
+                }}
+            >
+                {product.totalQuantity}
+            </span>
+        </td>
+    </tr>
+));
 
 /**
  * صف في عربة التسوق
@@ -638,6 +710,10 @@ export default function EnhancedPOS() {
      */
     const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
     const [searchMode, setSearchMode] = useState(() => getDefaultSearchMode()); // 'name' أو 'barcode'
+
+    const handleProductMouseEnterRef = useCallback((index) => {
+        setSelectedProductIndex(index);
+    }, []);
 
     const productNeedsVariantSelection = useCallback((product) => {
         const productVariants = Array.isArray(product?.variants) ? product.variants : [];
@@ -2149,38 +2225,14 @@ export default function EnhancedPOS() {
                             }}
                         >
                             {groupedProducts.map((product, index) => (
-                                <div
+                                <MemoizedProductGridItem
                                     key={product.id}
-                                    data-product-index={index}
-                                    onClick={() => {
-                                        handleProductSelection(product, index);
-                                    }}
-                                    onMouseEnter={() => setSelectedProductIndex(index)}
-                                    style={{
-                                        cursor: "pointer",
-                                        position: "relative",
-                                        transition: "transform 0.2s",
-                                    }}
-                                >
-                                    <ProductCard
-                                        product={product}
-                                        onClick={() => handleProductSelection(product, index)}
-                                    />
-                                    {selectedProductIndex === index && (
-                                        <div
-                                            style={{
-                                                position: "absolute",
-                                                top: 0,
-                                                left: 0,
-                                                right: 0,
-                                                bottom: 0,
-                                                border: "3px solid #3b82f6",
-                                                borderRadius: "10px",
-                                                pointerEvents: "none",
-                                            }}
-                                        />
-                                    )}
-                                </div>
+                                    product={product}
+                                    index={index}
+                                    isSelected={selectedProductIndex === index}
+                                    onSelect={handleProductSelection}
+                                    onMouseEnter={handleProductMouseEnterRef}
+                                />
                             ))}
                         </div>
                     ) : (
@@ -2228,52 +2280,14 @@ export default function EnhancedPOS() {
                                 </thead>
                                 <tbody>
                                     {groupedProducts.map((product, index) => (
-                                        <tr
+                                        <MemoizedProductRowItem
                                             key={product.id}
-                                            data-product-index={index}
-                                            onClick={() => {
-                                                handleProductSelection(product, index);
-                                            }}
-                                            onMouseEnter={() => setSelectedProductIndex(index)}
-                                            style={{
-                                                backgroundColor:
-                                                    selectedProductIndex === index ? "#eff6ff" : "white",
-                                                cursor: "pointer",
-                                                borderBottom: "1px solid #e5e7eb",
-                                                transition: "background-color 0.2s",
-                                                borderLeft:
-                                                    selectedProductIndex === index
-                                                        ? "4px solid #3b82f6"
-                                                        : "none",
-                                            }}
-                                        >
-                                            <td style={{ padding: "12px", textAlign: "right" }}>
-                                                <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                                                    {product.name}
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: "12px", textAlign: "center" }}>
-                                                <span style={{ color: "#059669", fontWeight: "bold" }}>
-                                                    {product.basePrice.toFixed(2)}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: "12px", textAlign: "center" }}>
-                                                <span
-                                                    style={{
-                                                        fontSize: "11px",
-                                                        color:
-                                                            product.totalQuantity > 0 ? "#6b7280" : "#ef4444",
-                                                        backgroundColor:
-                                                            product.totalQuantity > 0 ? "#f3f4f6" : "#fee2e2",
-                                                        padding: "2px 6px",
-                                                        borderRadius: "4px",
-                                                        display: "inline-block",
-                                                    }}
-                                                >
-                                                    {product.totalQuantity}
-                                                </span>
-                                            </td>
-                                        </tr>
+                                            product={product}
+                                            index={index}
+                                            isSelected={selectedProductIndex === index}
+                                            onSelect={handleProductSelection}
+                                            onMouseEnter={handleProductMouseEnterRef}
+                                        />
                                     ))}
                                 </tbody>
                             </table>
@@ -2454,7 +2468,7 @@ export default function EnhancedPOS() {
                                     }}
                                 />
                             </div>
-                             {/* Warehouse Selector */}
+                            {/* Warehouse Selector */}
                             <div
                                 style={{
                                     display: "flex",
@@ -2489,7 +2503,7 @@ export default function EnhancedPOS() {
                             </div>
                         </div>
                         <div style={{ gap: "10px", alignItems: "center" }}>
-                    
+
                             {!activeInvoice.customer ? (
                                 <div
                                     ref={customerDropdownRef}

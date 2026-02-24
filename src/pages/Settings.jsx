@@ -19,10 +19,13 @@ import {
 } from '../utils/appSettings';
 import './Settings.css';
 
+import { Settings as SettingsIcon, Users, Upload, Store, Box, UserCheck } from 'lucide-react';
+
 const SETTINGS_TABS = [
-  { id: 'basic', label: 'الإعدادات الأساسية' },
-  { id: 'customers', label: 'إعدادات العملاء' },
-  { id: 'import', label: 'استيراد العملاء' }
+  { id: 'basic', label: 'الإعدادات العامة', icon: <SettingsIcon /> },
+  { id: 'pos', label: 'نقطة البيع (POS)', icon: <Store /> },
+  { id: 'customers', label: 'إدارة العملاء', icon: <Users /> },
+  { id: 'import', label: 'استيراد العملاء', icon: <Upload /> }
 ];
 
 const normalizeCustomerNameKey = (value) => String(value ?? '').trim().toLowerCase();
@@ -514,322 +517,334 @@ export default function Settings() {
         <p>إدارة إعدادات النظام بشكل مركزي.</p>
       </header>
 
-      <div className="settings-tabs">
-        {SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`settings-tab-btn ${activeTab === tab.id ? 'is-active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'basic' && (
-        <section className="settings-card">
-          <h2>إعدادات البيع الأساسية</h2>
-          <p className="settings-hint">
-            الإعدادات التالية تُطبّق تلقائيًا عند فتح فاتورة جديدة في شاشة نقطة البيع.
-          </p>
-
-          <h3>نوع البيع الافتراضي</h3>
-          <div className="settings-sale-type-options">
-            <label className="settings-sale-option">
-              <input
-                type="radio"
-                name="defaultSaleType"
-                value="نقدي"
-                checked={defaultSaleType === 'نقدي'}
-                onChange={(event) => setDefaultSaleType(event.target.value)}
-              />
-              نقدي
-            </label>
-            <label className="settings-sale-option">
-              <input
-                type="radio"
-                name="defaultSaleType"
-                value="آجل"
-                checked={defaultSaleType === 'آجل'}
-                onChange={(event) => setDefaultSaleType(event.target.value)}
-              />
-              آجل
-            </label>
-          </div>
-
-          <div className="settings-form-row">
-            <span className="settings-form-label">طريقة العرض الافتراضية للمنتجات</span>
-            <div className="settings-sale-type-options">
-              <label className="settings-sale-option">
-                <input
-                  type="radio"
-                  name="defaultProductDisplayMode"
-                  value="list"
-                  checked={defaultProductDisplayMode === 'list'}
-                  onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
-                />
-                قائمة
-              </label>
-              <label className="settings-sale-option">
-                <input
-                  type="radio"
-                  name="defaultProductDisplayMode"
-                  value="grid"
-                  checked={defaultProductDisplayMode === 'grid'}
-                  onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
-                />
-                شبكة
-              </label>
-            </div>
-          </div>
-
-          <div className="settings-form-row">
-            <span className="settings-form-label">طريقة البحث الافتراضية</span>
-            <div className="settings-sale-type-options">
-              <label className="settings-sale-option">
-                <input
-                  type="radio"
-                  name="defaultSearchMode"
-                  value="name"
-                  checked={defaultSearchMode === 'name'}
-                  onChange={(event) => setDefaultSearchMode(event.target.value)}
-                />
-                بالاسم
-              </label>
-              <label className="settings-sale-option">
-                <input
-                  type="radio"
-                  name="defaultSearchMode"
-                  value="barcode"
-                  checked={defaultSearchMode === 'barcode'}
-                  onChange={(event) => setDefaultSearchMode(event.target.value)}
-                />
-                بالباركود
-              </label>
-            </div>
-          </div>
-
-          <div className="settings-form-row">
-            <label htmlFor="defaultWarehouseId" className="settings-form-label">
-              المخزن الافتراضي في نقطة البيع
-            </label>
-            <div className="settings-inline-controls">
-              <select
-                id="defaultWarehouseId"
-                className="settings-select"
-                value={defaultWarehouseId ? String(defaultWarehouseId) : ''}
-                onChange={(event) => setDefaultWarehouseId(normalizeWarehouseId(event.target.value))}
-                disabled={loadingWarehouses}
-              >
-                <option value="">كل المخازن (بدون تحديد)</option>
-                {activeWarehouses.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {(warehouse.icon || '🏭')} {warehouse.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={loadWarehouses}
-                className="settings-btn settings-btn-secondary"
-                disabled={loadingWarehouses || savingBasicSettings}
-              >
-                {loadingWarehouses ? 'جاري تحميل المخازن...' : 'تحديث المخازن'}
-              </button>
-            </div>
-            <small className="settings-form-help">
-              يُستخدم هذا المخزن تلقائيًا في الفواتير الجديدة، ويمكن تغييره يدويًا داخل نقطة البيع.
-            </small>
-          </div>
-
-          <div className="settings-actions">
+      <div className="settings-layout">
+        {/* Sidebar Navigation */}
+        <aside className="settings-sidebar">
+          {SETTINGS_TABS.map((tab) => (
             <button
+              key={tab.id}
               type="button"
-              onClick={saveBasicSettings}
-              className="settings-btn settings-btn-primary"
-              disabled={savingBasicSettings}
+              className={`settings-nav-item ${activeTab === tab.id ? 'is-active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
             >
-              {savingBasicSettings ? 'جاري الحفظ...' : 'حفظ الإعدادات الأساسية'}
+              {tab.icon}
+              <span>{tab.label}</span>
             </button>
-          </div>
+          ))}
+        </aside>
 
-          <div className="settings-suggestions">
-            <h3>اقتراحات إعدادات إضافية</h3>
-            <ul>
-              <li>تحديد طريقة الدفع الافتراضية للفاتورة الجديدة.</li>
-              <li>تفعيل الطباعة التلقائية بعد حفظ الفاتورة.</li>
-              <li>إعداد نسبة ضريبة افتراضية قابلة للتعديل.</li>
-              <li>تحديد حد خصم أقصى للمستخدم العادي.</li>
-              <li>تفعيل التحذير عند تجاوز حد ائتمان العميل.</li>
-            </ul>
-          </div>
-        </section>
-      )}
+        {/* Content Area */}
+        <main className="settings-content">
+          {activeTab === 'basic' && (
+            <section className="settings-card">
+              <h2><SettingsIcon className="w-5 h-5" /> الإعدادات العامة</h2>
+              <p className="settings-hint">
+                الإعدادات العامة للنظام سيتم إضافتها هنا قريباً.
+              </p>
 
-      {activeTab === 'customers' && (
-        <section className="settings-card">
-          <h2>إعدادات العملاء</h2>
-          <p className="settings-hint">التحكم في عدد الأيام قبل اعتبار العميل متأخرًا في الدفع.</p>
+              <div className="settings-empty">
+                <Box size={40} className="mb-2 opacity-50 mx-auto" />
+                <p>مساحة مخصصة لإعدادات النظام العامة المستقبلية (مثل معلومات الشركة، العملة الافتراضية، وغيرها).</p>
+              </div>
+            </section>
+          )}
 
-          <div className="settings-range-wrap">
-            <input
-              type="range"
-              min="7"
-              max="90"
-              step="1"
-              value={tempThreshold}
-              onChange={(event) => setTempThreshold(parseInt(event.target.value, 10))}
-              className="settings-range"
-            />
-            <div className="settings-range-value">{tempThreshold} يوم</div>
-          </div>
+          {activeTab === 'pos' && (
+            <section className="settings-card">
+              <h2><Store className="w-5 h-5" /> إعدادات نقطة البيع (POS)</h2>
+              <p className="settings-hint">
+                الإعدادات التالية تُطبّق تلقائيًا عند فتح فاتورة جديدة في شاشة نقطة البيع.
+              </p>
 
-          <div className="settings-stats-grid">
-            <div className="settings-stat-box">
-              <span>إجمالي العملاء</span>
-              <strong>{customerStats.totalItems}</strong>
-            </div>
-            <div className="settings-stat-box">
-              <span>عملاء مدينين</span>
-              <strong>{customerStats.debtedCount}</strong>
-            </div>
-            <div className="settings-stat-box">
-              <span>متأخرون حاليًا</span>
-              <strong>{customerStats.overdueCount}</strong>
-            </div>
-            <div className="settings-stat-box">
-              <span>متأخرون بعد التعديل</span>
-              <strong>{overduePreviewCount}</strong>
-            </div>
-          </div>
-
-          <div className="settings-actions">
-            <button type="button" onClick={saveOverdueThreshold} className="settings-btn settings-btn-primary">
-              حفظ إعدادات العملاء
-            </button>
-            <button
-              type="button"
-              onClick={loadAllCustomers}
-              className="settings-btn settings-btn-secondary"
-              disabled={loadingCustomers}
-            >
-              {loadingCustomers ? 'جاري التحديث...' : 'تحديث البيانات'}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {activeTab === 'import' && (
-        <section className="settings-card">
-          <h2>استيراد العملاء</h2>
-          <p className="settings-hint">الصيغ المدعومة: XLSX / XLS / CSV / TSV.</p>
-
-          <div className="settings-actions">
-            <button type="button" onClick={downloadCustomerImportTemplate} className="settings-btn settings-btn-secondary">
-              تنزيل قالب CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => customerImportInputRef.current?.click()}
-              className="settings-btn settings-btn-primary"
-              disabled={importingCustomers}
-            >
-              {importingCustomers ? 'جاري الاستيراد...' : 'اختيار ملف'}
-            </button>
-          </div>
-
-          <input
-            ref={customerImportInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv,.tsv,.txt"
-            style={{ display: 'none' }}
-            onChange={importCustomersFile}
-          />
-
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={updateExistingOnImport}
-              onChange={(event) => setUpdateExistingOnImport(event.target.checked)}
-              disabled={importingCustomers}
-            />
-            تحديث العميل الموجود عند تطابق الاسم أو الهاتف
-          </label>
-
-          {!customerImportSession && <div className="settings-empty">لم يتم اختيار ملف استيراد بعد.</div>}
-
-          {customerImportSession && (
-            <>
-              <div className="settings-import-meta">
-                <div><strong>الملف:</strong> {customerImportSession.fileName}</div>
-                <div>
-                  <strong>الأعمدة:</strong> {customerImportSession.headers.length}
-                  {' | '}
-                  <strong>الصفوف:</strong> {customerImportSession.rows.length}
-                  {customerImportSession.sheetName ? ` | الورقة: ${customerImportSession.sheetName}` : ''}
+              <div className="settings-form-group">
+                <span className="settings-form-label">نوع البيع الافتراضي</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultSaleType"
+                      value="نقدي"
+                      checked={defaultSaleType === 'نقدي'}
+                      onChange={(event) => setDefaultSaleType(event.target.value)}
+                    />
+                    <span>نقدي</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultSaleType"
+                      value="آجل"
+                      checked={defaultSaleType === 'آجل'}
+                      onChange={(event) => setDefaultSaleType(event.target.value)}
+                    />
+                    <span>آجل</span>
+                  </label>
                 </div>
               </div>
 
-              <div className="settings-mapping-grid">
-                {CUSTOMER_IMPORT_FIELD_OPTIONS.map((field) => {
-                  const selectedColumn = customerImportSession.mapping?.[field.key] ?? '';
-                  const sampleValue = selectedColumn ? customerImportColumnSamples.get(selectedColumn) : '';
+              <div className="settings-form-group">
+                <span className="settings-form-label">طريقة العرض الافتراضية للمنتجات</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultProductDisplayMode"
+                      value="list"
+                      checked={defaultProductDisplayMode === 'list'}
+                      onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
+                    />
+                    <span>≡ قائمة</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultProductDisplayMode"
+                      value="grid"
+                      checked={defaultProductDisplayMode === 'grid'}
+                      onChange={(event) => setDefaultProductDisplayMode(event.target.value)}
+                    />
+                    <span>▦ شبكة</span>
+                  </label>
+                </div>
+              </div>
 
-                  return (
-                    <label key={field.key} className="settings-mapping-row">
-                      <span>
-                        {field.label}
-                        {field.required ? ' *' : ''}
-                      </span>
-                      <select
-                        value={selectedColumn}
-                        onChange={(event) => updateCustomerImportFieldMapping(field.key, event.target.value)}
-                        disabled={importingCustomers}
-                      >
-                        <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
-                        {customerImportSession.headers.map((header) => (
-                          <option key={`${field.key}-${header.id}`} value={header.id}>
-                            {header.label}
-                          </option>
-                        ))}
-                      </select>
-                      <small>{sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}</small>
-                    </label>
-                  );
-                })}
+              <div className="settings-form-group">
+                <span className="settings-form-label">طريقة البحث الافتراضية</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultSearchMode"
+                      value="name"
+                      checked={defaultSearchMode === 'name'}
+                      onChange={(event) => setDefaultSearchMode(event.target.value)}
+                    />
+                    <span>📝 بالاسم</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultSearchMode"
+                      value="barcode"
+                      checked={defaultSearchMode === 'barcode'}
+                      onChange={(event) => setDefaultSearchMode(event.target.value)}
+                    />
+                    <span>📦 بالباركود</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-form-group">
+                <label htmlFor="defaultWarehouseId" className="settings-form-label">
+                  المخزن الافتراضي في نقطة البيع
+                </label>
+                <div className="settings-inline-controls">
+                  <select
+                    id="defaultWarehouseId"
+                    className="settings-select"
+                    value={defaultWarehouseId ? String(defaultWarehouseId) : ''}
+                    onChange={(event) => setDefaultWarehouseId(normalizeWarehouseId(event.target.value))}
+                    disabled={loadingWarehouses}
+                  >
+                    <option value="">كل المخازن (بدون تحديد)</option>
+                    {activeWarehouses.map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>
+                        {(warehouse.icon || '🏭')} {warehouse.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadWarehouses}
+                    className="settings-btn settings-btn-secondary"
+                    disabled={loadingWarehouses || savingBasicSettings}
+                  >
+                    {loadingWarehouses ? 'جاري تحميل المخازن...' : 'تحديث المخازن'}
+                  </button>
+                </div>
+                <small className="settings-form-help">
+                  يُستخدم هذا المخزن تلقائيًا في الفواتير الجديدة، ويمكن تغييره يدويًا داخل نقطة البيع.
+                </small>
               </div>
 
               <div className="settings-actions">
                 <button
                   type="button"
-                  onClick={applyCustomerImportAutoMapping}
-                  className="settings-btn settings-btn-secondary"
-                  disabled={importingCustomers}
+                  onClick={saveBasicSettings}
+                  className="settings-btn settings-btn-primary"
+                  disabled={savingBasicSettings}
                 >
-                  مطابقة تلقائية
+                  {savingBasicSettings ? 'جاري الحفظ...' : 'حفظ إعدادات البيع'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'customers' && (
+            <section className="settings-card">
+              <h2><UserCheck className="w-5 h-5" /> إعدادات العملاء</h2>
+              <p className="settings-hint">التحكم في عدد الأيام قبل اعتبار العميل متأخرًا في الدفع.</p>
+
+              <div className="settings-range-wrap">
+                <input
+                  type="range"
+                  min="7"
+                  max="90"
+                  step="1"
+                  value={tempThreshold}
+                  onChange={(event) => setTempThreshold(parseInt(event.target.value, 10))}
+                  className="settings-range"
+                />
+                <div className="settings-range-value">{tempThreshold} يوم</div>
+              </div>
+
+              <div className="settings-stats-grid">
+                <div className="settings-stat-box">
+                  <span>إجمالي العملاء</span>
+                  <strong>{customerStats.totalItems}</strong>
+                </div>
+                <div className="settings-stat-box">
+                  <span>عملاء مدينين</span>
+                  <strong>{customerStats.debtedCount}</strong>
+                </div>
+                <div className="settings-stat-box">
+                  <span>متأخرون حاليًا</span>
+                  <strong>{customerStats.overdueCount}</strong>
+                </div>
+                <div className="settings-stat-box">
+                  <span>متأخرون بعد التعديل</span>
+                  <strong>{overduePreviewCount}</strong>
+                </div>
+              </div>
+
+              <div className="settings-actions">
+                <button type="button" onClick={saveOverdueThreshold} className="settings-btn settings-btn-primary">
+                  حفظ إعدادات العملاء
                 </button>
                 <button
                   type="button"
-                  onClick={closeCustomerImportSession}
+                  onClick={loadAllCustomers}
                   className="settings-btn settings-btn-secondary"
-                  disabled={importingCustomers}
+                  disabled={loadingCustomers}
                 >
-                  إلغاء الملف
+                  {loadingCustomers ? 'جاري التحديث...' : 'تحديث البيانات'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'import' && (
+            <section className="settings-card">
+              <h2><Upload className="w-5 h-5" /> استيراد العملاء</h2>
+              <p className="settings-hint">الصيغ المدعومة: XLSX / XLS / CSV / TSV.</p>
+
+              <div className="settings-actions">
+                <button type="button" onClick={downloadCustomerImportTemplate} className="settings-btn settings-btn-secondary">
+                  تنزيل قالب CSV
                 </button>
                 <button
                   type="button"
-                  onClick={startCustomerImport}
+                  onClick={() => customerImportInputRef.current?.click()}
                   className="settings-btn settings-btn-primary"
                   disabled={importingCustomers}
                 >
-                  {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
+                  {importingCustomers ? 'جاري الاستيراد...' : 'اختيار ملف'}
                 </button>
               </div>
-            </>
+
+              <input
+                ref={customerImportInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,.tsv,.txt"
+                style={{ display: 'none' }}
+                onChange={importCustomersFile}
+              />
+
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={updateExistingOnImport}
+                  onChange={(event) => setUpdateExistingOnImport(event.target.checked)}
+                  disabled={importingCustomers}
+                />
+                تحديث العميل الموجود عند تطابق الاسم أو الهاتف
+              </label>
+
+              {!customerImportSession && <div className="settings-empty">لم يتم اختيار ملف استيراد بعد.</div>}
+
+              {customerImportSession && (
+                <>
+                  <div className="settings-import-meta">
+                    <div><strong>الملف:</strong> {customerImportSession.fileName}</div>
+                    <div>
+                      <strong>الأعمدة:</strong> {customerImportSession.headers.length}
+                      {' | '}
+                      <strong>الصفوف:</strong> {customerImportSession.rows.length}
+                      {customerImportSession.sheetName ? ` | الورقة: ${customerImportSession.sheetName}` : ''}
+                    </div>
+                  </div>
+
+                  <div className="settings-mapping-grid">
+                    {CUSTOMER_IMPORT_FIELD_OPTIONS.map((field) => {
+                      const selectedColumn = customerImportSession.mapping?.[field.key] ?? '';
+                      const sampleValue = selectedColumn ? customerImportColumnSamples.get(selectedColumn) : '';
+
+                      return (
+                        <label key={field.key} className="settings-mapping-row">
+                          <span>
+                            {field.label}
+                            {field.required ? ' *' : ''}
+                          </span>
+                          <select
+                            value={selectedColumn}
+                            onChange={(event) => updateCustomerImportFieldMapping(field.key, event.target.value)}
+                            disabled={importingCustomers}
+                          >
+                            <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
+                            {customerImportSession.headers.map((header) => (
+                              <option key={`${field.key}-${header.id}`} value={header.id}>
+                                {header.label}
+                              </option>
+                            ))}
+                          </select>
+                          <small>{sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}</small>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="settings-actions">
+                    <button
+                      type="button"
+                      onClick={applyCustomerImportAutoMapping}
+                      className="settings-btn settings-btn-secondary"
+                      disabled={importingCustomers}
+                    >
+                      مطابقة تلقائية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeCustomerImportSession}
+                      className="settings-btn settings-btn-secondary"
+                      disabled={importingCustomers}
+                    >
+                      إلغاء الملف
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startCustomerImport}
+                      className="settings-btn settings-btn-primary"
+                      disabled={importingCustomers}
+                    >
+                      {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
           )}
-        </section>
-      )}
-    </div>
+        </main>
+      </div>
+    </div >
   );
 }

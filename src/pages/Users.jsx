@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { safeAlert } from '../utils/safeAlert';
+import { safeConfirm } from '../utils/safeConfirm';
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -56,13 +57,17 @@ export default function Users() {
   };
 
   const handleDelete = async (id) => {
-    if (confirm('هل أنت متأكد من حذف هذا المستخدم؟')) {
-      try {
-        await window.api.deleteUser(id);
-        loadUsers();
-      } catch (err) {
-        safeAlert('خطأ في الحذف');
-      }
+    const confirmed = await safeConfirm('هل أنت متأكد من حذف هذا المستخدم؟', {
+      title: 'تأكيد الحذف',
+      buttons: ['حذف', 'إلغاء']
+    });
+    if (!confirmed) return;
+
+    try {
+      await window.api.deleteUser(id);
+      loadUsers();
+    } catch (err) {
+      safeAlert('خطأ في الحذف');
     }
   };
 

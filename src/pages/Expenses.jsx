@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { safeAlert } from '../utils/safeAlert';
+import { safeConfirm } from '../utils/safeConfirm';
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
@@ -37,13 +38,17 @@ export default function Expenses() {
   };
 
   const handleDelete = async (id) => {
-    if (confirm('هل أنت متأكد من الحذف؟')) {
-      try {
-        await window.api.deleteExpense(id);
-        loadExpenses();
-      } catch (err) {
-        safeAlert('خطأ في الحذف');
-      }
+    const confirmed = await safeConfirm('هل أنت متأكد من الحذف؟', {
+      title: 'تأكيد الحذف',
+      buttons: ['حذف', 'إلغاء']
+    });
+    if (!confirmed) return;
+
+    try {
+      await window.api.deleteExpense(id);
+      loadExpenses();
+    } catch (err) {
+      safeAlert('خطأ في الحذف');
     }
   };
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { safeAlert } from "../utils/safeAlert";
+import { safeConfirm } from "../utils/safeConfirm";
 import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
 import NewCustomerModal from "../components/NewCustomerModal";
 import SupplierLedger from "./SupplierLedger";
@@ -207,7 +208,11 @@ export default function Suppliers() {
     };
 
     const deleteSupplier = useCallback(async (supplierId) => {
-        if (!window.confirm("هل أنت متأكد من حذف المورد؟")) return;
+        const confirmed = await safeConfirm("هل أنت متأكد من حذف المورد؟", {
+            title: "تأكيد الحذف",
+            buttons: ["حذف", "إلغاء"],
+        });
+        if (!confirmed) return;
         try {
             const result = await window.api.deleteSupplier(supplierId);
             if (result?.error) {
@@ -247,7 +252,11 @@ export default function Suppliers() {
         }
 
         const confirmText = `سيتم تسجيل سداد بقيمة ${formatMoney(amount)} للمورد ${selectedSupplierLive.name}.\nالرصيد بعد السداد: ${formatMoney(paymentPreviewBalance)}\nهل تريد المتابعة؟`;
-        if (!window.confirm(confirmText)) return;
+        const confirmed = await safeConfirm(confirmText, {
+            title: "تأكيد تسجيل السداد",
+            buttons: ["تأكيد", "إلغاء"],
+        });
+        if (!confirmed) return;
 
         setPaymentSubmitting(true);
         try {

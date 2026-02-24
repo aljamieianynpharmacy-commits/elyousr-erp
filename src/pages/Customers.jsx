@@ -799,8 +799,11 @@ export default function Customers() {
     const previewNewBalance = (selectedCustomer.balance - paymentAmount).toFixed(2);
     const paymentDate = new Date(paymentFormData.paymentDate);
     const confirmText = `سوف تُسجّل دفعة بقيمة ${formatCurrency(paymentAmount)} بتاريخ ${paymentDate.toLocaleDateString('ar-EG')}\nالرصيد بعد التسجيل: ${previewNewBalance}\n\nهل تريد المتابعة؟`;
-
-    if (!window.confirm(confirmText)) return;
+    const confirmed = await safeConfirm(confirmText, {
+      title: 'تأكيد تسجيل الدفعة',
+      buttons: ['تأكيد', 'إلغاء']
+    });
+    if (!confirmed) return;
 
     setPaymentSubmitting(true);
     try {

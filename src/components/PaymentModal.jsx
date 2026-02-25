@@ -146,7 +146,8 @@ export default function PaymentModal({
                 };
                 const html = generateReceiptHTML(paymentForPrint, selectedCustomer);
                 const printResult = await safePrint(html, {
-                    title: `إيصال دفع رقم ${paymentId}`
+                    title: `إيصال دفع رقم ${paymentId}`,
+                    silent: true
                 });
 
                 if (printResult?.error) {

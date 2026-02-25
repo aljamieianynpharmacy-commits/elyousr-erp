@@ -8,6 +8,8 @@ import React, {
 } from "react";
 import { X, Printer, Save, FileText } from "lucide-react";
 import { filterPosPaymentMethods } from "../utils/paymentMethodFilters";
+import { safePrint } from "../../printing/safePrint";
+import { generateReceiptHTML } from "../../printing/receiptTemplate";
 
 // ثابت (عدم إعادة إنشاء المصفوفة في كل رندر)
 const DEFAULT_PAYMENT_METHODS = [
@@ -123,14 +125,34 @@ export default function PaymentModal({
 
             // print if requested
             if (withPrint) {
-                // allow print dialog to open
-                await new Promise((res) => {
-                    setTimeout(() => {
-                        window.print();
-                        // small delay to allow print to start
-                        setTimeout(res, 500);
-                    }, 200);
+                const selectedPaymentMethod = safePaymentMethods.find(
+                    (method) => String(method?.id) === String(paymentMethod)
+                );
+                const paymentId = result?.id
+                    || result?.paymentId
+                    || result?.data?.id
+                    || paymentData?.id
+                    || paymentData?.paymentId
+                    || "-";
+                const paymentForPrint = {
+                    ...paymentData,
+                    ...(result?.data || {}),
+                    id: paymentId,
+                    amount: Number(amount) || 0,
+                    paymentDate: date || new Date().toISOString().slice(0, 10),
+                    createdAt: result?.createdAt || paymentData?.createdAt || new Date().toISOString(),
+                    notes,
+                    paymentMethod: selectedPaymentMethod || paymentData?.paymentMethod || null
+                };
+                const html = generateReceiptHTML(paymentForPrint, selectedCustomer);
+                const printResult = await safePrint(html, {
+                    title: `إيصال دفع رقم ${paymentId}`
                 });
+
+                if (printResult?.error) {
+                    setAlert({ message: printResult.error || "تعذر تنفيذ الطباعة", type: "error" });
+                    return;
+                }
             }
 
             // close modal immediately after successful save

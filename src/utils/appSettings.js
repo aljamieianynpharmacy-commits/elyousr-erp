@@ -6,6 +6,8 @@ const DEFAULT_APP_SETTINGS = {
   defaultSearchMode: 'name',
   defaultProductDisplayMode: 'list',
   defaultInvoicePrintLayout: 'receipt80',
+  defaultPurchaseInvoicePrintLayout: 'receipt80',
+  defaultPaymentReceiptPrintLayout: 'receipt80',
   defaultPrinterName: '',
   companyName: '',
   companyContactNumbers: '',
@@ -79,6 +81,12 @@ export const getAppSettings = () => {
       defaultSearchMode: normalizeSearchMode(parsed?.defaultSearchMode),
       defaultProductDisplayMode: normalizeProductDisplayMode(parsed?.defaultProductDisplayMode),
       defaultInvoicePrintLayout: normalizeInvoicePrintLayout(parsed?.defaultInvoicePrintLayout),
+      defaultPurchaseInvoicePrintLayout: normalizeInvoicePrintLayout(
+        parsed?.defaultPurchaseInvoicePrintLayout
+      ),
+      defaultPaymentReceiptPrintLayout: normalizeInvoicePrintLayout(
+        parsed?.defaultPaymentReceiptPrintLayout
+      ),
       defaultPrinterName: normalizeDefaultPrinterName(parsed?.defaultPrinterName),
       companyName: normalizeCompanyName(parsed?.companyName),
       companyContactNumbers: normalizeCompanyContactNumbers(parsed?.companyContactNumbers),
@@ -103,6 +111,12 @@ export const saveAppSettings = (partialSettings = {}) => {
     defaultInvoicePrintLayout: normalizeInvoicePrintLayout(
       partialSettings?.defaultInvoicePrintLayout ?? current.defaultInvoicePrintLayout
     ),
+    defaultPurchaseInvoicePrintLayout: normalizeInvoicePrintLayout(
+      partialSettings?.defaultPurchaseInvoicePrintLayout ?? current.defaultPurchaseInvoicePrintLayout
+    ),
+    defaultPaymentReceiptPrintLayout: normalizeInvoicePrintLayout(
+      partialSettings?.defaultPaymentReceiptPrintLayout ?? current.defaultPaymentReceiptPrintLayout
+    ),
     defaultPrinterName: normalizeDefaultPrinterName(
       partialSettings?.defaultPrinterName ?? current.defaultPrinterName
     ),
@@ -125,6 +139,10 @@ export const getDefaultWarehouseId = () => getAppSettings().defaultWarehouseId;
 export const getDefaultSearchMode = () => getAppSettings().defaultSearchMode;
 export const getDefaultProductDisplayMode = () => getAppSettings().defaultProductDisplayMode;
 export const getDefaultInvoicePrintLayout = () => getAppSettings().defaultInvoicePrintLayout;
+export const getDefaultPurchaseInvoicePrintLayout = () =>
+  getAppSettings().defaultPurchaseInvoicePrintLayout;
+export const getDefaultPaymentReceiptPrintLayout = () =>
+  getAppSettings().defaultPaymentReceiptPrintLayout;
 export const getDefaultPrinterName = () => getAppSettings().defaultPrinterName;
 export const getCompanyName = () => getAppSettings().companyName;
 export const getCompanyContactNumbers = () => getAppSettings().companyContactNumbers;

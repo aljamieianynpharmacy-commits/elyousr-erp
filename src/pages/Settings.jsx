@@ -63,6 +63,12 @@ export default function Settings() {
   const [defaultInvoicePrintLayout, setDefaultInvoicePrintLayout] = useState(() =>
     normalizeInvoicePrintLayout(initialAppSettings.defaultInvoicePrintLayout)
   );
+  const [defaultPurchaseInvoicePrintLayout, setDefaultPurchaseInvoicePrintLayout] = useState(() =>
+    normalizeInvoicePrintLayout(initialAppSettings.defaultPurchaseInvoicePrintLayout)
+  );
+  const [defaultPaymentReceiptPrintLayout, setDefaultPaymentReceiptPrintLayout] = useState(() =>
+    normalizeInvoicePrintLayout(initialAppSettings.defaultPaymentReceiptPrintLayout)
+  );
   const [defaultPrinterName, setDefaultPrinterName] = useState(() =>
     normalizeDefaultPrinterName(initialAppSettings.defaultPrinterName)
   );
@@ -257,6 +263,8 @@ export default function Settings() {
         defaultSearchMode: normalizeSearchMode(defaultSearchMode),
         defaultProductDisplayMode: normalizeProductDisplayMode(defaultProductDisplayMode),
         defaultInvoicePrintLayout: normalizeInvoicePrintLayout(defaultInvoicePrintLayout),
+        defaultPurchaseInvoicePrintLayout: normalizeInvoicePrintLayout(defaultPurchaseInvoicePrintLayout),
+        defaultPaymentReceiptPrintLayout: normalizeInvoicePrintLayout(defaultPaymentReceiptPrintLayout),
         defaultPrinterName: normalizeDefaultPrinterName(defaultPrinterName),
         companyName: normalizeCompanyName(companyName),
         companyContactNumbers: normalizeCompanyContactNumbers(companyContactNumbers),
@@ -682,6 +690,64 @@ export default function Settings() {
                 </div>
                 <small className="settings-form-help">
                   يتم تطبيق هذا الإعداد عند طباعة فاتورة البيع من أي شاشة.
+                </small>
+              </div>
+
+              <div className="settings-form-group">
+                <span className="settings-form-label">المقاس الافتراضي لطباعة فواتير الشراء</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultPurchaseInvoicePrintLayout"
+                      value="receipt80"
+                      checked={defaultPurchaseInvoicePrintLayout === 'receipt80'}
+                      onChange={(event) => setDefaultPurchaseInvoicePrintLayout(event.target.value)}
+                    />
+                    <span>ريسيت 80mm</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultPurchaseInvoicePrintLayout"
+                      value="a4"
+                      checked={defaultPurchaseInvoicePrintLayout === 'a4'}
+                      onChange={(event) => setDefaultPurchaseInvoicePrintLayout(event.target.value)}
+                    />
+                    <span>A4</span>
+                  </label>
+                </div>
+                <small className="settings-form-help">
+                  يتم تطبيق هذا الإعداد عند طباعة فاتورة الشراء من أي شاشة.
+                </small>
+              </div>
+
+              <div className="settings-form-group">
+                <span className="settings-form-label">المقاس الافتراضي لطباعة إيصالات الدفعات</span>
+                <div className="settings-segmented-control">
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultPaymentReceiptPrintLayout"
+                      value="receipt80"
+                      checked={defaultPaymentReceiptPrintLayout === 'receipt80'}
+                      onChange={(event) => setDefaultPaymentReceiptPrintLayout(event.target.value)}
+                    />
+                    <span>ريسيت 80mm</span>
+                  </label>
+                  <label className="settings-segment">
+                    <input
+                      type="radio"
+                      name="defaultPaymentReceiptPrintLayout"
+                      value="a4"
+                      checked={defaultPaymentReceiptPrintLayout === 'a4'}
+                      onChange={(event) => setDefaultPaymentReceiptPrintLayout(event.target.value)}
+                    />
+                    <span>A4</span>
+                  </label>
+                </div>
+                <small className="settings-form-help">
+                  يتم تطبيق هذا الإعداد عند طباعة إيصال دفعة العميل من شاشة كشف الحساب.
                 </small>
               </div>
 

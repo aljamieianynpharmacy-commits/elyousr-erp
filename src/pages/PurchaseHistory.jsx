@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
 import { safePrint } from '../../printing/safePrint';
+import { generatePurchaseInvoiceHTML } from '../../printing/purchaseInvoiceTemplate';
 import { emitPurchaseEditorRequest } from '../utils/posEditorBridge';
 import SaleActions from '../components/sales/SaleActions';
 import './Sales.css';
@@ -51,13 +52,6 @@ const toFiniteNumber = (value, fallback = 0) => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
-
-const escapeHtml = (value) => String(value ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
 
 const normalizePurchaseRow = (purchase) => {
   const total = Math.max(0, toFiniteNumber(purchase?.total, 0));
@@ -168,105 +162,6 @@ const buildPurchaseSearchIndex = (purchase) => ([
 ]
   .map((value) => String(value ?? '').toLowerCase())
   .join(' '));
-
-const generatePurchaseInvoiceHTML = (purchase) => {
-  const items = Array.isArray(purchase?.items) ? purchase.items : [];
-  const total = Math.max(0, toFiniteNumber(purchase?.total, 0));
-  const paid = Math.max(0, Math.min(total, toFiniteNumber(purchase?.paidAmount ?? purchase?.paid, 0)));
-  const remaining = Math.max(0, total - paid);
-  const supplier = purchase?.supplier || null;
-  const paymentLabel = purchase?.payment || purchase?.paymentMethod?.name || '-';
-
-  const rows = items.map((item, index) => {
-    const quantity = Math.max(0, toFiniteNumber(item?.quantity, 0));
-    const price = Math.max(0, toFiniteNumber(item?.price ?? item?.cost, 0));
-    const lineTotal = price * quantity;
-
-    return `
-      <tr>
-        <td>${index + 1}</td>
-        <td>${escapeHtml(item?.variant?.product?.name || item?.productName || 'منتج')}</td>
-        <td>${escapeHtml(item?.variant?.productSize || item?.size || '-')}</td>
-        <td>${escapeHtml(item?.variant?.color || item?.color || '-')}</td>
-        <td>${quantity}</td>
-        <td>${price.toFixed(2)}</td>
-        <td>${lineTotal.toFixed(2)}</td>
-      </tr>
-    `;
-  }).join('');
-
-  return `
-  <!DOCTYPE html>
-  <html lang="ar" dir="rtl">
-  <head>
-    <meta charset="UTF-8" />
-    <title>فاتورة مشتريات رقم ${escapeHtml(purchase?.id)}</title>
-    <style>
-      body { font-family: Tahoma, Arial, sans-serif; margin: 0; padding: 20px; color: #111827; direction: rtl; }
-      .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; margin-bottom: 14px; }
-      .header h1 { margin: 0; font-size: 22px; color: #0f766e; }
-      .header p { margin: 6px 0 0; color: #475569; }
-      .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; font-size: 13px; }
-      .meta-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #f8fafc; }
-      .meta-box strong { color: #0f172a; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-      th, td { border: 1px solid #dbe2ea; padding: 8px; font-size: 13px; text-align: right; }
-      th { background: #f1f5f9; color: #334155; }
-      .summary { border: 1px solid #dbe2ea; border-radius: 8px; padding: 10px; background: #f8fafc; }
-      .summary-row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 14px; }
-      .summary-row strong { color: #0f172a; }
-      .summary-row.total { border-top: 1px solid #dbe2ea; padding-top: 8px; font-size: 16px; font-weight: 700; color: #0f766e; }
-      .footer { margin-top: 20px; text-align: center; color: #64748b; font-size: 12px; }
-      @media print { body { padding: 10px; } }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <h1>فاتورة مشتريات</h1>
-      <p>رقم الفاتورة: #${escapeHtml(purchase?.id)}</p>
-      <p>التاريخ: ${escapeHtml(formatDateTime(getPurchaseDate(purchase)))}</p>
-    </div>
-
-    <div class="meta">
-      <div class="meta-box">
-        <div><strong>المورد:</strong> ${escapeHtml(supplier?.name || 'مورد عام')}</div>
-        <div><strong>الهاتف:</strong> ${escapeHtml(supplier?.phone || '-')}</div>
-      </div>
-      <div class="meta-box">
-        <div><strong>طريقة الدفع:</strong> ${escapeHtml(paymentLabel)}</div>
-      </div>
-    </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>الصنف</th>
-          <th>المقاس</th>
-          <th>اللون</th>
-          <th>الكمية</th>
-          <th>السعر</th>
-          <th>الإجمالي</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows || '<tr><td colspan="7" style="text-align:center">لا توجد أصناف</td></tr>'}
-      </tbody>
-    </table>
-
-    <div class="summary">
-      <div class="summary-row"><span>إجمالي الفاتورة</span><strong>${formatMoney(total)}</strong></div>
-      <div class="summary-row"><span>المدفوع</span><strong>${formatMoney(paid)}</strong></div>
-      <div class="summary-row total"><span>المتبقي</span><strong>${formatMoney(remaining)}</strong></div>
-    </div>
-
-    <div class="footer">
-      وقت الطباعة: ${escapeHtml(new Date().toLocaleString('ar-EG'))}
-    </div>
-  </body>
-  </html>
-  `.trim();
-};
 
 function PurchaseDetailsModal({ purchase, onClose }) {
   if (!purchase) return null;

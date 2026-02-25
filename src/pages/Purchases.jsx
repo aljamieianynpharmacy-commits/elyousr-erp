@@ -13,6 +13,8 @@ import {
     filterPosPaymentMethods,
     normalizePaymentMethodCode
 } from "../utils/paymentMethodFilters";
+import { safePrint } from "../../printing/safePrint";
+import { generatePurchaseInvoiceHTML } from "../../printing/purchaseInvoiceTemplate";
 
 /**
  * Toast Notification Component
@@ -1499,6 +1501,37 @@ export default function Purchases() {
         });
     };
 
+    const printPurchaseFromData = useCallback(async (purchaseData, printMode = "silent") => {
+        if (!purchaseData) throw new Error("لا توجد بيانات فاتورة للطباعة");
+
+        const html = generatePurchaseInvoiceHTML(purchaseData);
+        const result = await safePrint(html, {
+            title: `فاتورة مشتريات رقم ${purchaseData.id || "-"}`,
+            ...(printMode === "preview" ? { preview: true } : { silent: true }),
+        });
+
+        if (result?.error) {
+            throw new Error(result.error);
+        }
+    }, []);
+
+    const printPurchaseById = useCallback(async (purchaseId, fallbackPurchase = null, printMode = "silent") => {
+        let purchaseForPrint = fallbackPurchase || null;
+
+        if (purchaseId && typeof window?.api?.getPurchaseById === "function") {
+            const fullPurchase = await window.api.getPurchaseById(purchaseId);
+            if (!fullPurchase?.error && fullPurchase) {
+                purchaseForPrint = fullPurchase;
+            }
+        }
+
+        if (!purchaseForPrint) {
+            throw new Error("تعذر تحميل بيانات فاتورة الشراء للطباعة");
+        }
+
+        await printPurchaseFromData(purchaseForPrint, printMode);
+    }, [printPurchaseFromData]);
+
     /**
      * ========== عملية الدفع والحفظ ==========
      * معالجة الفواتير والتحقق والحفظ في قاعدة البيانات
@@ -1621,12 +1654,14 @@ export default function Purchases() {
                     return;
                 }
 
-                const previewSale = {
-                    id: result.id || result.saleId,
+                const savedPurchaseId = result.id || result.saleId || result?.data?.id || null;
+                const previewPurchase = {
+                    id: savedPurchaseId || "-",
                     createdAt: new Date().toISOString(),
                     invoiceDate:
                         currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
                     customer: currentInvoice.customer,
+                    supplier: currentInvoice.customer,
                     items: currentInvoice.cart.map((item) => ({
                         variant: {
                             product: { name: item.productName },
@@ -1642,8 +1677,13 @@ export default function Purchases() {
                     payment: paymentLabel,
                     discount: parseFloat(currentInvoice.discount || 0),
                 };
-                setPreviewData(previewSale);
-                setShowInvoicePreview(true);
+
+                try {
+                    await printPurchaseById(savedPurchaseId, previewPurchase, "preview");
+                } catch (printError) {
+                    console.error(printError);
+                    showToast(`تم الحفظ ولكن تعذر فتح المعاينة: ${printError.message}`, "warning");
+                }
 
                 loadData(true);
                 resetInvoice();
@@ -1662,12 +1702,13 @@ export default function Purchases() {
             }
 
             if (shouldPrint) {
-                const previewSale = {
+                const previewPurchase = {
                     id: persistedPurchaseId,
                     createdAt: new Date().toISOString(),
                     invoiceDate:
                         currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
                     customer: currentInvoice.customer,
+                    supplier: currentInvoice.customer,
                     items: currentInvoice.cart.map((item) => ({
                         variant: {
                             product: { name: item.productName },
@@ -1683,11 +1724,12 @@ export default function Purchases() {
                     payment: paymentLabel,
                     discount: parseFloat(currentInvoice.discount || 0),
                 };
-                setPreviewData(previewSale);
-                setShowInvoicePreview(true);
-                setTimeout(() => {
-                    window.print();
-                }, 120);
+                try {
+                    await printPurchaseById(persistedPurchaseId, previewPurchase, "silent");
+                } catch (printError) {
+                    console.error(printError);
+                    showToast(`تم الحفظ ولكن تعذر الطباعة: ${printError.message}`, "warning");
+                }
             }
 
             loadData(true);
@@ -3442,7 +3484,14 @@ export default function Purchases() {
                         }}
                         onPrint={async () => {
                             try {
-                                window.print();
+                                await printPurchaseById(
+                                    previewData.id,
+                                    {
+                                        ...previewData,
+                                        supplier: previewData.supplier || previewData.customer || null,
+                                    },
+                                    "preview"
+                                );
 
                                 setShowInvoicePreview(false);
                                 setPreviewData(null);

@@ -132,7 +132,7 @@ contextBridge.exposeInMainWorld('api', {
 
     // Dialog & Printing
     showMessageBox: (options) => ipcRenderer.invoke('dialog:showMessageBox', options),
-    printHTML: (options) => ipcRenderer.invoke('print:html', options),
+    printPreviewHTML: (options) => ipcRenderer.invoke('print:html', options),
     exportPDF: (options) => ipcRenderer.invoke('print:exportPDF', options)
 });
 

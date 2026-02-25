@@ -1660,15 +1660,17 @@ export default function EnhancedPOS() {
         });
     };
 
-    const printInvoiceFromSaleData = useCallback(async (saleData, fallbackCustomer = null) => {
+    const printInvoiceFromSaleData = useCallback(async (saleData, fallbackCustomer = null, printMode = "silent") => {
         if (!saleData) throw new Error("لا توجد بيانات فاتورة للطباعة");
 
         const html = generateInvoiceHTML(
             saleData,
             saleData.customer || fallbackCustomer || null
         );
+        const shouldOpenPreview = printMode === "preview";
         const result = await safePrint(html, {
-            title: `فاتورة رقم ${saleData.id || "-"}`
+            title: `فاتورة رقم ${saleData.id || "-"}`,
+            ...(shouldOpenPreview ? { preview: true } : { silent: true }),
         });
 
         if (result?.error) {
@@ -1676,7 +1678,7 @@ export default function EnhancedPOS() {
         }
     }, []);
 
-    const printInvoiceBySaleId = useCallback(async (saleId, fallbackSale = null, fallbackCustomer = null) => {
+    const printInvoiceBySaleId = useCallback(async (saleId, fallbackSale = null, fallbackCustomer = null, printMode = "silent") => {
         let saleForPrint = fallbackSale || null;
 
         if (saleId && typeof window?.api?.getSaleById === "function") {
@@ -1690,7 +1692,7 @@ export default function EnhancedPOS() {
             throw new Error("تعذر تحميل بيانات الفاتورة للطباعة");
         }
 
-        await printInvoiceFromSaleData(saleForPrint, fallbackCustomer);
+        await printInvoiceFromSaleData(saleForPrint, fallbackCustomer, printMode);
     }, [printInvoiceFromSaleData]);
 
     /**
@@ -1818,8 +1820,9 @@ export default function EnhancedPOS() {
                     return;
                 }
 
+                const savedSaleId = result.id || result.saleId || result?.data?.id || null;
                 const previewSale = {
-                    id: result.id || result.saleId,
+                    id: savedSaleId || "-",
                     createdAt: new Date().toISOString(),
                     invoiceDate:
                         currentInvoice.invoiceDate || new Date().toISOString().split("T")[0],
@@ -1839,8 +1842,18 @@ export default function EnhancedPOS() {
                     payment: paymentLabel,
                     discount: parseFloat(currentInvoice.discount || 0),
                 };
-                setPreviewData(previewSale);
-                setShowInvoicePreview(true);
+
+                try {
+                    await printInvoiceBySaleId(
+                        savedSaleId,
+                        previewSale,
+                        currentInvoice.customer || null,
+                        "preview"
+                    );
+                } catch (printError) {
+                    console.error(printError);
+                    showToast(`تم الحفظ ولكن تعذر فتح المعاينة: ${printError.message}`, "warning");
+                }
 
                 loadData(true);
                 resetInvoice();
@@ -1861,7 +1874,12 @@ export default function EnhancedPOS() {
                     : (result.id || result.saleId);
 
                 try {
-                    await printInvoiceBySaleId(saleIdForPrint, null, currentInvoice.customer || null);
+                    await printInvoiceBySaleId(
+                        saleIdForPrint,
+                        null,
+                        currentInvoice.customer || null,
+                        "silent"
+                    );
                 } catch (printError) {
                     console.error(printError);
                     showToast(`تم الحفظ ولكن تعذر الطباعة: ${printError.message}`, "warning");
@@ -3543,7 +3561,8 @@ export default function EnhancedPOS() {
                                 await printInvoiceBySaleId(
                                     previewData.id,
                                     previewData,
-                                    previewData.customer || null
+                                    previewData.customer || null,
+                                    "preview"
                                 );
 
                                 setShowInvoicePreview(false);

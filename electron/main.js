@@ -692,7 +692,10 @@ ipcMain.handle('trigger-print', async (event, options = {}) => {
         const senderContents = event.sender;
         const senderWindow = BrowserWindow.fromWebContents(senderContents);
         const storedOptions = printWindowOptionsByWebContentsId.get(senderContents.id) || {};
-        const printerName = normalizePrinterName(options?.printerName || storedOptions?.printerName);
+        const printerName = normalizePrinterName(options?.printerName ?? storedOptions?.printerName);
+        const silent = typeof options?.silent === 'boolean'
+            ? options.silent
+            : (typeof storedOptions?.silent === 'boolean' ? storedOptions.silent : true);
 
         if (!senderWindow || senderWindow.isDestroyed()) {
             return { success: false, error: 'Print window is not available' };
@@ -701,7 +704,7 @@ ipcMain.handle('trigger-print', async (event, options = {}) => {
         return await new Promise((resolve) => {
             senderContents.print(
                 {
-                    silent: false,
+                    silent,
                     printBackground: true,
                     color: true,
                     margins: { marginType: 'printableArea' },
@@ -719,42 +722,78 @@ ipcMain.handle('trigger-print', async (event, options = {}) => {
 });
 
 // HTML Printing Handler (for safePrint)
-ipcMain.handle('print:html', async (event, options) => {
+ipcMain.handle('print:html', async (event, options = {}) => {
+    let printWindow = null;
+
     try {
+        const html = typeof options?.html === 'string' ? options.html : '';
+        if (!html.trim()) {
+            return { success: false, error: 'HTML content is required for printing' };
+        }
+
         const printerName = normalizePrinterName(options?.printerName);
-        const printWindow = new BrowserWindow({
+        const silent = Boolean(options?.silent);
+
+        printWindow = new BrowserWindow({
             width: 900,
             height: 700,
-            show: true,
-            title: options.title || 'معاينة الطباعة',
+            show: !silent,
+            title: options?.title || 'معاينة الطباعة',
             webPreferences: {
                 preload: path.join(__dirname, '..', 'printing', 'print-preload.js'),
                 nodeIntegration: false,
                 contextIsolation: true
             }
         });
+
         const printWebContentsId = printWindow.webContents.id;
+        if (!silent) {
+            printWindowOptionsByWebContentsId.set(printWebContentsId, {
+                printerName,
+                silent: true
+            });
+        }
 
-        printWindowOptionsByWebContentsId.set(printWebContentsId, {
-            printerName
-        });
+        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-        await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(options.html)}`);
+        if (silent) {
+            return await new Promise((resolve) => {
+                printWindow.webContents.print(
+                    {
+                        silent: true,
+                        printBackground: true,
+                        color: true,
+                        margins: { marginType: 'printableArea' },
+                        deviceName: printerName || ''
+                    },
+                    (success, errorType) => {
+                        if (printWindow && !printWindow.isDestroyed()) {
+                            printWindow.close();
+                        }
+                        resolve({ success, error: errorType || null });
+                    }
+                );
+            });
+        }
 
-        // Handler للطباعة من داخل النافذة
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
             printWindow.on('closed', () => {
                 printWindowOptionsByWebContentsId.delete(printWebContentsId);
                 resolve({ success: true, windowOpened: true });
             });
 
-            printWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+            printWindow.webContents.on('did-fail-load', (loadEvent, errorCode, errorDescription) => {
                 printWindowOptionsByWebContentsId.delete(printWebContentsId);
-                printWindow.close();
+                if (printWindow && !printWindow.isDestroyed()) {
+                    printWindow.close();
+                }
                 resolve({ success: false, error: errorDescription });
             });
         });
     } catch (err) {
+        if (printWindow && !printWindow.isDestroyed()) {
+            printWindow.close();
+        }
         console.error('Print Error:', err);
         return { error: err.message };
     }
@@ -939,8 +978,11 @@ ipcMain.handle('print:printHTML', async (event, payload = {}) => {
         await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
         const normalizedPrinterName = normalizePrinterName(printerName);
+        const shouldPrintSilently = typeof silent === 'boolean'
+            ? silent
+            : Boolean(normalizedPrinterName);
         const options = {
-            silent: silent || false,
+            silent: shouldPrintSilently,
             printBackground: true,
             deviceName: normalizedPrinterName || '' // Default printer when empty
         };

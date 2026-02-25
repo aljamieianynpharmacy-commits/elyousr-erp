@@ -193,7 +193,7 @@ export const generateInvoiceReceipt80HTML = ({ sale, customer, company }) => {
     <div>تم الطباعة: ${escapeHtml(printedAt)}</div>
     <div>شكراً لتعاملكم معنا</div>
     <div class="no-print">
-      <button class="print-button" onclick="if(window.electronAPI){window.electronAPI.triggerPrint()}else{window.print()}">طباعة</button>
+      <button class="print-button" onclick="if(window.electronAPI){window.electronAPI.triggerPrint({ silent: true })}else{window.print()}">طباعة</button>
     </div>
   </div>
 
@@ -202,7 +202,7 @@ export const generateInvoiceReceipt80HTML = ({ sale, customer, company }) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
         if (window.electronAPI && window.electronAPI.triggerPrint) {
-          window.electronAPI.triggerPrint();
+          window.electronAPI.triggerPrint({ silent: true });
         } else {
           window.print();
         }
@@ -213,4 +213,3 @@ export const generateInvoiceReceipt80HTML = ({ sale, customer, company }) => {
 </html>
   `.trim();
 };
-

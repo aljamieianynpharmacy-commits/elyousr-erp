@@ -13,10 +13,29 @@ export const safePrint = async (html, options = {}) => {
       const printerName = normalizeDefaultPrinterName(
         options?.printerName ?? getDefaultPrinterName()
       );
+      const shouldPrintSilently = options?.silent === true;
+      const usePreviewWindow = (Boolean(options?.preview) || !shouldPrintSilently) &&
+        typeof window.api?.printPreviewHTML === 'function';
+
+      if (usePreviewWindow) {
+        const previewResult = await window.api.printPreviewHTML({
+          html,
+          title: options.title || 'Print Preview',
+          silent: false,
+          printerName
+        });
+
+        if (previewResult?.error) {
+          throw new Error(previewResult.error);
+        }
+
+        return { success: true, previewOpened: true };
+      }
+
       const result = await window.api.printHTML({
         html,
         title: options.title || 'Print',
-        silent: options.silent || false,
+        silent: shouldPrintSilently,
         printerName
       });
       

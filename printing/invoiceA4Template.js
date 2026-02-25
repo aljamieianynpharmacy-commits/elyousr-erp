@@ -195,7 +195,7 @@ export const generateInvoiceA4HTML = ({ sale, customer, company }) => {
     <div>شكراً لتعاملكم معنا</div>
     <div style="font-size: 12px;">تم الطباعة في: ${printedAt}</div>
     <div class="no-print">
-      <button class="print-button" onclick="if(window.electronAPI){window.electronAPI.triggerPrint()}else{window.print()}">طباعة الفاتورة</button>
+      <button class="print-button" onclick="if(window.electronAPI){window.electronAPI.triggerPrint({ silent: true })}else{window.print()}">طباعة الفاتورة</button>
     </div>
   </div>
 
@@ -204,7 +204,7 @@ export const generateInvoiceA4HTML = ({ sale, customer, company }) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
         if (window.electronAPI && window.electronAPI.triggerPrint) {
-          window.electronAPI.triggerPrint();
+          window.electronAPI.triggerPrint({ silent: true });
         } else {
           window.print();
         }
@@ -215,4 +215,3 @@ export const generateInvoiceA4HTML = ({ sale, customer, company }) => {
 </html>
   `.trim();
 };
-

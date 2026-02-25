@@ -335,6 +335,10 @@
   background: #0f766e;
 }
 
+.sales-action-btn.is-print {
+  background: #2563eb;
+}
+
 .sales-action-btn.is-delete {
   background: #c81e1e;
 }

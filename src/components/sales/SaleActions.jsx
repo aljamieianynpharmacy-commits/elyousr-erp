@@ -3,6 +3,7 @@
 function SaleActions({
   sale,
   onView,
+  onPrint,
   onEdit,
   onDelete
 }) {
@@ -31,6 +32,15 @@ function SaleActions({
         aria-label="عرض التفاصيل"
       >
         👁️
+      </button>
+      <button
+        className="sales-action-btn is-print"
+        onClick={() => runAction('print', onPrint)}
+        disabled={isDisabled}
+        title="طباعة الفاتورة"
+        aria-label="طباعة الفاتورة"
+      >
+        🖨️
       </button>
       <button
         className="sales-action-btn is-edit"

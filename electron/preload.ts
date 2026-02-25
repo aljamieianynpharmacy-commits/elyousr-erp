@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('api', {
     // Returns
     getReturns: () => ipcRenderer.invoke('db:getReturns'),
     createReturn: (returnData) => ipcRenderer.invoke('db:createReturn', returnData),
+    updateReturn: (returnId, returnData) => ipcRenderer.invoke('db:updateReturn', returnId, returnData),
+    deleteReturn: (returnId) => ipcRenderer.invoke('db:deleteReturn', returnId),
     getPurchaseReturns: () => ipcRenderer.invoke('db:getPurchaseReturns'),
     createPurchaseReturn: (returnData) => ipcRenderer.invoke('db:createPurchaseReturn', returnData),
 

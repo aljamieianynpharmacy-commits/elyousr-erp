@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
 import { APP_NAVIGATE_EVENT, emitPosEditorRequest } from '../utils/posEditorBridge';
+import { safePrint } from '../../printing/safePrint';
+import { generateInvoiceHTML } from '../../printing/invoiceTemplate';
 import SaleActions from '../components/sales/SaleActions';
 import SaleDetailsModal from '../components/sales/SaleDetailsModal';
 import './Sales.css';
@@ -336,6 +338,22 @@ export default function Sales() {
     setSelectedSale(fullSale);
   }, [fetchSaleDetails]);
 
+  const handlePrintSale = useCallback(async (sale) => {
+    const fullSale = await fetchSaleDetails(sale.id);
+    if (!fullSale) return;
+
+    const html = generateInvoiceHTML(
+      fullSale,
+      fullSale.customer || sale.customer || null
+    );
+    const result = await safePrint(html, {
+      title: `فاتورة رقم ${fullSale.id || sale.id}`
+    });
+
+    if (result?.error) {
+      await safeAlert('خطأ في الطباعة: ' + result.error);
+    }
+  }, [fetchSaleDetails]);
 
   const handleEditSale = useCallback(async (sale) => {
     window.dispatchEvent(
@@ -445,6 +463,7 @@ export default function Sales() {
             <SaleActions
               sale={sale}
               onView={handleOpenSaleDetails}
+              onPrint={handlePrintSale}
               onEdit={handleEditSale}
               onDelete={handleDeleteSale}
             />
@@ -452,7 +471,7 @@ export default function Sales() {
         </tr>
       );
     })
-  ), [visibleSales, handleOpenSaleDetails, handleEditSale, handleDeleteSale]);
+  ), [visibleSales, handleOpenSaleDetails, handlePrintSale, handleEditSale, handleDeleteSale]);
 
   const pageStart = totalItems === 0 ? 0 : ((currentPage - 1) * PAGE_SIZE) + 1;
   const pageEnd = totalItems === 0 ? 0 : Math.min(totalItems, pageStart + visibleSales.length - 1);

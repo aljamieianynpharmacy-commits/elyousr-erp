@@ -4,9 +4,10 @@ import { safeConfirm } from '../utils/safeConfirm';
 import { CustomerLedgerService } from '../services/customerLedgerService';
 import { safePrint } from '../../printing/safePrint';
 import { generateInvoiceHTML } from '../../printing/invoiceTemplate';
+import { generateReturnInvoiceHTML } from '../../printing/returnInvoiceTemplate';
 import { generateReceiptHTML } from '../../printing/receiptTemplate';
 import { generateLedgerHTML, generateDetailedLedgerA4HTML } from '../../printing/ledgerTemplate';
-import { emitPosEditorRequest } from '../utils/posEditorBridge';
+import { emitPosEditorRequest, emitReturnEditorRequest } from '../utils/posEditorBridge';
 import PaymentModal from './PaymentModal';
 import CustomerLedgerHeader from './CustomerLedgerHeader';
 import CustomerLedgerSummary from './CustomerLedgerSummary';
@@ -159,6 +160,15 @@ export default function CustomerLedgerModal({
     }
   };
 
+  const handlePrintReturn = async (returnInvoice) => {
+    const html = generateReturnInvoiceHTML(returnInvoice, customer);
+    const result = await safePrint(html, { title: `مرتجع رقم ${returnInvoice.id}` });
+
+    if (result.error) {
+      await safeAlert('خطأ في الطباعة: ' + result.error);
+    }
+  };
+
   const handlePrintReceipt = async (payment) => {
     const html = generateReceiptHTML(payment, customer);
     const result = await safePrint(html, { title: `إيصال دفع رقم ${payment.id}` });
@@ -225,6 +235,35 @@ export default function CustomerLedgerModal({
     }
   };
 
+  const handleDeleteReturn = async (returnInvoice) => {
+    const confirmed = await safeConfirm(
+      `هل تريد حذف المرتجع رقم ${returnInvoice.id}؟`,
+      { title: 'تأكيد الحذف', detail: 'لا يمكن التراجع عن هذا الإجراء' }
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const result = await window.api.deleteReturn(returnInvoice.id);
+      if (result.error) {
+        await safeAlert('خطأ: ' + result.error);
+        return;
+      }
+
+      const updatedCustomer = await window.api.getCustomer(customerId);
+      if (!updatedCustomer.error) {
+        setCustomer(updatedCustomer);
+        onCustomerUpdated?.(customerId, { balance: updatedCustomer.balance });
+        onDataChanged?.();
+      }
+
+      await safeAlert('✅ تم حذف المرتجع بنجاح');
+      loadCustomerData();
+    } catch (err) {
+      await safeAlert('خطأ في الحذف: ' + err.message);
+    }
+  };
+
   const handleDeletePayment = async (payment) => {
     const confirmed = await safeConfirm(
       `هل تريد حذف الدفعة رقم ${payment.id}؟`,
@@ -263,6 +302,22 @@ export default function CustomerLedgerModal({
 
     emitPosEditorRequest({
       type: 'sale',
+      transaction,
+      customer
+    });
+
+    onClose?.();
+  };
+
+  const handleEditReturn = (transaction) => {
+    const returnInvoice = transaction?.details;
+    if (!returnInvoice?.id) {
+      safeAlert('تعذر فتح المرتجع للتعديل');
+      return;
+    }
+
+    emitReturnEditorRequest({
+      type: 'return',
       transaction,
       customer
     });
@@ -373,10 +428,13 @@ export default function CustomerLedgerModal({
         <CustomerLedgerTable
           transactions={transactions}
           onPrintInvoice={handlePrintInvoice}
+          onPrintReturn={handlePrintReturn}
           onPrintReceipt={handlePrintReceipt}
           onEditSale={handleEditSale}
+          onEditReturn={handleEditReturn}
           onEditPayment={handleEditPayment}
           onDeleteSale={handleDeleteSale}
+          onDeleteReturn={handleDeleteReturn}
           onDeletePayment={handleDeletePayment}
         />
 

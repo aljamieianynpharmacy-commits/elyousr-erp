@@ -6,10 +6,13 @@ const formatCurrency = (value) => `${Number(value || 0).toFixed(2)} \u062c.\u064
 export default function CustomerLedgerTable({
   transactions,
   onPrintInvoice,
+  onPrintReturn,
   onPrintReceipt,
   onEditSale,
+  onEditReturn,
   onEditPayment,
   onDeleteSale,
+  onDeleteReturn,
   onDeletePayment,
 }) {
   return (
@@ -100,10 +103,13 @@ export default function CustomerLedgerTable({
                     <TransactionActions
                       transaction={transaction}
                       onPrintInvoice={onPrintInvoice}
+                      onPrintReturn={onPrintReturn}
                       onPrintReceipt={onPrintReceipt}
                       onEditSale={onEditSale}
+                      onEditReturn={onEditReturn}
                       onEditPayment={onEditPayment}
                       onDeleteSale={onDeleteSale}
+                      onDeleteReturn={onDeleteReturn}
                       onDeletePayment={onDeletePayment}
                     />
                   </td>

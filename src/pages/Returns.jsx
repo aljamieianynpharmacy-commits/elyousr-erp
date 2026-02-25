@@ -1,6 +1,11 @@
 ﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { filterPosPaymentMethods, normalizePaymentMethodCode } from '../utils/paymentMethodFilters';
+import {
+    POS_EDITOR_REQUEST_EVENT,
+    readPosEditorRequest,
+    clearPosEditorRequest
+} from '../utils/posEditorBridge';
 
 const toNumber = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const genId = () => `R-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -10,6 +15,23 @@ const todayLocalISO = () => {
     return d.toISOString().slice(0, 10);
 };
 
+const toInputDate = (value) => {
+    if (!value) return todayLocalISO();
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return todayLocalISO();
+    parsed.setMinutes(parsed.getMinutes() - parsed.getTimezoneOffset());
+    return parsed.toISOString().slice(0, 10);
+};
+
+const normalizeReturnNotesForEditor = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.startsWith('ملاحظات:')) {
+        return text.slice('ملاحظات:'.length).trim();
+    }
+    return text;
+};
+
 const isCashMethod = (method) => {
     const code = normalizePaymentMethodCode(method?.code || method?.name);
     if (code === 'CASH') return true;
@@ -17,7 +39,19 @@ const isCashMethod = (method) => {
     return n.includes('cash') || n.includes('نقد');
 };
 
-const emptySession = () => ({ id: genId(), cart: [], customerId: null, customerName: '', selectedSaleId: null, returnNotes: '', returnDate: todayLocalISO(), refundMode: 'cashOut', paymentMethodId: '' });
+const emptySession = () => ({
+    id: genId(),
+    cart: [],
+    customerId: null,
+    customerName: '',
+    selectedSaleId: null,
+    returnNotes: '',
+    returnDate: todayLocalISO(),
+    refundMode: 'cashOut',
+    paymentMethodId: '',
+    sourceReturnId: null,
+    isEditMode: false
+});
 
 // ─── Toast ───
 function Toast({ message, type = 'info', onClose }) {
@@ -105,6 +139,7 @@ export default function Returns() {
     const cart = sess?.cart || [];
     const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.returnQty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((s, i) => s + i.returnQty, 0), [cart]);
+    const isEditingReturn = !!sess?.sourceReturnId;
     const hasSelectedCustomer = !!selCust;
     const effectiveRefundMode = hasSelectedCustomer ? sess.refundMode : 'cashOut';
     const previousBalance = toNumber(selCust?.balance);
@@ -126,6 +161,101 @@ export default function Returns() {
         }
         upd(nextState);
     }, [sess?.customerId, sess?.cart, showToast, upd]);
+
+    const openIncomingEditorRequest = useCallback((request) => {
+        if (!request?.type || request.type !== 'return') return false;
+
+        const transaction = request?.transaction || {};
+        const returnInvoice = transaction?.details || request?.return;
+        if (!returnInvoice?.id) return false;
+
+        const resolvedCustomer =
+            request?.customer
+            || returnInvoice?.customer
+            || customers.find((item) => String(item.id) === String(returnInvoice.customerId))
+            || null;
+
+        const editItems = Array.isArray(returnInvoice?.items) ? returnInvoice.items : [];
+        const mappedCart = editItems.map((item, index) => {
+            const variantId = parseInt(item?.variantId || item?.variant?.id, 10) || 0;
+            const quantity = Math.max(1, parseInt(item?.quantity, 10) || 1);
+            const price = Math.max(0, toNumber(item?.price));
+
+            return {
+                itemId: `edit-${returnInvoice.id}-${variantId || index + 1}`,
+                saleId: returnInvoice?.saleId || null,
+                variantId,
+                productName: item?.variant?.product?.name || item?.productName || `منتج #${variantId || index + 1}`,
+                size: item?.variant?.productSize || item?.size || '-',
+                color: item?.variant?.color || item?.color || '-',
+                price,
+                barcode: item?.variant?.barcode || item?.barcode || '',
+                soldQty: quantity,
+                alreadyReturned: 0,
+                maxQuantity: Infinity,
+                returnQty: quantity
+            };
+        });
+
+        const nextSession = {
+            ...emptySession(),
+            id: `RET-EDIT-${returnInvoice.id}-${Date.now()}`,
+            cart: mappedCart,
+            customerId: resolvedCustomer?.id || returnInvoice?.customerId || null,
+            customerName: resolvedCustomer?.name || '',
+            selectedSaleId: returnInvoice?.saleId || null,
+            returnNotes: normalizeReturnNotesForEditor(returnInvoice?.notes),
+            returnDate: toInputDate(returnInvoice?.createdAt),
+            sourceReturnId: returnInvoice.id,
+            isEditMode: true
+        };
+
+        let targetSessionId = nextSession.id;
+        setSessions((prev) => {
+            const existingSession = prev.find(
+                (session) => String(session?.sourceReturnId || '') === String(returnInvoice.id)
+            );
+            if (!existingSession) {
+                return [...prev, nextSession];
+            }
+
+            targetSessionId = existingSession.id;
+            return prev.map((session) => (
+                session.id === existingSession.id
+                    ? { ...nextSession, id: existingSession.id }
+                    : session
+            ));
+        });
+        setActiveId(targetSessionId);
+        setSelSale(null);
+        setSaleItems([]);
+        setSearch('');
+        setCustSearch('');
+        setProdSearch('');
+        setShowCL(false);
+        clearPosEditorRequest();
+        showToast(`تم فتح المرتجع #${returnInvoice.id} للتعديل`, 'info');
+        return true;
+    }, [customers, showToast]);
+
+    useEffect(() => {
+        const handleEditorRequest = (event) => {
+            const request = event?.detail || readPosEditorRequest();
+            if (!request) return;
+            openIncomingEditorRequest(request);
+        };
+
+        window.addEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+
+        const pendingRequest = readPosEditorRequest();
+        if (pendingRequest) {
+            openIncomingEditorRequest(pendingRequest);
+        }
+
+        return () => {
+            window.removeEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+        };
+    }, [openIncomingEditorRequest]);
 
     // ─── Init ───
     useEffect(() => { (async () => { setLoading(true); try { const [c, m, v] = await Promise.all([window.api.getCustomers(), window.api.getPaymentMethods(), window.api.getVariants()]); if (!c?.error) setCustomers(Array.isArray(c) ? c : (c?.data || [])); if (!m?.error) setPM(filterPosPaymentMethods(m || []).filter(isCashMethod)); if (!v?.error) setAllVariants(Array.isArray(v) ? v : []); } catch (e) { console.error(e) } finally { setLoading(false) } })() }, []);
@@ -322,20 +452,57 @@ export default function Returns() {
 
     const doCheckout = async () => {
         setShowConfirm(false); setLoading(true);
+        const isEditMode = !!sess?.sourceReturnId;
         const ns = sess.returnNotes ? `ملاحظات: ${sess.returnNotes}` : '';
         const selectedReturnDate = sess.returnDate || todayLocalISO();
-        const rd = { saleId: cart.find(c => c.saleId)?.saleId || null, customerId: sess.customerId || null, total: cartTotal, notes: ns, returnDate: selectedReturnDate, items: cart.map(i => ({ variantId: i.variantId, quantity: i.returnQty, price: i.price })) };
-        if (sess.customerId) { if (sess.refundMode === 'cashOut') { rd.refundAmount = cartTotal; rd.paymentMethodId = sess.paymentMethodId; rd.refundMode = 'CASH_ONLY'; } else { rd.refundAmount = 0; } }
-        else { rd.refundAmount = cartTotal; rd.paymentMethodId = sess.paymentMethodId; rd.refundMode = 'CASH_ONLY'; }
+        const rd = {
+            saleId: sess?.selectedSaleId || cart.find(c => c.saleId)?.saleId || null,
+            customerId: sess.customerId || null,
+            total: cartTotal,
+            notes: ns,
+            returnDate: selectedReturnDate,
+            items: cart.map(i => ({ variantId: i.variantId, quantity: i.returnQty, price: i.price }))
+        };
+        if (sess.customerId) {
+            if (sess.refundMode === 'cashOut') {
+                rd.refundAmount = cartTotal;
+                rd.paymentMethodId = sess.paymentMethodId;
+                rd.refundMode = 'CASH_ONLY';
+            } else {
+                rd.refundAmount = 0;
+            }
+        } else {
+            rd.refundAmount = cartTotal;
+            rd.paymentMethodId = sess.paymentMethodId;
+            rd.refundMode = 'CASH_ONLY';
+        }
         try {
-            const res = await window.api.createReturn(rd);
-            if (res?.error) { await safeAlert('خطأ: ' + res.error); } else {
+            const res = isEditMode
+                ? await window.api.updateReturn(sess.sourceReturnId, rd)
+                : await window.api.createReturn(rd);
+
+            if (res?.error) {
+                await safeAlert('خطأ: ' + res.error);
+            } else {
                 if (printOnConfirm) {
-                    try { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' }); }
-                    catch (printErr) { console.error(printErr); showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning'); }
+                    try {
+                        await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع' });
+                    } catch (printErr) {
+                        console.error(printErr);
+                        showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning');
+                    }
                 }
-                showToast('✅ تم حفظ المرتجع', 'success'); playBeep(true);
-                upd({ cart: [], returnNotes: '', returnDate: todayLocalISO(), selectedSaleId: null, customerId: null, customerName: '' });
+                showToast(isEditMode ? '✅ تم تعديل المرتجع' : '✅ تم حفظ المرتجع', 'success'); playBeep(true);
+                upd({
+                    cart: [],
+                    returnNotes: '',
+                    returnDate: todayLocalISO(),
+                    selectedSaleId: null,
+                    customerId: null,
+                    customerName: '',
+                    sourceReturnId: null,
+                    isEditMode: false
+                });
                 setSelSale(null);
                 setSaleItems([]);
                 setCustSales([]);
@@ -345,11 +512,18 @@ export default function Returns() {
                 setShowCL(false);
                 setPrintOnConfirm(false);
             }
-        } catch (er) { console.error(er); await safeAlert('تعذر الحفظ'); }
+        } catch (er) {
+            console.error(er);
+            await safeAlert(isEditMode ? 'تعذر تعديل المرتجع' : 'تعذر الحفظ');
+        }
         finally { setLoading(false); setPrintOnConfirm(false); searchRef.current?.focus(); }
     };
 
     const buildReceipt = (res) => `<html dir="rtl"><head><style>body{font-family:'Segoe UI',Tahoma,sans-serif;padding:20px;font-size:14px}.header{text-align:center;margin-bottom:20px;border-bottom:2px dashed #000;padding-bottom:15px}.title{font-size:20px;font-weight:bold}.info div{display:flex;justify-content:space-between;padding:3px 0}table{width:100%;border-collapse:collapse;margin:15px 0}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}th{background:#f8f9fa}.total{font-size:18px;font-weight:bold;text-align:left;border-top:2px dashed #000;padding-top:15px;margin-top:15px}.footer{text-align:center;margin-top:30px;font-size:12px;color:#555}</style></head><body><div class="header"><div class="title">إيصال مرتجع</div><div>رقم: ${res.data?.id || '-'}</div><div>${new Date(`${(sess.returnDate || todayLocalISO())}T00:00:00`).toLocaleDateString('ar-EG')}</div></div><div class="info"><div><span>العميل:</span><span>${selCust ? selCust.name : 'عميل عابر'}</span></div></div><table><thead><tr><th>الصنف</th><th style="text-align:center">كمية</th><th style="text-align:center">سعر</th><th style="text-align:left">إجمالي</th></tr></thead><tbody>${cart.map(i => `<tr><td>${i.productName} (${i.size})</td><td style="text-align:center">${i.returnQty}</td><td style="text-align:center">${parseFloat(i.price).toFixed(2)}</td><td style="text-align:left">${(i.returnQty * i.price).toFixed(2)}</td></tr>`).join('')}</tbody></table><div class="total">الإجمالي: ${cartTotal.toFixed(2)} ج.م</div><div class="footer">شكراً لثقتكم</div></body></html>`;
+
+    const confirmLabel = printOnConfirm
+        ? (isEditingReturn ? '✅ تعديل وحفظ وطباعة' : '✅ تأكيد وحفظ وطباعة')
+        : (isEditingReturn ? '✅ تعديل وحفظ' : '✅ تأكيد وحفظ');
 
     if (loading && customers.length === 0) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#9ca3af', fontSize: 18 }}><div style={{ textAlign: 'center' }}><div style={{ fontSize: 48, marginBottom: 10 }}>🔄</div><div>جاري التحميل...</div></div></div>;
 
@@ -358,7 +532,7 @@ export default function Returns() {
             <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
             {loading && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="spinner"></div></div>}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={effectiveRefundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? '✅ تأكيد وحفظ وطباعة' : '✅ تأكيد وحفظ'} />}
+            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} customer={selCust} refundMode={effectiveRefundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={confirmLabel} />}
 
             {/* ═══ Tabs ═══ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>

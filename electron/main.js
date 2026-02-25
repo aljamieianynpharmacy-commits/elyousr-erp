@@ -1045,6 +1045,12 @@ ipcMain.handle('db:getReturns', async () => {
 ipcMain.handle('db:createReturn', async (event, returnData) => {
     return await dbService.createReturn(returnData);
 });
+ipcMain.handle('db:updateReturn', async (event, returnId, returnData) => {
+    return await dbService.updateReturn(returnId, returnData || {});
+});
+ipcMain.handle('db:deleteReturn', async (event, returnId) => {
+    return await dbService.deleteReturn(returnId);
+});
 ipcMain.handle('db:getPurchaseReturns', async () => {
     return await dbService.getPurchaseReturns();
 });

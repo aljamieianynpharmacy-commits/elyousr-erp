@@ -5522,6 +5522,371 @@ const dbService = {
         }
     },
 
+    async updateReturn(returnId, returnData) {
+        const perf = startPerfTimer('db:updateReturn', {
+            returnId: parseInt(returnId, 10) || null,
+            hasCustomer: Boolean(returnData?.customerId),
+            itemCount: Array.isArray(returnData?.items) ? returnData.items.length : 0
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedReturnId = parsePositiveInt(returnId);
+                if (!parsedReturnId) {
+                    return { error: 'Invalid return id' };
+                }
+
+                if (!Array.isArray(returnData?.items) || returnData.items.length === 0) {
+                    return { error: 'Return items are required' };
+                }
+
+                const currentReturn = await tx.return.findUnique({
+                    where: { id: parsedReturnId },
+                    include: {
+                        items: true
+                    }
+                });
+
+                if (!currentReturn) {
+                    return { error: 'Return not found' };
+                }
+
+                const oldTransactions = await tx.customerTransaction.findMany({
+                    where: {
+                        referenceType: 'RETURN',
+                        referenceId: parsedReturnId
+                    },
+                    select: {
+                        debit: true,
+                        credit: true
+                    }
+                });
+                const oldReturnDelta = oldTransactions.reduce((sum, trx) => (
+                    sum + (toNumber(trx.debit) - toNumber(trx.credit))
+                ), 0);
+
+                const returnDate = parseDateOrDefault(
+                    returnData?.returnDate,
+                    currentReturn.createdAt || new Date()
+                );
+                const nextCustomerId = Object.prototype.hasOwnProperty.call(returnData || {}, 'customerId')
+                    ? parsePositiveInt(returnData?.customerId)
+                    : parsePositiveInt(currentReturn.customerId);
+                const nextSaleId = Object.prototype.hasOwnProperty.call(returnData || {}, 'saleId')
+                    ? parsePositiveInt(returnData?.saleId)
+                    : parsePositiveInt(currentReturn.saleId);
+
+                const affectedProductIds = new Set();
+
+                // Revert old stock impact first.
+                for (const oldItem of currentReturn.items || []) {
+                    const variantId = parsePositiveInt(oldItem?.variantId);
+                    const quantity = Math.max(0, toInteger(oldItem?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true, quantity: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found while reverting return' };
+                    }
+                    if (toNumber(variant.quantity, 0) < quantity) {
+                        return { error: 'Insufficient stock to revert previous return quantities' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+                }
+
+                await tx.customerTransaction.deleteMany({
+                    where: {
+                        referenceType: 'RETURN',
+                        referenceId: parsedReturnId
+                    }
+                });
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'RETURN', parsedReturnId);
+                throwIfResultError(rollbackResult, 'Failed to rollback return treasury entries');
+
+                await tx.returnItem.deleteMany({
+                    where: { returnId: parsedReturnId }
+                });
+
+                let computedTotal = 0;
+                for (let i = 0; i < returnData.items.length; i++) {
+                    const item = returnData.items[i];
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(1, toInteger(item?.quantity, 1));
+                    const price = Math.max(0, toNumber(item?.price, 0));
+                    if (!variantId) {
+                        return { error: 'Invalid variantId in return items' };
+                    }
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found in return items' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+
+                    await tx.returnItem.create({
+                        data: {
+                            id: i + 1,
+                            returnId: parsedReturnId,
+                            variantId,
+                            quantity,
+                            price
+                        }
+                    });
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { increment: quantity }
+                        }
+                    });
+
+                    computedTotal += price * quantity;
+                }
+
+                const requestedTotal = Math.max(0, toNumber(returnData?.total, 0));
+                const finalTotal = Math.max(0, toNumber(
+                    requestedTotal > 0 ? requestedTotal : computedTotal
+                ));
+
+                const updatedReturn = await tx.return.update({
+                    where: { id: parsedReturnId },
+                    data: {
+                        saleId: nextSaleId || null,
+                        customerId: nextCustomerId || null,
+                        total: finalTotal,
+                        notes: returnData?.notes || null,
+                        createdAt: returnDate
+                    }
+                });
+
+                // Reverse old customer effect then apply new one.
+                if (currentReturn.customerId && oldReturnDelta !== 0) {
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: currentReturn.customerId,
+                        balanceDelta: -oldReturnDelta,
+                        activityDate: returnDate
+                    });
+                }
+
+                if (nextCustomerId) {
+                    await tx.customerTransaction.create({
+                        data: {
+                            customer: {
+                                connect: { id: nextCustomerId }
+                            },
+                            date: returnDate,
+                            type: 'RETURN',
+                            referenceType: 'RETURN',
+                            referenceId: parsedReturnId,
+                            debit: 0,
+                            credit: finalTotal,
+                            notes: `مرتجع #${parsedReturnId} - ${returnData?.notes || 'مرتجع'}`
+                        }
+                    });
+
+                    if (finalTotal > 0) {
+                        await applyCustomerFinancialDelta(tx, {
+                            customerId: nextCustomerId,
+                            balanceDelta: -finalTotal,
+                            activityDate: returnDate
+                        });
+                    }
+                }
+
+                const refundAmount = Math.max(0, toNumber(
+                    returnData?.refundAmount !== undefined ? returnData.refundAmount : finalTotal
+                ));
+                if (refundAmount > 0) {
+                    const returnTreasuryId = await resolveTreasuryId(tx, returnData?.treasuryId);
+                    const refundMode = String(returnData?.refundMode || REFUND_MODE.SAME_METHOD)
+                        .trim()
+                        .toUpperCase();
+
+                    let resolvedPaymentMethodId;
+                    if (refundMode === REFUND_MODE.CASH_ONLY) {
+                        resolvedPaymentMethodId = await resolveCashPaymentMethodId(tx, 1);
+                    } else {
+                        let sameMethodCandidate = returnData?.paymentMethodId ?? returnData?.paymentMethod;
+                        if (!sameMethodCandidate && nextSaleId) {
+                            const sourceSale = await tx.sale.findUnique({
+                                where: { id: nextSaleId },
+                                select: { paymentMethodId: true }
+                            });
+                            sameMethodCandidate = sourceSale?.paymentMethodId || null;
+                        }
+                        resolvedPaymentMethodId = await resolvePaymentMethodId(
+                            tx,
+                            sameMethodCandidate,
+                            1
+                        );
+                    }
+
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: returnTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.RETURN_REFUND,
+                        direction: TREASURY_DIRECTION.OUT,
+                        amount: refundAmount,
+                        notes: `Return #${parsedReturnId}${returnData?.notes ? ` - ${returnData.notes}` : ''}`,
+                        referenceType: 'RETURN',
+                        referenceId: parsedReturnId,
+                        paymentMethodId: resolvedPaymentMethodId,
+                        entryDate: returnDate,
+                        idempotencyKey: generateIdempotencyKey('RETURN_REFUND', [
+                            parsedReturnId,
+                            resolvedPaymentMethodId,
+                            normalizeAmountForKey(refundAmount),
+                            refundMode
+                        ]),
+                        createdByUserId: parsePositiveInt(returnData?.createdByUserId ?? returnData?.userId),
+                        meta: {
+                            refundMode
+                        }
+                    });
+                    throwIfResultError(treasuryEntryResult);
+                }
+
+                const recalcCustomerIds = new Set();
+                if (currentReturn.customerId) recalcCustomerIds.add(currentReturn.customerId);
+                if (nextCustomerId) recalcCustomerIds.add(nextCustomerId);
+                for (const customerId of recalcCustomerIds) {
+                    await recalculateCustomerActivityDates(tx, customerId);
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                return { success: true, data: updatedReturn };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async deleteReturn(returnId) {
+        const perf = startPerfTimer('db:deleteReturn', {
+            returnId: parseInt(returnId, 10) || null
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedReturnId = parsePositiveInt(returnId);
+                if (!parsedReturnId) {
+                    return { error: 'Invalid return id' };
+                }
+
+                const currentReturn = await tx.return.findUnique({
+                    where: { id: parsedReturnId },
+                    include: {
+                        items: true
+                    }
+                });
+                if (!currentReturn) {
+                    return { error: 'Return not found' };
+                }
+
+                const returnTransactions = await tx.customerTransaction.findMany({
+                    where: {
+                        referenceType: 'RETURN',
+                        referenceId: parsedReturnId
+                    },
+                    select: {
+                        debit: true,
+                        credit: true
+                    }
+                });
+                const previousReturnDelta = returnTransactions.reduce((sum, trx) => (
+                    sum + (toNumber(trx.debit) - toNumber(trx.credit))
+                ), 0);
+
+                const affectedProductIds = new Set();
+
+                for (const item of currentReturn.items || []) {
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(0, toInteger(item?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true, quantity: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found while deleting return' };
+                    }
+                    if (toNumber(variant.quantity, 0) < quantity) {
+                        return { error: 'Insufficient stock to delete this return' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                await tx.customerTransaction.deleteMany({
+                    where: {
+                        referenceType: 'RETURN',
+                        referenceId: parsedReturnId
+                    }
+                });
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'RETURN', parsedReturnId);
+                throwIfResultError(rollbackResult, 'Failed to rollback return treasury entries');
+
+                await tx.returnItem.deleteMany({
+                    where: { returnId: parsedReturnId }
+                });
+
+                const deletedReturn = await tx.return.delete({
+                    where: { id: parsedReturnId }
+                });
+
+                if (currentReturn.customerId && previousReturnDelta !== 0) {
+                    await applyCustomerFinancialDelta(tx, {
+                        customerId: currentReturn.customerId,
+                        balanceDelta: -previousReturnDelta
+                    });
+                }
+                if (currentReturn.customerId) {
+                    await recalculateCustomerActivityDates(tx, currentReturn.customerId);
+                }
+
+                return { success: true, data: deletedReturn };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
     async getPurchaseReturns() {
         try {
             return await prisma.purchaseReturn.findMany({

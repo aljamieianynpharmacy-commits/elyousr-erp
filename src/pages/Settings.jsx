@@ -10,6 +10,16 @@ import {
   sanitizeImportedCustomer
 } from '../utils/customerImportUtils';
 import {
+  IMPORT_FIELD_OPTIONS,
+  delimiter as detectProductImportDelimiter,
+  parseLine as parseProductImportLine,
+  toImportHeaders as toProductImportHeaders,
+  buildImportFieldAutoMapping,
+  mapRowsWithImportMapping,
+  importGroups
+} from '../utils/importUtils';
+import { nText, nNum, nInt } from '../utils/productUtils';
+import {
   getAppSettings,
   saveAppSettings,
   normalizeSaleType,
@@ -25,13 +35,14 @@ import {
 import { emitOpenLicenseManagerRequest } from '../utils/posEditorBridge';
 import './Settings.css';
 
-import { Settings as SettingsIcon, Users, Upload, Store, UserCheck, ShieldCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Upload, Store, UserCheck, ShieldCheck, Package } from 'lucide-react';
 
 const SETTINGS_TABS = [
   { id: 'basic', label: 'الإعدادات العامة', icon: <SettingsIcon /> },
   { id: 'pos', label: 'نقطة البيع (POS)', icon: <Store /> },
   { id: 'customers', label: 'إدارة العملاء', icon: <Users /> },
-  { id: 'import', label: 'استيراد العملاء', icon: <Upload /> }
+  { id: 'import', label: 'استيراد العملاء', icon: <Upload /> },
+  { id: 'productsImport', label: 'استيراد المنتجات', icon: <Package /> }
 ];
 
 const normalizeCustomerNameKey = (value) => String(value ?? '').trim().toLowerCase();
@@ -46,6 +57,7 @@ const getRowStartIndex = (index, session) => {
 
 export default function Settings() {
   const customerImportInputRef = useRef(null);
+  const productImportInputRef = useRef(null);
   const initialAppSettings = getAppSettings();
 
   const [activeTab, setActiveTab] = useState('basic');
@@ -98,6 +110,8 @@ export default function Settings() {
   const [customerImportSession, setCustomerImportSession] = useState(null);
   const [importingCustomers, setImportingCustomers] = useState(false);
   const [updateExistingOnImport, setUpdateExistingOnImport] = useState(true);
+  const [productImportSession, setProductImportSession] = useState(null);
+  const [importingProducts, setImportingProducts] = useState(false);
 
   const openLicenseManager = () => {
     emitOpenLicenseManagerRequest();
@@ -253,6 +267,23 @@ export default function Settings() {
 
     return sampleMap;
   }, [customerImportSession]);
+  const productImportColumnSamples = useMemo(() => {
+    const sampleMap = new Map();
+    if (!productImportSession?.headers?.length || !productImportSession?.rows?.length) return sampleMap;
+
+    const previewRows = productImportSession.rows.slice(0, 120);
+    productImportSession.headers.forEach((header) => {
+      for (const row of previewRows) {
+        const value = String(row?.[header.index] ?? '').trim();
+        if (value) {
+          sampleMap.set(header.id, value.slice(0, 120));
+          break;
+        }
+      }
+    });
+
+    return sampleMap;
+  }, [productImportSession]);
 
   const saveBasicSettings = async () => {
     try {
@@ -585,6 +616,432 @@ export default function Settings() {
       setImportingCustomers(false);
     }
   }, [customerImportSession, importingCustomers, updateExistingOnImport, allCustomers, loadAllCustomers]);
+
+  const closeProductImportSession = useCallback(() => {
+    if (importingProducts) return;
+    setProductImportSession(null);
+  }, [importingProducts]);
+
+  const updateProductImportFieldMapping = useCallback((fieldKey, columnId) => {
+    setProductImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: {
+          ...prev.mapping,
+          [fieldKey]: columnId
+        }
+      };
+    });
+  }, []);
+
+  const applyProductImportAutoMapping = useCallback(() => {
+    setProductImportSession((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        mapping: buildImportFieldAutoMapping(prev.headers)
+      };
+    });
+  }, []);
+
+  const parseDelimitedProductRows = useCallback((rawText) => {
+    const lines = String(rawText || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) throw new Error('الملف لا يحتوي على بيانات كافية');
+
+    const delim = detectProductImportDelimiter(lines[0]);
+    const headers = toProductImportHeaders(parseProductImportLine(lines[0], delim));
+    const rows = lines
+      .slice(1)
+      .map((line) => parseProductImportLine(line, delim))
+      .filter((row) => row.some((cell) => String(cell ?? '').trim() !== ''));
+
+    if (!headers.length) throw new Error('تعذر قراءة الأعمدة من الملف');
+    if (!rows.length) throw new Error('الملف لا يحتوي على صفوف بيانات');
+
+    return { headers, rows, dataStartRowIndex: 2 };
+  }, []);
+
+  const parseWorkbookProductRows = useCallback(async (file) => {
+    const xlsxModule = await import('xlsx');
+    const XLSX = xlsxModule?.default || xlsxModule;
+
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, {
+      type: 'array',
+      cellDates: false
+    });
+
+    const firstSheetName = workbook?.SheetNames?.[0];
+    if (!firstSheetName) throw new Error('ملف Excel لا يحتوي على أي ورقة بيانات');
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const matrix = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: '',
+      raw: false
+    });
+
+    const rows = Array.isArray(matrix) ? matrix : [];
+    const hasAnyValue = (row) => (
+      Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')
+    );
+    const firstNonEmptyIndex = rows.findIndex(hasAnyValue);
+
+    if (firstNonEmptyIndex === -1) throw new Error('ورقة Excel فارغة');
+
+    const headerRow = rows[firstNonEmptyIndex] || [];
+    const dataRows = rows
+      .slice(firstNonEmptyIndex + 1)
+      .map((row) => (Array.isArray(row) ? row : []))
+      .filter(hasAnyValue);
+
+    const headers = toProductImportHeaders(headerRow);
+    if (!headers.length) throw new Error('تعذر قراءة أعمدة ملف Excel');
+    if (!dataRows.length) throw new Error('ورقة Excel لا تحتوي على بيانات');
+
+    return {
+      headers,
+      rows: dataRows,
+      sheetName: firstSheetName,
+      dataStartRowIndex: firstNonEmptyIndex + 2
+    };
+  }, []);
+
+  const importProductsFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const fileName = String(file.name || '').toLowerCase();
+      let parsed = null;
+
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        parsed = await parseWorkbookProductRows(file);
+      } else if (fileName.endsWith('.csv') || fileName.endsWith('.tsv') || fileName.endsWith('.txt')) {
+        parsed = parseDelimitedProductRows(await file.text());
+      } else {
+        throw new Error('صيغة الملف غير مدعومة. استخدم Excel أو CSV أو TSV');
+      }
+
+      setProductImportSession({
+        fileName: file.name,
+        headers: parsed.headers,
+        rows: parsed.rows,
+        sheetName: parsed.sheetName || null,
+        dataStartRowIndex: parsed.dataStartRowIndex || 2,
+        mapping: buildImportFieldAutoMapping(parsed.headers)
+      });
+    } catch (err) {
+      await safeAlert(err?.message || 'تعذر قراءة ملف المنتجات', null, {
+        type: 'error',
+        title: 'استيراد المنتجات'
+      });
+    }
+  };
+
+  const downloadProductImportTemplate = () => {
+    const headers = [
+      'name',
+      'category',
+      'brand',
+      'sku',
+      'barcode',
+      'description',
+      'salePrice',
+      'costPrice',
+      'totalQuantity',
+      'minStock',
+      'size',
+      'color',
+      'variantBarcode',
+      'variantPrice',
+      'variantCost',
+      'variantQty'
+    ];
+
+    const rows = [
+      headers.join(','),
+      [
+        'منتج تجريبي',
+        'تصنيف عام',
+        'علامة 1',
+        'SKU-001',
+        '1234567890123',
+        'وصف اختياري',
+        '150',
+        '100',
+        '25',
+        '5',
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
+      ].join(','),
+      [
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        'XL',
+        'أسود',
+        '1234567890456',
+        '155',
+        '102',
+        '8'
+      ].join(',')
+    ];
+
+    const blob = new Blob([`\uFEFF${rows.join('\r\n')}`], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'products-import-template.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const ensureImportedCategory = useCallback(async (name, categoryMap) => {
+    const key = nText(name).toLowerCase();
+    if (!key) return null;
+    if (categoryMap.has(key)) return categoryMap.get(key).id;
+
+    const add = await window.api.addCategory({
+      name: nText(name),
+      description: null,
+      color: '#0f766e',
+      icon: '🧵'
+    });
+    if (add?.error) throw new Error(add.error);
+    categoryMap.set(key, add);
+    return add.id;
+  }, []);
+
+  const importProductGroupsIntoDatabase = useCallback(async (groups) => {
+    const allRes = await window.api.getProducts({
+      page: 1,
+      pageSize: 5000,
+      includeTotal: false,
+      includeDescription: false,
+      includeImage: false,
+      includeCategory: false,
+      includeInventory: false,
+      includeVariants: true
+    });
+    if (allRes?.error) throw new Error(allRes.error);
+    const all = Array.isArray(allRes?.data) ? allRes.data : [];
+    const bySku = new Map();
+    all.forEach((product) => {
+      const key = nText(product?.sku).toLowerCase();
+      if (key && !bySku.has(key)) bySku.set(key, product);
+    });
+
+    const categoriesRes = await window.api.getCategories();
+    if (categoriesRes?.error) throw new Error(categoriesRes.error);
+    const categories = Array.isArray(categoriesRes) ? categoriesRes : [];
+    const categoryMap = new Map();
+    categories.forEach((category) => {
+      const key = nText(category?.name).toLowerCase();
+      if (key && !categoryMap.has(key)) categoryMap.set(key, category);
+    });
+
+    let created = 0;
+    let updated = 0;
+    let addVariants = 0;
+    let updateVariants = 0;
+    let failed = 0;
+    const rowErrors = [];
+
+    for (const group of groups) {
+      try {
+        const categoryId = await ensureImportedCategory(group.product.category, categoryMap);
+        const payload = {
+          name: group.product.name,
+          description: group.product.description || null,
+          categoryId,
+          brand: group.product.brand || null,
+          sku: group.product.sku || null,
+          barcode: group.product.barcode || null,
+          image: group.product.image || null,
+          basePrice: nNum(group.product.basePrice, 0),
+          cost: nNum(group.product.cost, 0),
+          hasVariants: Array.isArray(group.variants) && group.variants.length > 0
+        };
+
+        const skuKey = nText(payload.sku).toLowerCase();
+        const current = skuKey ? bySku.get(skuKey) : null;
+        let productId = current?.id || 0;
+        const knownVariants = Array.isArray(current?.variants) ? [...current.variants] : [];
+
+        if (current) {
+          const updateProductResult = await window.api.updateProduct(current.id, payload);
+          if (updateProductResult?.error) throw new Error(updateProductResult.error);
+          updated += 1;
+        } else {
+          const addProductResult = await window.api.addProduct(payload);
+          if (addProductResult?.error) throw new Error(addProductResult.error);
+          productId = addProductResult.id;
+          created += 1;
+        }
+
+        for (const variant of group.variants) {
+          const barcodeKey = nText(variant.barcode).toLowerCase();
+          const foundVariant = knownVariants.find((item) => {
+            if (barcodeKey && nText(item?.barcode).toLowerCase() === barcodeKey) return true;
+            return (
+              nText(item?.productSize).toLowerCase() === nText(variant.size).toLowerCase()
+              && nText(item?.color).toLowerCase() === nText(variant.color).toLowerCase()
+            );
+          });
+
+          const variantPayload = {
+            productId,
+            size: variant.size,
+            color: variant.color,
+            price: nNum(variant.price, payload.basePrice),
+            cost: nNum(variant.cost, payload.cost),
+            quantity: nInt(variant.quantity, 0),
+            barcode: nText(variant.barcode) || null
+          };
+
+          if (foundVariant) {
+            const updateVariantResult = await window.api.updateVariant(foundVariant.id, variantPayload);
+            if (updateVariantResult?.error) throw new Error(updateVariantResult.error);
+            foundVariant.productSize = variantPayload.size;
+            foundVariant.color = variantPayload.color;
+            foundVariant.price = variantPayload.price;
+            foundVariant.cost = variantPayload.cost;
+            foundVariant.quantity = variantPayload.quantity;
+            foundVariant.barcode = variantPayload.barcode;
+            updateVariants += 1;
+          } else {
+            const addVariantResult = await window.api.addVariant(variantPayload);
+            if (addVariantResult?.error) throw new Error(addVariantResult.error);
+            knownVariants.push({
+              id: addVariantResult.id,
+              productSize: variantPayload.size,
+              color: variantPayload.color,
+              price: variantPayload.price,
+              cost: variantPayload.cost,
+              quantity: variantPayload.quantity,
+              barcode: variantPayload.barcode
+            });
+            addVariants += 1;
+          }
+        }
+
+        const variantsTotal = group.variants.reduce((sum, variant) => sum + nInt(variant.quantity, 0), 0);
+        const importedTotal = Math.max(
+          0,
+          nInt(group.inventory.totalQuantity, nInt(group.inventory.warehouseQty, 0) + nInt(group.inventory.displayQty, 0))
+        );
+        const totalQuantity = Math.max(variantsTotal, importedTotal);
+        const inventoryResult = await window.api.updateInventory(productId, {
+          minStock: nInt(group.inventory.minStock, 5),
+          maxStock: nInt(group.inventory.maxStock, 100),
+          warehouseQty: totalQuantity,
+          displayQty: 0,
+          totalQuantity,
+          notes: group.inventory.notes || null,
+          lastRestock: new Date().toISOString()
+        });
+        if (inventoryResult?.error) throw new Error(inventoryResult.error);
+
+        if (skuKey) {
+          bySku.set(skuKey, {
+            ...(current || {}),
+            ...payload,
+            id: productId,
+            variants: knownVariants
+          });
+        }
+      } catch (error) {
+        failed += 1;
+        if (rowErrors.length < 10) {
+          rowErrors.push(`${nText(group?.product?.name) || 'منتج بدون اسم'}: ${error?.message || 'خطأ غير متوقع'}`);
+        }
+      }
+    }
+
+    return {
+      created,
+      updated,
+      addVariants,
+      updateVariants,
+      failed,
+      rowErrors
+    };
+  }, [ensureImportedCategory]);
+
+  const startProductImport = useCallback(async () => {
+    if (!productImportSession || importingProducts) return;
+
+    if (!productImportSession.mapping?.name) {
+      await safeAlert('اختَر عمود "اسم المنتج" قبل بدء الاستيراد', null, {
+        type: 'warning',
+        title: 'مطابقة الأعمدة'
+      });
+      return;
+    }
+
+    setImportingProducts(true);
+    try {
+      const mappedRows = mapRowsWithImportMapping(
+        productImportSession.rows,
+        productImportSession.mapping
+      ).map((mapped, index) => ({
+        ...mapped,
+        sourceIndex: getRowStartIndex(index, productImportSession)
+      }));
+
+      const validRows = mappedRows.filter((row) => (
+        Object.entries(row).some(([key, value]) => key !== 'sourceIndex' && nText(value) !== '')
+      ));
+      if (!validRows.length) {
+        throw new Error('لم يتم العثور على صفوف صالحة للاستيراد');
+      }
+
+      const groups = importGroups(validRows);
+      if (!groups.length) {
+        throw new Error('لم يتم العثور على صفوف صالحة بعد تطبيق المطابقة');
+      }
+
+      const result = await importProductGroupsIntoDatabase(groups);
+      setProductImportSession(null);
+
+      await safeAlert(
+        `نتيجة الاستيراد:\nجديد: ${result.created}\nتم تحديثه: ${result.updated}\nمتغيرات مضافة: ${result.addVariants}\nمتغيرات محدثة: ${result.updateVariants}\nفشل: ${result.failed}`,
+        null,
+        {
+          type: result.failed > 0 ? 'warning' : 'success',
+          title: 'استيراد المنتجات',
+          detail: result.rowErrors.length ? result.rowErrors.join('\n') : undefined
+        }
+      );
+    } catch (error) {
+      await safeAlert(error?.message || 'تعذر استيراد المنتجات', null, {
+        type: 'error',
+        title: 'استيراد المنتجات'
+      });
+    } finally {
+      setImportingProducts(false);
+    }
+  }, [productImportSession, importingProducts, importProductGroupsIntoDatabase]);
 
   return (
     <div className="settings-page">
@@ -1106,6 +1563,106 @@ export default function Settings() {
                       disabled={importingCustomers}
                     >
                       {importingCustomers ? 'جاري استيراد العملاء...' : 'بدء استيراد العملاء'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+          {activeTab === 'productsImport' && (
+            <section className="settings-card">
+              <h2><Package className="w-5 h-5" /> استيراد المنتجات</h2>
+              <p className="settings-hint">الصيغ المدعومة: XLSX / XLS / CSV / TSV.</p>
+
+              <div className="settings-actions">
+                <button type="button" onClick={downloadProductImportTemplate} className="settings-btn settings-btn-secondary">
+                  تنزيل قالب CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => productImportInputRef.current?.click()}
+                  className="settings-btn settings-btn-primary"
+                  disabled={importingProducts}
+                >
+                  {importingProducts ? 'جاري الاستيراد...' : 'اختيار ملف'}
+                </button>
+              </div>
+
+              <input
+                ref={productImportInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,.tsv,.txt"
+                style={{ display: 'none' }}
+                onChange={importProductsFile}
+              />
+
+              {!productImportSession && <div className="settings-empty">لم يتم اختيار ملف استيراد بعد.</div>}
+
+              {productImportSession && (
+                <>
+                  <div className="settings-import-meta">
+                    <div><strong>الملف:</strong> {productImportSession.fileName}</div>
+                    <div>
+                      <strong>الأعمدة:</strong> {productImportSession.headers.length}
+                      {' | '}
+                      <strong>الصفوف:</strong> {productImportSession.rows.length}
+                      {productImportSession.sheetName ? ` | الورقة: ${productImportSession.sheetName}` : ''}
+                    </div>
+                  </div>
+
+                  <div className="settings-mapping-grid">
+                    {IMPORT_FIELD_OPTIONS.map((field) => {
+                      const selectedColumn = productImportSession.mapping?.[field.key] ?? '';
+                      const sampleValue = selectedColumn ? productImportColumnSamples.get(selectedColumn) : '';
+
+                      return (
+                        <label key={field.key} className="settings-mapping-row">
+                          <span>
+                            {field.label}
+                            {field.required ? ' *' : ''}
+                          </span>
+                          <select
+                            value={selectedColumn}
+                            onChange={(event) => updateProductImportFieldMapping(field.key, event.target.value)}
+                            disabled={importingProducts}
+                          >
+                            <option value="">{field.required ? 'اختَر عمودًا...' : 'تجاهل هذا الحقل'}</option>
+                            {productImportSession.headers.map((header) => (
+                              <option key={`${field.key}-${header.id}`} value={header.id}>
+                                {header.label}
+                              </option>
+                            ))}
+                          </select>
+                          <small>{sampleValue ? `مثال: ${sampleValue}` : 'بدون معاينة'}</small>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="settings-actions">
+                    <button
+                      type="button"
+                      onClick={applyProductImportAutoMapping}
+                      className="settings-btn settings-btn-secondary"
+                      disabled={importingProducts}
+                    >
+                      مطابقة تلقائية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeProductImportSession}
+                      className="settings-btn settings-btn-secondary"
+                      disabled={importingProducts}
+                    >
+                      إلغاء الملف
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startProductImport}
+                      className="settings-btn settings-btn-primary"
+                      disabled={importingProducts}
+                    >
+                      {importingProducts ? 'جاري استيراد المنتجات...' : 'بدء استيراد المنتجات'}
                     </button>
                   </div>
                 </>

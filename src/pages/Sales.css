@@ -299,23 +299,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .sales-action-btn {
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
   color: #fff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14);
   font-size: 16px;
-  background: #64748b;
+  background: #334155;
 }
 
 .sales-action-btn:hover:not(:disabled) {
@@ -335,12 +335,8 @@
   background: #0f766e;
 }
 
-.sales-action-btn.is-print {
-  background: #3b82f6;
-}
-
 .sales-action-btn.is-delete {
-  background: #dc2626;
+  background: #c81e1e;
 }
 
 .sales-pagination {

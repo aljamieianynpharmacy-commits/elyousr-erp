@@ -1481,7 +1481,50 @@ export default function Products() {
     try {
       const fileName = nText(file.name).toLowerCase();
       if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        throw new Error('الملف بصيغة XLSX/XLS غير مدعوم حاليًا. احفظه من Excel كـ CSV ثم أعد الاستيراد.');
+        const xlsxModule = await import('xlsx');
+        const XLSX = xlsxModule?.default || xlsxModule;
+
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, {
+          type: 'array',
+          cellDates: false
+        });
+
+        const firstSheetName = workbook?.SheetNames?.[0];
+        if (!firstSheetName) throw new Error('ملف Excel لا يحتوي على أي ورقة بيانات');
+
+        const sheet = workbook.Sheets[firstSheetName];
+        const matrix = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: '',
+          raw: false
+        });
+        const sheetRows = Array.isArray(matrix) ? matrix : [];
+        const hasAnyValue = (row) => (
+          Array.isArray(row) && row.some((cell) => nText(cell) !== '')
+        );
+        const firstNonEmptyIndex = sheetRows.findIndex(hasAnyValue);
+        if (firstNonEmptyIndex === -1) throw new Error('ورقة Excel فارغة');
+
+        const headerRow = sheetRows[firstNonEmptyIndex] || [];
+        const rows = sheetRows
+          .slice(firstNonEmptyIndex + 1)
+          .map((row) => (Array.isArray(row) ? row : []))
+          .filter(hasAnyValue);
+        const headers = toImportHeaders(headerRow);
+
+        if (!headers.length) throw new Error('تعذر قراءة أعمدة ملف Excel');
+        if (!rows.length) throw new Error('ورقة Excel لا تحتوي على بيانات');
+
+        setImportSession({
+          fileName: file.name,
+          headers,
+          rows,
+          sheetName: firstSheetName,
+          dataStartRowIndex: firstNonEmptyIndex + 2,
+          mapping: buildImportFieldAutoMapping(headers)
+        });
+        return;
       }
 
       const content = await file.text();
@@ -1490,7 +1533,10 @@ export default function Products() {
 
       const d = delimiter(lines[0]);
       const headers = toImportHeaders(parseLine(lines[0], d));
-      const rows = lines.slice(1).map((line) => parseLine(line, d));
+      const rows = lines
+        .slice(1)
+        .map((line) => parseLine(line, d))
+        .filter((row) => row.some((cell) => nText(cell) !== ''));
 
       if (!headers.length) throw new Error('تعذر قراءة الأعمدة من الملف');
       if (!rows.length) throw new Error('الملف لا يحتوي على صفوف بيانات');
@@ -1600,7 +1646,7 @@ export default function Products() {
         </div>
       </header>
 
-      <input ref={importRef} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={importFile} />
+      <input ref={importRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" style={{ display: 'none' }} onChange={importFile} />
 
       <ProductsMetrics metrics={metrics} />
 

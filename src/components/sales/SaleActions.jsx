@@ -4,7 +4,6 @@ function SaleActions({
   sale,
   onView,
   onEdit,
-  onPrint,
   onDelete
 }) {
   const [pendingAction, setPendingAction] = useState(null);
@@ -41,15 +40,6 @@ function SaleActions({
         aria-label="تعديل الفاتورة"
       >
         ✏️
-      </button>
-      <button
-        className="sales-action-btn is-print"
-        onClick={() => runAction('print', onPrint)}
-        disabled={isDisabled}
-        title="طباعة الفاتورة"
-        aria-label="طباعة الفاتورة"
-      >
-        🖨️
       </button>
       <button
         className="sales-action-btn is-delete"

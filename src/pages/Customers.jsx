@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredVa
 import { safeAlert } from '../utils/safeAlert';
 import { safeConfirm } from '../utils/safeConfirm';
 import { FixedSizeList as List, areEqual } from 'react-window';
-import { FileText, DollarSign, Edit2, Trash2, Plus, Search, Settings, Printer } from 'lucide-react';
+import { Plus, Search, Settings, Printer } from 'lucide-react';
 import CustomerLedger from './CustomerLedger';
 import NewCustomerModal from '../components/NewCustomerModal';
 import PaymentModal from '../components/PaymentModal';
@@ -34,10 +34,7 @@ const COLUMN_SPECS = {
   notes: { minWidth: 200 },
   creditLimit: { minWidth: 140 },
   balance: { minWidth: 120 },
-  action_ledger: { width: 36 },
-  action_payment: { width: 36 },
-  action_edit: { width: 36 },
-  action_delete: { width: 36 }
+  action_actions: { width: 174 }
 };
 
 const getVisibleColumnOrder = (visibleColumns) => {
@@ -54,7 +51,7 @@ const getVisibleColumnOrder = (visibleColumns) => {
   if (visibleColumns.creditLimit) order.push('creditLimit');
   if (visibleColumns.balance) order.push('balance');
   if (visibleColumns.actions) {
-    order.push('action_ledger', 'action_payment', 'action_edit', 'action_delete');
+    order.push('action_actions');
   }
   return order;
 };
@@ -216,46 +213,40 @@ const VirtualizedCustomerRow = memo(function VirtualizedCustomerRow({ index, sty
       )}
       {visibleColumns.actions && (
         <div className="customers-cell customers-action-cell" role="cell">
-          <button
-            onClick={() => onShowLedger(customer.id)}
-            title="كشف الحساب"
-            className="customers-action-button"
-          >
-            <FileText size={16} color="#0307c9ff" />
-          </button>
-        </div>
-      )}
-      {visibleColumns.actions && (
-        <div className="customers-cell customers-action-cell" role="cell">
-          <button
-            onClick={() => onPayment(customer)}
-            title="تسجيل دفعة"
-            className="customers-action-button"
-          >
-            <DollarSign size={16} color="#177400ff" />
-          </button>
-        </div>
-      )}
-      {visibleColumns.actions && (
-        <div className="customers-cell customers-action-cell" role="cell">
-          <button
-            onClick={() => onEdit(customer)}
-            title="تعديل"
-            className="customers-action-button"
-          >
-            <Edit2 size={16} color="#f78c00ff" />
-          </button>
-        </div>
-      )}
-      {visibleColumns.actions && (
-        <div className="customers-cell customers-action-cell" role="cell">
-          <button
-            onClick={() => onDelete(customer.id)}
-            title="حذف"
-            className="customers-action-button"
-          >
-            <Trash2 size={16} color="#dc2626" />
-          </button>
+          <div className="customers-actions-group">
+            <button
+              type="button"
+              onClick={() => onShowLedger(customer.id)}
+              title={'\u0639\u0631\u0636 \u0643\u0634\u0641 \u0627\u0644\u062D\u0633\u0627\u0628'}
+              className="customers-action-button customers-action-view"
+            >
+              {'\u{1F441}\uFE0F'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onPayment(customer)}
+              title={'\u062A\u0633\u062C\u064A\u0644 \u062F\u0641\u0639\u0629'}
+              className="customers-action-button customers-action-payment"
+            >
+              {'\u{1F4B5}'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onEdit(customer)}
+              title={'\u062A\u0639\u062F\u064A\u0644'}
+              className="customers-action-button customers-action-edit"
+            >
+              {'\u270F\uFE0F'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(customer.id)}
+              title={'\u062D\u0630\u0641'}
+              className="customers-action-button customers-action-delete"
+            >
+              {'\u{1F5D1}\uFE0F'}
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -331,10 +322,7 @@ const CustomersTable = memo(function CustomersTable({
           {visibleColumns.notes && <div className="customers-header-cell" role="columnheader">الملاحظات</div>}
           {visibleColumns.creditLimit && <div className="customers-header-cell" role="columnheader">الحد الائتماني</div>}
           {visibleColumns.balance && <div className="customers-header-cell" role="columnheader">الرصيد</div>}
-          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">عرض</div>}
-          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">دفع</div>}
-          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">تعديل</div>}
-          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">حذف</div>}
+          {visibleColumns.actions && <div className="customers-header-cell customers-action-cell" role="columnheader">{'\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A'}</div>}
         </div>
 
         {showSearchRow && (
@@ -449,9 +437,6 @@ const CustomersTable = memo(function CustomersTable({
                 />
               </div>
             )}
-            {visibleColumns.actions && <div className="customers-search-cell" />}
-            {visibleColumns.actions && <div className="customers-search-cell" />}
-            {visibleColumns.actions && <div className="customers-search-cell" />}
             {visibleColumns.actions && <div className="customers-search-cell" />}
           </div>
         )}

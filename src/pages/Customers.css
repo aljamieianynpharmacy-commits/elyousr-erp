@@ -118,16 +118,51 @@
   text-align: center;
 }
 
-.customers-action-button {
-  background: none;
-  border: none;
-  padding: 2px;
-  border-radius: 3px;
-  width: 24px;
-  height: 24px;
+.customers-actions-group {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+}
+
+.customers-action-button {
+  border: none;
+  background: #64748b;
+  padding: 0;
+  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.customers-action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
+}
+
+.customers-action-button:active {
+  transform: translateY(0);
+}
+
+.customers-action-view {
+  background: #334155;
+}
+
+.customers-action-payment {
+  background: #2563eb;
+}
+
+.customers-action-edit {
+  background: #0f766e;
+}
+
+.customers-action-delete {
+  background: #c81e1e;
 }
 
 .customers-balance {

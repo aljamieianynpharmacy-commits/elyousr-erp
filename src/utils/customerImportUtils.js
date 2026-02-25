@@ -43,6 +43,24 @@ export const CUSTOMER_IMPORT_FIELD_OPTIONS = [
     aliases: ['creditlimit', 'limit', 'credit', 'debtlimit', 'حد', 'حد الائتمان', 'الحد']
   },
   {
+    key: 'balance',
+    label: 'الرصيد',
+    aliases: [
+      'balance',
+      'currentbalance',
+      'openingbalance',
+      'debt',
+      'dues',
+      'amountdue',
+      'الرصيد',
+      'رصيد',
+      'الرصيد الحالي',
+      'رصيد افتتاحي',
+      'مديونية',
+      'المتبقي'
+    ]
+  },
+  {
     key: 'customerType',
     label: 'نوع العميل',
     aliases: ['customertype', 'type', 'segment', 'نوع', 'نوع العميل', 'التصنيف']
@@ -169,6 +187,19 @@ export const mapRowsWithCustomerImportMapping = (rows, mapping) => (
 );
 
 export const sanitizeImportedCustomer = (row = {}) => ({
+  // keep numeric fields optional when the source cell is blank
+  // so existing values are not overwritten during update-import.
+  ...(() => {
+    const creditLimitText = nText(row.creditLimit);
+    const parsedCreditLimit = creditLimitText ? nNum(creditLimitText, Number.NaN) : Number.NaN;
+    const balanceText = nText(row.balance);
+    const parsedBalance = balanceText ? nNum(balanceText, Number.NaN) : Number.NaN;
+
+    return {
+      creditLimit: Number.isFinite(parsedCreditLimit) ? Math.max(0, parsedCreditLimit) : undefined,
+      balance: Number.isFinite(parsedBalance) ? parsedBalance : undefined
+    };
+  })(),
   name: nText(row.name),
   phone: nText(row.phone),
   phone2: nText(row.phone2),
@@ -176,6 +207,5 @@ export const sanitizeImportedCustomer = (row = {}) => ({
   city: nText(row.city),
   district: nText(row.district),
   notes: nText(row.notes),
-  creditLimit: Math.max(0, nNum(row.creditLimit, 0)),
   customerType: normalizeCustomerType(row.customerType)
 });

@@ -431,6 +431,7 @@ export default function Settings() {
       'district',
       'notes',
       'creditLimit',
+      'balance',
       'customerType'
     ];
 
@@ -445,6 +446,7 @@ export default function Settings() {
         'مدينة نصر',
         'ملاحظة اختيارية',
         '5000',
+        '1250',
         'VIP'
       ].join(',')
     ];
@@ -526,7 +528,10 @@ export default function Settings() {
               district: row.district || existingCustomer.district || '',
               notes: row.notes || existingCustomer.notes || '',
               creditLimit: row.creditLimit ?? existingCustomer.creditLimit ?? 0,
-              customerType: row.customerType || existingCustomer.customerType || 'عادي'
+              customerType: row.customerType || existingCustomer.customerType || 'عادي',
+              ...(Number.isFinite(row.balance)
+                ? { balance: row.balance }
+                : {})
             };
             const updateResult = await window.api.updateCustomer(existingCustomer.id, updatePayload);
             if (updateResult?.error) throw new Error(updateResult.error);

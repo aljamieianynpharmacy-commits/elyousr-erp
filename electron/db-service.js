@@ -6033,22 +6033,43 @@ const dbService = {
 
     async addCustomer(customerData) {
         try {
-            return await prisma.customer.create({
-                data: {
-                    name: customerData.name,
-                    phone: customerData.phone || null,
-                    phone2: customerData.phone2 || null,
-                    address: customerData.address || null,
-                    city: customerData.city || null,
-                    district: customerData.district || null,
-                    notes: customerData.notes || null,
-                    creditLimit: parseFloat(customerData.creditLimit || 0),
-                    balance: 0,
-                    firstActivityDate: null,
-                    lastPaymentDate: null,
-                    financialsUpdatedAt: new Date(),
-                    customerType: customerData.customerType || 'عادي'
+            const initialBalance = Number(toNumber(customerData?.balance, 0).toFixed(2));
+
+            return await prisma.$transaction(async (tx) => {
+                const createdCustomer = await tx.customer.create({
+                    data: {
+                        name: customerData.name,
+                        phone: customerData.phone || null,
+                        phone2: customerData.phone2 || null,
+                        address: customerData.address || null,
+                        city: customerData.city || null,
+                        district: customerData.district || null,
+                        notes: customerData.notes || null,
+                        creditLimit: parseFloat(customerData.creditLimit || 0),
+                        balance: initialBalance,
+                        firstActivityDate: null,
+                        lastPaymentDate: null,
+                        financialsUpdatedAt: new Date(),
+                        customerType: customerData.customerType || 'عادي'
+                    }
+                });
+
+                if (Math.abs(initialBalance) > 0.0001) {
+                    await tx.customerTransaction.create({
+                        data: {
+                            customerId: createdCustomer.id,
+                            date: new Date(),
+                            type: 'ADJUSTMENT',
+                            referenceType: null,
+                            referenceId: null,
+                            debit: initialBalance > 0 ? initialBalance : 0,
+                            credit: initialBalance < 0 ? Math.abs(initialBalance) : 0,
+                            notes: 'Imported opening balance'
+                        }
+                    });
                 }
+
+                return createdCustomer;
             });
         } catch (error) {
             return { error: error.message };
@@ -6057,19 +6078,70 @@ const dbService = {
 
     async updateCustomer(id, customerData) {
         try {
-            return await prisma.customer.update({
-                where: { id: parseInt(id) },
-                data: {
-                    name: customerData.name,
-                    phone: customerData.phone || null,
-                    phone2: customerData.phone2 || null,
-                    address: customerData.address || null,
-                    city: customerData.city || null,
-                    district: customerData.district || null,
-                    notes: customerData.notes || null,
-                    creditLimit: customerData.creditLimit !== undefined ? parseFloat(customerData.creditLimit) : undefined,
-                    customerType: customerData.customerType || undefined
+            const customerId = parseInt(id, 10);
+            const hasBalanceInPayload = (
+                customerData?.balance !== undefined
+                && customerData?.balance !== null
+                && String(customerData?.balance).trim() !== ''
+            );
+
+            const sharedData = {
+                name: customerData.name,
+                phone: customerData.phone || null,
+                phone2: customerData.phone2 || null,
+                address: customerData.address || null,
+                city: customerData.city || null,
+                district: customerData.district || null,
+                notes: customerData.notes || null,
+                creditLimit: customerData.creditLimit !== undefined ? parseFloat(customerData.creditLimit) : undefined,
+                customerType: customerData.customerType || undefined
+            };
+
+            if (!hasBalanceInPayload) {
+                return await prisma.customer.update({
+                    where: { id: customerId },
+                    data: sharedData
+                });
+            }
+
+            const nextBalance = Number(toNumber(customerData.balance, 0).toFixed(2));
+
+            return await prisma.$transaction(async (tx) => {
+                const existingCustomer = await tx.customer.findUnique({
+                    where: { id: customerId },
+                    select: { id: true, balance: true }
+                });
+                if (!existingCustomer) {
+                    return { error: 'Customer not found' };
                 }
+
+                const previousBalance = Number(toNumber(existingCustomer.balance, 0).toFixed(2));
+                const balanceDelta = Number((nextBalance - previousBalance).toFixed(2));
+
+                const updatedCustomer = await tx.customer.update({
+                    where: { id: customerId },
+                    data: {
+                        ...sharedData,
+                        balance: nextBalance
+                    }
+                });
+
+                if (Math.abs(balanceDelta) > 0.0001) {
+                    await tx.customerTransaction.create({
+                        data: {
+                            customerId,
+                            date: new Date(),
+                            type: 'ADJUSTMENT',
+                            referenceType: null,
+                            referenceId: null,
+                            debit: balanceDelta > 0 ? balanceDelta : 0,
+                            credit: balanceDelta < 0 ? Math.abs(balanceDelta) : 0,
+                            notes: 'Customer balance adjustment'
+                        }
+                    });
+                }
+
+                return updatedCustomer;
             });
         } catch (error) {
             return { error: error.message };

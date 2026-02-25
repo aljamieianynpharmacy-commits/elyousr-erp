@@ -1017,6 +1017,7 @@ export default function Customers() {
       'district',
       'notes',
       'creditLimit',
+      'balance',
       'customerType'
     ];
     const rows = [
@@ -1030,6 +1031,7 @@ export default function Customers() {
         'مدينة نصر',
         'ملاحظة اختيارية',
         '5000',
+        '1250',
         'VIP'
       ].join(',')
     ];
@@ -1111,7 +1113,10 @@ export default function Customers() {
               district: row.district || existingCustomer.district || '',
               notes: row.notes || existingCustomer.notes || '',
               creditLimit: row.creditLimit ?? existingCustomer.creditLimit ?? 0,
-              customerType: row.customerType || existingCustomer.customerType || 'عادي'
+              customerType: row.customerType || existingCustomer.customerType || 'عادي',
+              ...(Number.isFinite(row.balance)
+                ? { balance: row.balance }
+                : {})
             };
             const updateResult = await window.api.updateCustomer(existingCustomer.id, updatePayload);
             if (updateResult?.error) throw new Error(updateResult.error);

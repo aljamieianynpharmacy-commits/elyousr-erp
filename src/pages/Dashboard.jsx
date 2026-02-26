@@ -1,110 +1,83 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useCallback, useMemo } from 'react';
+import { APP_NAVIGATE_EVENT } from '../utils/posEditorBridge';
+import './Dashboard.css';
 
-export default function Dashboard({ token }) {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+const getTodayLabel = () => new Date().toLocaleDateString('ar-EG', {
+  weekday: 'long',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric'
+});
 
-  useEffect(() => {
-    loadStats();
-  }, [token]);
+export default function Dashboard({ user }) {
+  const handleNavigate = useCallback((page) => {
+    window.dispatchEvent(
+      new CustomEvent(APP_NAVIGATE_EVENT, {
+        detail: { page, reason: 'dashboard-shortcut' }
+      })
+    );
+  }, []);
 
-  const loadStats = async () => {
-    try {
-      const result = await window.api.getDashboardStats(token);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setStats(result);
-      }
-    } catch (err) {
-      setError('فشل تحميل البيانات: ' + err.message);
-    } finally {
-      setLoading(false);
+  const quickActions = useMemo(() => {
+    const base = [
+      { page: 'pos', icon: '🛒', title: 'فاتورة البيع', subtitle: 'إنشاء فاتورة بيع جديدة', tone: 'sales' },
+      { page: 'purchases', icon: '📥', title: 'فاتورة المشتريات', subtitle: 'تسجيل مشتريات جديدة', tone: 'purchases' },
+      { page: 'customers', icon: '👥', title: 'العملاء', subtitle: 'بحث وإدارة حسابات العملاء', tone: 'customers' },
+      { page: 'products', icon: '📦', title: 'المنتجات', subtitle: 'إضافة وتعديل الأصناف', tone: 'products' },
+      { page: 'returns', icon: '↩️', title: 'مرتجع المبيعات', subtitle: 'إدخال مرتجعات العملاء', tone: 'returns' },
+      { page: 'purchaseReturns', icon: '🔁', title: 'مرتجع المشتريات', subtitle: 'إدخال مرتجعات الموردين', tone: 'returns' },
+      { page: 'treasury', icon: '🏦', title: 'الحسابات', subtitle: 'متابعة الخزنة والتقارير', tone: 'finance' },
+      { page: 'warehouses', icon: '🏭', title: 'المخازن', subtitle: 'إدارة المخزون والتحويلات', tone: 'warehouse' }
+    ];
+
+    if (user?.role === 'ADMIN') {
+      base.push({ page: 'users', icon: '👤', title: 'المستخدمين', subtitle: 'إدارة الصلاحيات والحسابات', tone: 'settings' });
     }
-  };
 
-  if (loading) return <div>جاري التحميل...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
-  if (!stats) return <div>لا توجد بيانات</div>;
+    return base;
+  }, [user?.role]);
 
   return (
-    <div>
-      <h1>📊 لوحة التحكم</h1>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginTop: '20px' }}>
-        {/* البطاقات الإحصائية */}
-        <div className="card" style={{ borderLeft: '4px solid #10b981' }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>مبيعات اليوم</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>
-            {stats.salesAmount.toFixed(2)} ج.م
-          </div>
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-            {stats.salesCount} عملية
-          </div>
+    <div className="dashboard-home">
+      <section className="dashboard-hero card">
+        <div>
+          <p className="dashboard-hero-eyebrow">الشاشة الافتتاحية</p>
+          <h1>مرحبًا {user?.name || 'بك'} في نظام ERP</h1>
+          <p>ابدأ من الاختصارات السريعة للمهام الأساسية.</p>
         </div>
-
-        <div className="card" style={{ borderLeft: '4px solid #ef4444' }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>المصروفات اليوم</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#ef4444' }}>
-            {stats.expensesAmount.toFixed(2)} ج.م
-          </div>
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>مصروفات مسجلة</div>
+        <div className="dashboard-hero-actions">
+          <div className="dashboard-hero-date">{getTodayLabel()}</div>
+          <button type="button" className="dashboard-btn dashboard-btn-primary" onClick={() => handleNavigate('pos')}>
+            بدء فاتورة بيع
+          </button>
+          <button type="button" className="dashboard-btn dashboard-btn-light" onClick={() => handleNavigate('purchases')}>
+            بدء فاتورة مشتريات
+          </button>
         </div>
+      </section>
 
-        <div className="card" style={{ borderLeft: '4px solid #6366f1' }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>الربح</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#6366f1' }}>
-            {(stats.salesAmount - stats.expensesAmount).toFixed(2)} ج.م
-          </div>
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>اليوم</div>
+      <section className="card dashboard-shortcuts">
+        <div className="dashboard-section-head">
+          <h2>اختصارات سريعة</h2>
+          <span>تنقل مباشر للمهام الأساسية</span>
         </div>
-
-        <div className="card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>إجمالي المنتجات</div>
-          <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#f59e0b' }}>
-            {stats.productsCount}
-          </div>
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>منتج في النظام</div>
+        <div className="dashboard-shortcuts-grid">
+          {quickActions.map((action) => (
+            <button
+              key={action.page}
+              type="button"
+              className={`dashboard-shortcut tone-${action.tone}`}
+              onClick={() => handleNavigate(action.page)}
+            >
+              <span className="dashboard-shortcut-icon">{action.icon}</span>
+              <span className="dashboard-shortcut-text">
+                <strong>{action.title}</strong>
+                <small>{action.subtitle}</small>
+              </span>
+            </button>
+          ))}
         </div>
-      </div>
-
-      {/* منتجات قليلة المخزون */}
-      {stats.lowStockVariants && stats.lowStockVariants.length > 0 && (
-        <div className="card" style={{ marginTop: '30px' }}>
-          <h2>⚠️ منتجات قليلة المخزون</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>المنتج</th>
-                <th>الحجم</th>
-                <th>اللون</th>
-                <th>الكمية</th>
-                <th>السعر</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.lowStockVariants.map((variant, idx) => (
-                <tr key={variant.id}>
-                  <td>{idx + 1}</td>
-                  <td>منتج {variant.productId}</td>
-                  <td>{variant.size}</td>
-                  <td>{variant.color}</td>
-                  <td style={{ color: variant.quantity <= 3 ? '#ef4444' : '#f59e0b' }}>
-                    <strong>{variant.quantity}</strong>
-                  </td>
-                  <td>{variant.price.toFixed(2)} ج.م</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <button className="btn-primary" style={{ marginTop: '30px' }} onClick={loadStats}>
-        تحديث البيانات
-      </button>
+      </section>
     </div>
   );
 }

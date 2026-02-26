@@ -38,7 +38,7 @@ function App() {
   const [showLicenseManager, setShowLicenseManager] = useState(false);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [currentPage, setCurrentPage] = useState('pos');
+  const [currentPage, setCurrentPage] = useState('dashboard');
 
   useEffect(() => {
     let isMounted = true;
@@ -150,6 +150,7 @@ function App() {
     localStorage.setItem('user', JSON.stringify(userData));
     setToken(newToken);
     setUser(userData);
+    setCurrentPage('dashboard');
   };
 
   const handleLogout = () => {
@@ -202,7 +203,7 @@ function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard token={token} />;
+        return <Dashboard token={token} user={user} />;
       case 'pos':
         return <EnhancedPOS />;
       case 'sales':
@@ -234,7 +235,7 @@ function App() {
       case 'users':
         return user?.role === 'ADMIN' ? <Users /> : <div>ليس لديك صلاحية</div>;
       default:
-        return <Dashboard token={token} />;
+        return <Dashboard token={token} user={user} />;
     }
   };
 

@@ -18,6 +18,8 @@ import {
 } from '../utils/customerImportUtils';
 import './Customers.css';
 
+let globalCustomersCache = null;
+
 // Utility functions - moved outside component for better performance
 const ROW_HEIGHT = 56;
 const MAX_LIST_HEIGHT = 520;
@@ -583,7 +585,12 @@ export default function Customers() {
   // تحميل كل العملاء مرة واحدة - البحث والفلترة تتم محلياً
   const loadAllCustomers = useCallback(async () => {
     try {
-      setInitialLoading(true);
+      if (globalCustomersCache) {
+        setAllCustomers(globalCustomersCache);
+        setInitialLoading(false);
+      } else {
+        setInitialLoading(true);
+      }
 
       const result = await window.api.getCustomers({
         page: 1,
@@ -598,7 +605,7 @@ export default function Customers() {
 
       if (result?.error) {
         console.error('❌ [BACKEND] خطأ في تحميل العملاء: ' + result.error);
-        setAllCustomers([]);
+        if (!globalCustomersCache) setAllCustomers([]);
         return;
       }
 
@@ -611,10 +618,11 @@ export default function Customers() {
         normalizedSearchString: `${c.name || ''}`.toLowerCase()
       }));
 
+      globalCustomersCache = enhancedData;
       setAllCustomers(enhancedData);
     } catch (err) {
       console.error('💥 [FRONTEND] استثناء في تحميل العملاء:', err);
-      setAllCustomers([]);
+      if (!globalCustomersCache) setAllCustomers([]);
     } finally {
       setInitialLoading(false);
     }

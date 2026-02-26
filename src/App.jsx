@@ -20,6 +20,18 @@ import LicensePage from './pages/LicensePage';
 import { APP_NAVIGATE_EVENT, APP_OPEN_LICENSE_EVENT } from './utils/posEditorBridge';
 import './index.css';
 
+const PAGES_WITH_INTERNAL_SCROLL = new Set([
+  'pos',
+  'purchases',
+  'returns',
+  'purchaseReturns',
+  'sales',
+  'purchaseHistory',
+  'returnsHistory',
+  'purchaseReturnsHistory',
+  'products'
+]);
+
 function App() {
   const [licenseStatus, setLicenseStatus] = useState(null);
   const [isLicenseLoading, setIsLicenseLoading] = useState(true);
@@ -226,15 +238,55 @@ function App() {
     }
   };
 
+  const navSections = [
+    {
+      title: 'المبيعات والمشتريات',
+      items: [
+        { page: 'dashboard', icon: '📊', label: 'لوحة التحكم' },
+        { page: 'pos', icon: '🛒', label: 'فاتورة البيع' },
+        { page: 'sales', icon: '📋', label: 'المبيعات' },
+        { page: 'purchases', icon: '📥', label: 'فاتورة المشتريات' },
+        { page: 'purchaseHistory', icon: '📚', label: 'المشتريات السابقة' }
+      ]
+    },
+    {
+      title: 'المرتجعات',
+      items: [
+        { page: 'returns', icon: '🧾', label: 'فاتورة مرتجع المبيعات' },
+        { page: 'returnsHistory', icon: '↩️', label: 'سجل مرتجع المبيعات' },
+        { page: 'purchaseReturns', icon: '🧾', label: 'فاتورة مرتجع المشتريات' },
+        { page: 'purchaseReturnsHistory', icon: '🔁', label: 'سجل مرتجع المشتريات' }
+      ]
+    },
+    {
+      title: 'الإدارة',
+      items: [
+        { page: 'products', icon: '📦', label: 'المنتجات' },
+        { page: 'warehouses', icon: '🏭', label: 'المخازن' },
+        { page: 'customers', icon: '👥', label: 'العملاء' },
+        { page: 'suppliers', icon: '🚚', label: 'الموردين' },
+        { page: 'treasury', icon: '🏦', label: 'الحسابات' },
+        { page: 'settings', icon: '⚙️', label: 'الإعدادات' },
+        ...(user?.role === 'ADMIN' ? [{ page: 'users', icon: '👤', label: 'المستخدمين' }] : [])
+      ]
+    }
+  ];
+
   const NavItem = ({ page, icon, label }) => (
     <li
       onClick={() => setCurrentPage(page)}
       style={{
-        padding: '12px',
+        padding: '10px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
         cursor: 'pointer',
         backgroundColor: currentPage === page ? '#334155' : 'transparent',
-        borderRadius: '5px',
-        marginBottom: '8px',
+        border: currentPage === page ? '1px solid #475569' : '1px solid transparent',
+        borderRadius: '8px',
+        marginBottom: '6px',
+        fontWeight: currentPage === page ? '700' : '500',
+        fontSize: '14px',
         transition: 'all 0.2s'
       }}
       onMouseEnter={(event) => {
@@ -244,61 +296,67 @@ function App() {
         if (currentPage !== page) event.currentTarget.style.backgroundColor = 'transparent';
       }}
     >
-      {icon} {label}
+      <span style={{ width: '20px', textAlign: 'center' }}>{icon}</span>
+      <span>{label}</span>
     </li>
   );
+
+  const useInternalScrollLayout = PAGES_WITH_INTERNAL_SCROLL.has(currentPage);
 
   return (
     <div className="app-container" style={{ display: 'flex', height: '100vh', overflow: 'hidden', direction: 'rtl' }}>
       <div
         className="sidebar"
         style={{
-          width: '250px',
+          width: '280px',
           backgroundColor: '#1e293b',
           color: 'white',
-          padding: '20px',
+          padding: '16px 14px 14px',
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          gap: '10px'
         }}
       >
         <h2
           style={{
-            fontSize: '20px',
-            marginBottom: '30px',
+            fontSize: '19px',
+            marginBottom: '4px',
             textAlign: 'center',
             borderBottom: '2px solid #334155',
-            paddingBottom: '15px'
+            paddingBottom: '12px'
           }}
         >
           ⚡ ERP SYSTEM
         </h2>
 
-        <nav style={{ flex: 1 }}>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            <NavItem page="pos" icon="🛒" label="فاتورة البيع" />
-            <NavItem page="purchases" icon="📥" label="فاتورة المشتريات" />
-            <NavItem page="purchaseHistory" icon="📚" label="المشتريات السابقة" />
-            <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
-            <NavItem page="sales" icon="📋" label="المبيعات" />
-            <NavItem page="returnsHistory" icon="↩️" label="سجل مرتجع المبيعات" />
-            <NavItem page="purchaseReturnsHistory" icon="🔁" label="سجل مرتجع المشتريات" />
-            <NavItem page="returns" icon="🧾" label="فاتورة مرتجع المبيعات" />
-            <NavItem page="purchaseReturns" icon="🧾" label="فاتورة مرتجع المشتريات" />
-            <NavItem page="warehouses" icon="🏭" label="المخازن" />
-
-            <NavItem page="products" icon="📦" label="المنتجات" />
-            <NavItem page="customers" icon="👥" label="العملاء" />
-            <NavItem page="suppliers" icon="🚚" label="الموردين" />
-            <NavItem page="treasury" icon="🏦" label="الحسابات" />
-            <NavItem page="settings" icon="⚙️" label="الإعدادات" />
-            {user?.role === 'ADMIN' && <NavItem page="users" icon="👤" label="المستخدمين" />}
-          </ul>
+        <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '2px 4px 2px 0' }}>
+          {navSections.map((section) => (
+            <div key={section.title} style={{ marginBottom: '10px' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#94a3b8',
+                  fontWeight: '700',
+                  marginBottom: '6px',
+                  paddingRight: '6px',
+                  letterSpacing: '0.4px'
+                }}
+              >
+                {section.title}
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {section.items.map((item) => (
+                  <NavItem key={item.page} page={item.page} icon={item.icon} label={item.label} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
 
-        <div style={{ borderTop: '1px solid #334155', paddingTop: '20px' }}>
+        <div style={{ borderTop: '1px solid #334155', paddingTop: '12px' }}>
           <div
             style={{
-              marginBottom: '15px',
+              marginBottom: '10px',
               padding: '10px',
               backgroundColor: '#334155',
               borderRadius: '8px'
@@ -331,15 +389,9 @@ function App() {
         className="main-content"
         style={{
           flex: 1,
-          padding: '30px 30px 10px 30px',
+          padding: useInternalScrollLayout ? '10px' : '30px 30px 10px 30px',
           backgroundColor: '#f9fafb',
-          overflowY: currentPage === 'sales'
-            || currentPage === 'purchaseHistory'
-            || currentPage === 'returnsHistory'
-            || currentPage === 'purchaseReturnsHistory'
-            || currentPage === 'products'
-            ? 'hidden'
-            : 'auto'
+          overflowY: useInternalScrollLayout ? 'hidden' : 'auto'
         }}
       >
         {renderPage()}

@@ -8,6 +8,8 @@ import PurchaseHistory, { prefetchPurchaseHistoryPage } from './pages/PurchaseHi
 import Purchases from './pages/Purchases';
 import Returns from './pages/Returns';
 import PurchaseReturns from './pages/PurchaseReturns';
+import SalesReturnsHistory from './pages/SalesReturnsHistory';
+import PurchaseReturnsHistory from './pages/PurchaseReturnsHistory';
 import Customers from './pages/Customers';
 import Suppliers from './pages/Suppliers';
 import Users from './pages/Users';
@@ -73,7 +75,9 @@ function App() {
       'purchaseHistory',
       'purchases',
       'purchaseReturns',
+      'purchaseReturnsHistory',
       'returns',
+      'returnsHistory',
       'products',
       'warehouses',
       'customers',
@@ -199,6 +203,10 @@ function App() {
         return <Returns />;
       case 'purchaseReturns':
         return <PurchaseReturns />;
+      case 'returnsHistory':
+        return <SalesReturnsHistory />;
+      case 'purchaseReturnsHistory':
+        return <PurchaseReturnsHistory />;
       case 'products':
         return <Products />;
       case 'warehouses':
@@ -272,8 +280,10 @@ function App() {
             <NavItem page="purchaseHistory" icon="📚" label="المشتريات السابقة" />
             <NavItem page="dashboard" icon="📊" label="لوحة التحكم" />
             <NavItem page="sales" icon="📋" label="المبيعات" />
-            <NavItem page="purchaseReturns" icon="🔁" label="مرتجع المشتريات" />
-            <NavItem page="returns" icon="↩️" label="مرتجع المبيعات" />
+            <NavItem page="returnsHistory" icon="↩️" label="سجل مرتجع المبيعات" />
+            <NavItem page="purchaseReturnsHistory" icon="🔁" label="سجل مرتجع المشتريات" />
+            <NavItem page="returns" icon="🧾" label="فاتورة مرتجع المبيعات" />
+            <NavItem page="purchaseReturns" icon="🧾" label="فاتورة مرتجع المشتريات" />
             <NavItem page="warehouses" icon="🏭" label="المخازن" />
 
             <NavItem page="products" icon="📦" label="المنتجات" />
@@ -323,7 +333,13 @@ function App() {
           flex: 1,
           padding: '30px 30px 10px 30px',
           backgroundColor: '#f9fafb',
-          overflowY: currentPage === 'sales' || currentPage === 'purchaseHistory' || currentPage === 'products' ? 'hidden' : 'auto'
+          overflowY: currentPage === 'sales'
+            || currentPage === 'purchaseHistory'
+            || currentPage === 'returnsHistory'
+            || currentPage === 'purchaseReturnsHistory'
+            || currentPage === 'products'
+            ? 'hidden'
+            : 'auto'
         }}
       >
         {renderPage()}

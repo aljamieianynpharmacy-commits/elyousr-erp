@@ -1,6 +1,11 @@
 ﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { safeAlert } from '../utils/safeAlert';
 import { filterPosPaymentMethods, normalizePaymentMethodCode } from '../utils/paymentMethodFilters';
+import {
+    POS_EDITOR_REQUEST_EVENT,
+    readPosEditorRequest,
+    clearPosEditorRequest
+} from '../utils/posEditorBridge';
 
 const toNumber = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const genId = () => `R-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -10,6 +15,23 @@ const todayLocalISO = () => {
     return d.toISOString().slice(0, 10);
 };
 
+const toInputDate = (value) => {
+    if (!value) return todayLocalISO();
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return todayLocalISO();
+    parsed.setMinutes(parsed.getMinutes() - parsed.getTimezoneOffset());
+    return parsed.toISOString().slice(0, 10);
+};
+
+const normalizeReturnNotesForEditor = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.startsWith('ملاحظات:')) {
+        return text.slice('ملاحظات:'.length).trim();
+    }
+    return text;
+};
+
 const isCashMethod = (method) => {
     const code = normalizePaymentMethodCode(method?.code || method?.name);
     if (code === 'CASH') return true;
@@ -17,7 +39,19 @@ const isCashMethod = (method) => {
     return n.includes('cash') || n.includes('نقد');
 };
 
-const emptySession = () => ({ id: genId(), cart: [], supplierId: null, supplierName: '', selectedPurchaseId: null, returnNotes: '', returnDate: todayLocalISO(), refundMode: 'cashIn', paymentMethodId: '' });
+const emptySession = () => ({
+    id: genId(),
+    cart: [],
+    supplierId: null,
+    supplierName: '',
+    selectedPurchaseId: null,
+    returnNotes: '',
+    returnDate: todayLocalISO(),
+    refundMode: 'cashIn',
+    paymentMethodId: '',
+    sourceReturnId: null,
+    isEditMode: false
+});
 
 // ─── Toast ───
 function Toast({ message, type = 'info', onClose }) {
@@ -105,6 +139,7 @@ export default function PurchaseReturns() {
     const cart = sess?.cart || [];
     const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.returnQty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((s, i) => s + i.returnQty, 0), [cart]);
+    const isEditingReturn = !!sess?.sourceReturnId;
     const hasSelectedSupplier = !!selSup;
     const effectiveRefundMode = hasSelectedSupplier ? sess.refundMode : 'cashIn';
     const previousBalance = toNumber(selSup?.balance);
@@ -126,6 +161,102 @@ export default function PurchaseReturns() {
         }
         upd(nextState);
     }, [sess?.supplierId, sess?.cart, showToast, upd]);
+
+    const openIncomingEditorRequest = useCallback((request) => {
+        if (!request?.type || request.type !== 'purchaseReturn') return false;
+
+        const transaction = request?.transaction || {};
+        const returnInvoice = transaction?.details || request?.return;
+        if (!returnInvoice?.id) return false;
+
+        const resolvedSupplier =
+            request?.supplier
+            || returnInvoice?.supplier
+            || suppliers.find((item) => String(item.id) === String(returnInvoice.supplierId))
+            || null;
+
+        const editItems = Array.isArray(returnInvoice?.items) ? returnInvoice.items : [];
+        const mappedCart = editItems.map((item, index) => {
+            const variantId = parseInt(item?.variantId || item?.variant?.id, 10) || 0;
+            const quantity = Math.max(1, parseInt(item?.quantity, 10) || 1);
+            const price = Math.max(0, toNumber(item?.price));
+
+            return {
+                itemId: `edit-${returnInvoice.id}-${variantId || index + 1}`,
+                purchaseId: returnInvoice?.purchaseId || null,
+                variantId,
+                productName: item?.variant?.product?.name || item?.productName || `منتج #${variantId || index + 1}`,
+                size: item?.variant?.productSize || item?.size || '-',
+                color: item?.variant?.color || item?.color || '-',
+                price,
+                barcode: item?.variant?.barcode || item?.barcode || '',
+                purchasedQty: quantity,
+                alreadyReturned: 0,
+                maxQuantity: Infinity,
+                returnQty: quantity
+            };
+        });
+
+        const nextSession = {
+            ...emptySession(),
+            id: `PRET-EDIT-${returnInvoice.id}-${Date.now()}`,
+            cart: mappedCart,
+            supplierId: resolvedSupplier?.id || returnInvoice?.supplierId || null,
+            supplierName: resolvedSupplier?.name || '',
+            selectedPurchaseId: returnInvoice?.purchaseId || null,
+            returnNotes: normalizeReturnNotesForEditor(returnInvoice?.notes),
+            returnDate: toInputDate(returnInvoice?.createdAt),
+            sourceReturnId: returnInvoice.id,
+            isEditMode: true
+        };
+
+        let targetSessionId = nextSession.id;
+        setSessions((prev) => {
+            const existingSession = prev.find(
+                (session) => String(session?.sourceReturnId || '') === String(returnInvoice.id)
+            );
+            if (!existingSession) {
+                return [...prev, nextSession];
+            }
+
+            targetSessionId = existingSession.id;
+            return prev.map((session) => (
+                session.id === existingSession.id
+                    ? { ...nextSession, id: existingSession.id }
+                    : session
+            ));
+        });
+
+        setActiveId(targetSessionId);
+        setSelPurchase(null);
+        setPurchaseItems([]);
+        setSearch('');
+        setSupSearch('');
+        setProdSearch('');
+        setShowSupList(false);
+        clearPosEditorRequest();
+        showToast(`تم فتح مرتجع المشتريات #${returnInvoice.id} للتعديل`, 'info');
+        return true;
+    }, [suppliers, showToast]);
+
+    useEffect(() => {
+        const handleEditorRequest = (event) => {
+            const request = event?.detail || readPosEditorRequest();
+            if (!request) return;
+            openIncomingEditorRequest(request);
+        };
+
+        window.addEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+
+        const pendingRequest = readPosEditorRequest();
+        if (pendingRequest) {
+            openIncomingEditorRequest(pendingRequest);
+        }
+
+        return () => {
+            window.removeEventListener(POS_EDITOR_REQUEST_EVENT, handleEditorRequest);
+        };
+    }, [openIncomingEditorRequest]);
 
     // ─── Init ───
     useEffect(() => { (async () => { setLoading(true); try { const [c, m, v] = await Promise.all([window.api.getSuppliers(), window.api.getPaymentMethods(), window.api.getVariants()]); if (!c?.error) setSuppliers(Array.isArray(c) ? c : (c?.data || [])); if (!m?.error) setPM(filterPosPaymentMethods(m || []).filter(isCashMethod)); if (!v?.error) setAllVariants(Array.isArray(v) ? v : []); } catch (e) { console.error(e) } finally { setLoading(false) } })() }, []);
@@ -336,14 +467,25 @@ export default function PurchaseReturns() {
         if (sess.supplierId) { if (sess.refundMode === 'cashIn') { rd.refundAmount = cartTotal; rd.paymentMethodId = sess.paymentMethodId; rd.refundMode = 'CASH_ONLY'; } else { rd.refundAmount = 0; } }
         else { rd.refundAmount = cartTotal; rd.paymentMethodId = sess.paymentMethodId; rd.refundMode = 'CASH_ONLY'; }
         try {
-            const res = await window.api.createPurchaseReturn(rd);
+            const res = isEditingReturn
+                ? await window.api.updatePurchaseReturn(sess.sourceReturnId, rd)
+                : await window.api.createPurchaseReturn(rd);
             if (res?.error) { await safeAlert('خطأ: ' + res.error); } else {
                 if (printOnConfirm) {
                     try { await window.api.printHTML({ html: buildReceipt(res), title: 'إيصال مرتجع مشتريات' }); }
                     catch (printErr) { console.error(printErr); showToast('تم الحفظ ولكن تعذر طباعة إيصال المرتجع', 'warning'); }
                 }
-                showToast('✅ تم حفظ مرتجع المشتريات', 'success'); playBeep(true);
-                upd({ cart: [], returnNotes: '', returnDate: todayLocalISO(), selectedPurchaseId: null, supplierId: null, supplierName: '' });
+                showToast(isEditingReturn ? '✅ تم تعديل مرتجع المشتريات' : '✅ تم حفظ مرتجع المشتريات', 'success'); playBeep(true);
+                upd({
+                    cart: [],
+                    returnNotes: '',
+                    returnDate: todayLocalISO(),
+                    selectedPurchaseId: null,
+                    supplierId: null,
+                    supplierName: '',
+                    sourceReturnId: null,
+                    isEditMode: false
+                });
                 setSelPurchase(null);
                 setPurchaseItems([]);
                 setSupPurchases([]);
@@ -353,7 +495,7 @@ export default function PurchaseReturns() {
                 setShowSupList(false);
                 setPrintOnConfirm(false);
             }
-        } catch (er) { console.error(er); await safeAlert('تعذر الحفظ'); }
+        } catch (er) { console.error(er); await safeAlert(isEditingReturn ? 'تعذر تعديل المرتجع' : 'تعذر الحفظ'); }
         finally { setLoading(false); setPrintOnConfirm(false); searchRef.current?.focus(); }
     };
 
@@ -366,7 +508,7 @@ export default function PurchaseReturns() {
             <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
             {loading && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="spinner"></div></div>}
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} supplier={selSup} refundMode={effectiveRefundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? '✅ تأكيد وحفظ وطباعة' : '✅ تأكيد وحفظ'} />}
+            {showConfirm && <ConfirmModal cart={cart} cartTotal={cartTotal} supplier={selSup} refundMode={effectiveRefundMode} onConfirm={doCheckout} onCancel={() => { setShowConfirm(false); setPrintOnConfirm(false); }} confirmLabel={printOnConfirm ? (isEditingReturn ? '✅ تعديل وحفظ وطباعة' : '✅ تأكيد وحفظ وطباعة') : (isEditingReturn ? '✅ تعديل وحفظ' : '✅ تأكيد وحفظ')} />}
 
             {/* ═══ Tabs ═══ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
@@ -543,8 +685,8 @@ export default function PurchaseReturns() {
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', marginTop: 'auto', minHeight: summaryCardHeight }}>
-                        <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد مرتجع المشتريات (F1)</button>
-                        <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>تأكيد وطباعة (F2)</button>
+                        <button id="btn-confirm-return" onClick={() => handleCheckoutFlow(false)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>{isEditingReturn ? 'تعديل مرتجع المشتريات (F1)' : 'تأكيد مرتجع المشتريات (F1)'}</button>
+                        <button id="btn-confirm-print-return" onClick={() => handleCheckoutFlow(true)} disabled={cart.length === 0} style={{ flex: 1, height: '100%', padding: 14, backgroundColor: cart.length === 0 ? '#9ca3af' : '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>{isEditingReturn ? 'تعديل وطباعة (F2)' : 'تأكيد وطباعة (F2)'}</button>
                         <button onClick={() => { upd({ cart: [] }); showToast('تم الإفراغ', 'warning'); }} disabled={cart.length === 0} style={{ height: '100%', padding: '14px 20px', backgroundColor: cart.length === 0 ? '#9ca3af' : '#f59e0b', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}>إفراغ</button>
                     </div>
                 </div>

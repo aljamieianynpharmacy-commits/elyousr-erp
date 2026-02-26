@@ -37,6 +37,10 @@ export const emitReturnEditorRequest = (payload) => {
   emitEditorRequest(payload, 'returns');
 };
 
+export const emitPurchaseReturnEditorRequest = (payload) => {
+  emitEditorRequest(payload, 'purchaseReturns');
+};
+
 export const readPosEditorRequest = () => {
   if (typeof window === 'undefined') return null;
 

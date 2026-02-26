@@ -1039,8 +1039,11 @@ ipcMain.handle('db:deletePurchase', async (event, purchaseId) => {
 });
 
 // Returns
-ipcMain.handle('db:getReturns', async () => {
-    return await dbService.getReturns();
+ipcMain.handle('db:getReturns', async (event, options) => {
+    return await dbService.getReturns(options || {});
+});
+ipcMain.handle('db:getReturnById', async (event, returnId) => {
+    return await dbService.getReturnById(returnId);
 });
 ipcMain.handle('db:createReturn', async (event, returnData) => {
     return await dbService.createReturn(returnData);
@@ -1051,11 +1054,20 @@ ipcMain.handle('db:updateReturn', async (event, returnId, returnData) => {
 ipcMain.handle('db:deleteReturn', async (event, returnId) => {
     return await dbService.deleteReturn(returnId);
 });
-ipcMain.handle('db:getPurchaseReturns', async () => {
-    return await dbService.getPurchaseReturns();
+ipcMain.handle('db:getPurchaseReturns', async (event, options) => {
+    return await dbService.getPurchaseReturns(options || {});
+});
+ipcMain.handle('db:getPurchaseReturnById', async (event, returnId) => {
+    return await dbService.getPurchaseReturnById(returnId);
 });
 ipcMain.handle('db:createPurchaseReturn', async (event, returnData) => {
     return await dbService.createPurchaseReturn(returnData);
+});
+ipcMain.handle('db:updatePurchaseReturn', async (event, returnId, returnData) => {
+    return await dbService.updatePurchaseReturn(returnId, returnData || {});
+});
+ipcMain.handle('db:deletePurchaseReturn', async (event, returnId) => {
+    return await dbService.deletePurchaseReturn(returnId);
 });
 
 // Customer Payments

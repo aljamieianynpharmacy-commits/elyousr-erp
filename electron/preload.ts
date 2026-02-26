@@ -66,12 +66,16 @@ contextBridge.exposeInMainWorld('api', {
     // Returns
 
     // Returns
-    getReturns: () => ipcRenderer.invoke('db:getReturns'),
+    getReturns: (options) => ipcRenderer.invoke('db:getReturns', options),
+    getReturnById: (returnId) => ipcRenderer.invoke('db:getReturnById', returnId),
     createReturn: (returnData) => ipcRenderer.invoke('db:createReturn', returnData),
     updateReturn: (returnId, returnData) => ipcRenderer.invoke('db:updateReturn', returnId, returnData),
     deleteReturn: (returnId) => ipcRenderer.invoke('db:deleteReturn', returnId),
-    getPurchaseReturns: () => ipcRenderer.invoke('db:getPurchaseReturns'),
+    getPurchaseReturns: (options) => ipcRenderer.invoke('db:getPurchaseReturns', options),
+    getPurchaseReturnById: (returnId) => ipcRenderer.invoke('db:getPurchaseReturnById', returnId),
     createPurchaseReturn: (returnData) => ipcRenderer.invoke('db:createPurchaseReturn', returnData),
+    updatePurchaseReturn: (returnId, returnData) => ipcRenderer.invoke('db:updatePurchaseReturn', returnId, returnData),
+    deletePurchaseReturn: (returnId) => ipcRenderer.invoke('db:deletePurchaseReturn', returnId),
 
     // Customers
     getCustomers: (params) => ipcRenderer.invoke('db:getCustomers', params),

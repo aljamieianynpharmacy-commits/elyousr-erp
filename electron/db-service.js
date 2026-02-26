@@ -5428,11 +5428,140 @@ const dbService = {
     },
 
     // ==================== RETURNS (المرتجعات) ====================
-    async getReturns() {
+    async getReturns(options = {}) {
+        const perf = startPerfTimer('db:getReturns', {
+            hasPagination: Boolean(options?.paginated || options?.page || options?.pageSize),
+            limit: options?.limit || null,
+            customerId: options?.customerId || null,
+            saleId: options?.saleId || null,
+            searchLength: String(options?.searchTerm || '').trim().length
+        });
+
         try {
-            return await prisma.return.findMany({
-                include: {
-                    sale: true,
+            const {
+                customerId,
+                saleId,
+                limit,
+                page,
+                pageSize,
+                paginated = false,
+                fromDate,
+                toDate,
+                searchTerm = '',
+                sortCol = 'createdAt',
+                sortDir = 'desc',
+                lightweight = false
+            } = options || {};
+
+            const hasPagination = Boolean(
+                paginated
+                || Object.prototype.hasOwnProperty.call(options || {}, 'page')
+                || Object.prototype.hasOwnProperty.call(options || {}, 'pageSize')
+            );
+
+            const whereClause = {};
+            const parsedCustomerId = parsePositiveInt(customerId);
+            if (parsedCustomerId) {
+                whereClause.customerId = parsedCustomerId;
+            }
+            const parsedSaleId = parsePositiveInt(saleId);
+            if (parsedSaleId) {
+                whereClause.saleId = parsedSaleId;
+            }
+
+            const parseOptionalFilterDate = (value, endOfDayValue = false) => {
+                if (!value) return null;
+                const parsedDate = parseDateOrDefault(value, null);
+                if (!parsedDate) return null;
+                if (endOfDayValue) {
+                    parsedDate.setHours(23, 59, 59, 999);
+                } else {
+                    parsedDate.setHours(0, 0, 0, 0);
+                }
+                return parsedDate;
+            };
+
+            const createdAtRange = {};
+            const parsedFromDate = parseOptionalFilterDate(fromDate, false);
+            const parsedToDate = parseOptionalFilterDate(toDate, true);
+            if (parsedFromDate) createdAtRange.gte = parsedFromDate;
+            if (parsedToDate) createdAtRange.lte = parsedToDate;
+            if (Object.keys(createdAtRange).length > 0) {
+                whereClause.createdAt = createdAtRange;
+            }
+
+            const normalizedSearchTerm = String(searchTerm || '').trim();
+            if (normalizedSearchTerm) {
+                const searchOrFilters = [
+                    { notes: { contains: normalizedSearchTerm, mode: 'insensitive' } },
+                    { customer: { is: { name: { contains: normalizedSearchTerm, mode: 'insensitive' } } } }
+                ];
+
+                const numericSearch = parsePositiveInt(normalizedSearchTerm);
+                if (numericSearch) {
+                    searchOrFilters.unshift({ id: numericSearch });
+                    searchOrFilters.push({ saleId: numericSearch });
+                }
+
+                whereClause.AND = [...(whereClause.AND || []), { OR: searchOrFilters }];
+            }
+
+            const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
+            const sortableColumns = new Set([
+                'id',
+                'createdAt',
+                'total',
+                'customer',
+                'customerName',
+                'saleId'
+            ]);
+            const safeSortCol = sortableColumns.has(sortCol) ? sortCol : 'createdAt';
+
+            let orderBy;
+            if (safeSortCol === 'customer' || safeSortCol === 'customerName') {
+                orderBy = [
+                    { customer: { name: safeSortDir } },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ];
+            } else if (safeSortCol === 'createdAt') {
+                orderBy = [
+                    { createdAt: safeSortDir },
+                    { id: 'desc' }
+                ];
+            } else {
+                orderBy = { [safeSortCol]: safeSortDir };
+            }
+
+            const includeClause = lightweight
+                ? {
+                    sale: {
+                        select: {
+                            id: true,
+                            total: true,
+                            invoiceDate: true,
+                            createdAt: true
+                        }
+                    },
+                    customer: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            address: true
+                        }
+                    },
+                    _count: {
+                        select: { items: true }
+                    }
+                }
+                : {
+                    sale: {
+                        include: {
+                            customer: true,
+                            paymentMethod: true
+                        }
+                    },
                     customer: true,
                     items: {
                         include: {
@@ -5441,9 +5570,98 @@ const dbService = {
                             }
                         }
                     }
-                },
-                orderBy: { createdAt: 'desc' }
+                };
+
+            const mapReturnsWithComputedFields = (rawReturns) => {
+                if (!Array.isArray(rawReturns) || rawReturns.length === 0) return [];
+
+                return rawReturns.map((row) => ({
+                    ...row,
+                    total: Math.max(0, toNumber(row?.total, 0)),
+                    itemsCount: typeof row?._count?.items === 'number'
+                        ? row._count.items
+                        : (Array.isArray(row?.items) ? row.items.length : 0)
+                }));
+            };
+
+            const buildFindManyArgs = () => ({
+                where: whereClause,
+                include: includeClause,
+                orderBy
             });
+
+            if (hasPagination) {
+                const safePage = Math.max(1, parseInt(page, 10) || 1);
+                const safePageSize = Math.min(500, Math.max(10, parseInt(pageSize, 10) || 100));
+                const skip = (safePage - 1) * safePageSize;
+
+                const [rawReturns, total] = await Promise.all([
+                    prisma.return.findMany({
+                        ...buildFindManyArgs(),
+                        skip,
+                        take: safePageSize
+                    }),
+                    prisma.return.count({ where: whereClause })
+                ]);
+
+                const data = mapReturnsWithComputedFields(rawReturns);
+                perf({ rows: data.length });
+
+                return {
+                    data,
+                    total,
+                    page: safePage,
+                    pageSize: safePageSize,
+                    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+                };
+            }
+
+            const queryArgs = buildFindManyArgs();
+            if (limit) {
+                queryArgs.take = Math.max(1, parseInt(limit, 10) || 1);
+            }
+
+            const rawReturns = await prisma.return.findMany(queryArgs);
+            const data = mapReturnsWithComputedFields(rawReturns);
+            perf({ rows: data.length });
+            return data;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async getReturnById(returnId) {
+        try {
+            const parsedReturnId = parsePositiveInt(returnId);
+            if (!parsedReturnId) return { error: 'Invalid return id' };
+
+            const returnInvoice = await prisma.return.findUnique({
+                where: { id: parsedReturnId },
+                include: {
+                    sale: {
+                        include: {
+                            customer: true,
+                            paymentMethod: true
+                        }
+                    },
+                    customer: true,
+                    items: {
+                        include: {
+                            variant: {
+                                include: { product: true }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!returnInvoice) return { error: 'Return not found' };
+            return {
+                ...returnInvoice,
+                total: Math.max(0, toNumber(returnInvoice?.total, 0)),
+                itemsCount: Array.isArray(returnInvoice?.items) ? returnInvoice.items.length : 0
+            };
         } catch (error) {
             return { error: error.message };
         }
@@ -5953,11 +6171,138 @@ const dbService = {
         }
     },
 
-    async getPurchaseReturns() {
+    async getPurchaseReturns(options = {}) {
+        const perf = startPerfTimer('db:getPurchaseReturns', {
+            hasPagination: Boolean(options?.paginated || options?.page || options?.pageSize),
+            limit: options?.limit || null,
+            supplierId: options?.supplierId || null,
+            purchaseId: options?.purchaseId || null,
+            searchLength: String(options?.searchTerm || '').trim().length
+        });
+
         try {
-            return await prisma.purchaseReturn.findMany({
-                include: {
-                    purchase: true,
+            const {
+                supplierId,
+                purchaseId,
+                limit,
+                page,
+                pageSize,
+                paginated = false,
+                fromDate,
+                toDate,
+                searchTerm = '',
+                sortCol = 'createdAt',
+                sortDir = 'desc',
+                lightweight = false
+            } = options || {};
+
+            const hasPagination = Boolean(
+                paginated
+                || Object.prototype.hasOwnProperty.call(options || {}, 'page')
+                || Object.prototype.hasOwnProperty.call(options || {}, 'pageSize')
+            );
+
+            const whereClause = {};
+            const parsedSupplierId = parsePositiveInt(supplierId);
+            if (parsedSupplierId) {
+                whereClause.supplierId = parsedSupplierId;
+            }
+            const parsedPurchaseId = parsePositiveInt(purchaseId);
+            if (parsedPurchaseId) {
+                whereClause.purchaseId = parsedPurchaseId;
+            }
+
+            const parseOptionalFilterDate = (value, endOfDayValue = false) => {
+                if (!value) return null;
+                const parsedDate = parseDateOrDefault(value, null);
+                if (!parsedDate) return null;
+                if (endOfDayValue) {
+                    parsedDate.setHours(23, 59, 59, 999);
+                } else {
+                    parsedDate.setHours(0, 0, 0, 0);
+                }
+                return parsedDate;
+            };
+
+            const createdAtRange = {};
+            const parsedFromDate = parseOptionalFilterDate(fromDate, false);
+            const parsedToDate = parseOptionalFilterDate(toDate, true);
+            if (parsedFromDate) createdAtRange.gte = parsedFromDate;
+            if (parsedToDate) createdAtRange.lte = parsedToDate;
+            if (Object.keys(createdAtRange).length > 0) {
+                whereClause.createdAt = createdAtRange;
+            }
+
+            const normalizedSearchTerm = String(searchTerm || '').trim();
+            if (normalizedSearchTerm) {
+                const searchOrFilters = [
+                    { notes: { contains: normalizedSearchTerm, mode: 'insensitive' } },
+                    { supplier: { is: { name: { contains: normalizedSearchTerm, mode: 'insensitive' } } } }
+                ];
+
+                const numericSearch = parsePositiveInt(normalizedSearchTerm);
+                if (numericSearch) {
+                    searchOrFilters.unshift({ id: numericSearch });
+                    searchOrFilters.push({ purchaseId: numericSearch });
+                }
+
+                whereClause.AND = [...(whereClause.AND || []), { OR: searchOrFilters }];
+            }
+
+            const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
+            const sortableColumns = new Set([
+                'id',
+                'createdAt',
+                'total',
+                'supplier',
+                'supplierName',
+                'purchaseId'
+            ]);
+            const safeSortCol = sortableColumns.has(sortCol) ? sortCol : 'createdAt';
+
+            let orderBy;
+            if (safeSortCol === 'supplier' || safeSortCol === 'supplierName') {
+                orderBy = [
+                    { supplier: { name: safeSortDir } },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ];
+            } else if (safeSortCol === 'createdAt') {
+                orderBy = [
+                    { createdAt: safeSortDir },
+                    { id: 'desc' }
+                ];
+            } else {
+                orderBy = { [safeSortCol]: safeSortDir };
+            }
+
+            const includeClause = lightweight
+                ? {
+                    purchase: {
+                        select: {
+                            id: true,
+                            total: true,
+                            createdAt: true
+                        }
+                    },
+                    supplier: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phone: true,
+                            address: true
+                        }
+                    },
+                    _count: {
+                        select: { items: true }
+                    }
+                }
+                : {
+                    purchase: {
+                        include: {
+                            supplier: true
+                        }
+                    },
                     supplier: true,
                     items: {
                         include: {
@@ -5966,9 +6311,96 @@ const dbService = {
                             }
                         }
                     }
-                },
-                orderBy: { createdAt: 'desc' }
+                };
+
+            const mapPurchaseReturnsWithComputedFields = (rawRows) => {
+                if (!Array.isArray(rawRows) || rawRows.length === 0) return [];
+                return rawRows.map((row) => ({
+                    ...row,
+                    total: Math.max(0, toNumber(row?.total, 0)),
+                    itemsCount: typeof row?._count?.items === 'number'
+                        ? row._count.items
+                        : (Array.isArray(row?.items) ? row.items.length : 0)
+                }));
+            };
+
+            const buildFindManyArgs = () => ({
+                where: whereClause,
+                include: includeClause,
+                orderBy
             });
+
+            if (hasPagination) {
+                const safePage = Math.max(1, parseInt(page, 10) || 1);
+                const safePageSize = Math.min(500, Math.max(10, parseInt(pageSize, 10) || 100));
+                const skip = (safePage - 1) * safePageSize;
+
+                const [rawRows, total] = await Promise.all([
+                    prisma.purchaseReturn.findMany({
+                        ...buildFindManyArgs(),
+                        skip,
+                        take: safePageSize
+                    }),
+                    prisma.purchaseReturn.count({ where: whereClause })
+                ]);
+
+                const data = mapPurchaseReturnsWithComputedFields(rawRows);
+                perf({ rows: data.length });
+
+                return {
+                    data,
+                    total,
+                    page: safePage,
+                    pageSize: safePageSize,
+                    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+                };
+            }
+
+            const queryArgs = buildFindManyArgs();
+            if (limit) {
+                queryArgs.take = Math.max(1, parseInt(limit, 10) || 1);
+            }
+
+            const rawRows = await prisma.purchaseReturn.findMany(queryArgs);
+            const data = mapPurchaseReturnsWithComputedFields(rawRows);
+            perf({ rows: data.length });
+            return data;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async getPurchaseReturnById(returnId) {
+        try {
+            const parsedReturnId = parsePositiveInt(returnId);
+            if (!parsedReturnId) return { error: 'Invalid purchase return id' };
+
+            const returnInvoice = await prisma.purchaseReturn.findUnique({
+                where: { id: parsedReturnId },
+                include: {
+                    purchase: {
+                        include: {
+                            supplier: true
+                        }
+                    },
+                    supplier: true,
+                    items: {
+                        include: {
+                            variant: {
+                                include: { product: true }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!returnInvoice) return { error: 'Purchase return not found' };
+            return {
+                ...returnInvoice,
+                total: Math.max(0, toNumber(returnInvoice?.total, 0)),
+                itemsCount: Array.isArray(returnInvoice?.items) ? returnInvoice.items.length : 0
+            };
         } catch (error) {
             return { error: error.message };
         }
@@ -6174,6 +6606,359 @@ const dbService = {
             });
 
             perf({ rows: 1 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async updatePurchaseReturn(returnId, returnData) {
+        const perf = startPerfTimer('db:updatePurchaseReturn', {
+            returnId: parseInt(returnId, 10) || null,
+            hasSupplier: Boolean(returnData?.supplierId),
+            itemCount: Array.isArray(returnData?.items) ? returnData.items.length : 0
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedReturnId = parsePositiveInt(returnId);
+                if (!parsedReturnId) {
+                    return { error: 'Invalid purchase return id' };
+                }
+
+                if (!Array.isArray(returnData?.items) || returnData.items.length === 0) {
+                    return { error: 'Purchase return items are required' };
+                }
+
+                const currentReturn = await tx.purchaseReturn.findUnique({
+                    where: { id: parsedReturnId },
+                    include: {
+                        items: true
+                    }
+                });
+                if (!currentReturn) {
+                    return { error: 'Purchase return not found' };
+                }
+
+                const oldSupplierId = parsePositiveInt(currentReturn.supplierId);
+                const oldTotal = Math.max(0, toNumber(currentReturn.total, 0));
+
+                const hasReturnDateUpdate = Object.prototype.hasOwnProperty.call(returnData || {}, 'returnDate');
+                const returnDate = hasReturnDateUpdate
+                    ? resolveEditedDateKeepingPosition(
+                        returnData?.returnDate,
+                        currentReturn?.createdAt || new Date()
+                    )
+                    : (toValidDate(currentReturn?.createdAt) || new Date());
+                const nextPurchaseId = Object.prototype.hasOwnProperty.call(returnData || {}, 'purchaseId')
+                    ? parsePositiveInt(returnData?.purchaseId)
+                    : parsePositiveInt(currentReturn.purchaseId);
+                let nextSupplierId = Object.prototype.hasOwnProperty.call(returnData || {}, 'supplierId')
+                    ? parsePositiveInt(returnData?.supplierId)
+                    : parsePositiveInt(currentReturn.supplierId);
+
+                const purchasedQtyByVariant = new Map();
+                const returnedQtyByVariant = new Map();
+
+                if (nextPurchaseId) {
+                    const sourcePurchase = await tx.purchase.findUnique({
+                        where: { id: nextPurchaseId },
+                        include: {
+                            items: true,
+                            returns: {
+                                include: {
+                                    items: true
+                                }
+                            }
+                        }
+                    });
+
+                    if (!sourcePurchase) {
+                        return { error: 'Purchase not found for purchase return' };
+                    }
+                    if (sourcePurchase.supplierId && nextSupplierId && sourcePurchase.supplierId !== nextSupplierId) {
+                        return { error: 'Supplier does not match selected purchase' };
+                    }
+                    if (!nextSupplierId && sourcePurchase.supplierId) {
+                        nextSupplierId = sourcePurchase.supplierId;
+                    }
+
+                    for (const purchaseItem of sourcePurchase.items || []) {
+                        const variantId = parsePositiveInt(purchaseItem?.variantId);
+                        if (!variantId) continue;
+                        const qty = Math.max(0, toInteger(purchaseItem?.quantity, 0));
+                        purchasedQtyByVariant.set(variantId, (purchasedQtyByVariant.get(variantId) || 0) + qty);
+                    }
+                    for (const previousReturn of sourcePurchase.returns || []) {
+                        if (parsePositiveInt(previousReturn?.id) === parsedReturnId) continue;
+                        for (const previousItem of previousReturn.items || []) {
+                            const variantId = parsePositiveInt(previousItem?.variantId);
+                            if (!variantId) continue;
+                            const qty = Math.max(0, toInteger(previousItem?.quantity, 0));
+                            returnedQtyByVariant.set(variantId, (returnedQtyByVariant.get(variantId) || 0) + qty);
+                        }
+                    }
+                }
+
+                const affectedProductIds = new Set();
+
+                // Revert old stock impact first.
+                for (const oldItem of currentReturn.items || []) {
+                    const variantId = parsePositiveInt(oldItem?.variantId);
+                    const quantity = Math.max(0, toInteger(oldItem?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found while reverting purchase return' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { increment: quantity }
+                        }
+                    });
+                }
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PURCHASE_RETURN', parsedReturnId);
+                throwIfResultError(rollbackResult, 'Failed to rollback purchase return treasury entries');
+
+                await tx.purchaseReturnItem.deleteMany({
+                    where: { purchaseReturnId: parsedReturnId }
+                });
+
+                let computedTotal = 0;
+                for (let i = 0; i < returnData.items.length; i++) {
+                    const item = returnData.items[i];
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(1, toInteger(item?.quantity, 1));
+                    const price = Math.max(0, toNumber(item?.price, 0));
+                    if (!variantId) {
+                        return { error: 'Invalid variantId in purchase return items' };
+                    }
+
+                    if (nextPurchaseId) {
+                        const purchasedQty = Math.max(0, purchasedQtyByVariant.get(variantId) || 0);
+                        const alreadyReturnedQty = Math.max(0, returnedQtyByVariant.get(variantId) || 0);
+                        const remainingQty = Math.max(0, purchasedQty - alreadyReturnedQty);
+                        if (purchasedQty <= 0) {
+                            return { error: 'Variant does not exist in selected purchase' };
+                        }
+                        if (quantity > remainingQty) {
+                            return { error: 'Requested return quantity exceeds purchase remaining quantity' };
+                        }
+                        returnedQtyByVariant.set(variantId, alreadyReturnedQty + quantity);
+                    }
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true, quantity: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found in purchase return items' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+                    if (toNumber(variant.quantity, 0) < quantity) {
+                        return { error: 'Insufficient stock quantity for purchase return' };
+                    }
+
+                    await tx.purchaseReturnItem.create({
+                        data: {
+                            id: i + 1,
+                            purchaseReturnId: parsedReturnId,
+                            variantId,
+                            quantity,
+                            price
+                        }
+                    });
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { decrement: quantity }
+                        }
+                    });
+
+                    computedTotal += price * quantity;
+                }
+
+                const requestedTotal = Math.max(0, toNumber(returnData?.total, 0));
+                const finalTotal = Math.max(0, toNumber(
+                    requestedTotal > 0 ? requestedTotal : computedTotal
+                ));
+
+                const updatedPurchaseReturn = await tx.purchaseReturn.update({
+                    where: { id: parsedReturnId },
+                    data: {
+                        purchaseId: nextPurchaseId || null,
+                        supplierId: nextSupplierId || null,
+                        total: finalTotal,
+                        notes: returnData?.notes || null,
+                        createdAt: returnDate
+                    }
+                });
+
+                if (oldSupplierId && oldTotal > 0) {
+                    await tx.supplier.update({
+                        where: { id: oldSupplierId },
+                        data: {
+                            balance: { decrement: oldTotal }
+                        }
+                    });
+                }
+
+                if (nextSupplierId && finalTotal > 0) {
+                    await tx.supplier.update({
+                        where: { id: nextSupplierId },
+                        data: {
+                            balance: { increment: finalTotal }
+                        }
+                    });
+                }
+
+                const refundAmount = Math.max(0, toNumber(
+                    returnData?.refundAmount !== undefined ? returnData.refundAmount : finalTotal
+                ));
+                if (refundAmount > 0) {
+                    const returnTreasuryId = await resolveTreasuryId(tx, returnData?.treasuryId);
+                    const refundMode = String(returnData?.refundMode || REFUND_MODE.SAME_METHOD)
+                        .trim()
+                        .toUpperCase();
+
+                    let resolvedPaymentMethodId;
+                    if (refundMode === REFUND_MODE.CASH_ONLY) {
+                        resolvedPaymentMethodId = await resolveCashPaymentMethodId(tx, 1);
+                    } else {
+                        const sameMethodCandidate = returnData?.paymentMethodId ?? returnData?.paymentMethod;
+                        resolvedPaymentMethodId = await resolvePaymentMethodId(
+                            tx,
+                            sameMethodCandidate,
+                            1
+                        );
+                    }
+
+                    const treasuryEntryResult = await createTreasuryEntry(tx, {
+                        treasuryId: returnTreasuryId,
+                        entryType: TREASURY_ENTRY_TYPE.RETURN_REFUND,
+                        direction: TREASURY_DIRECTION.IN,
+                        amount: refundAmount,
+                        notes: `Purchase Return #${parsedReturnId}${returnData?.notes ? ` - ${returnData.notes}` : ''}`,
+                        referenceType: 'PURCHASE_RETURN',
+                        referenceId: parsedReturnId,
+                        paymentMethodId: resolvedPaymentMethodId,
+                        entryDate: returnDate,
+                        idempotencyKey: generateIdempotencyKey('PURCHASE_RETURN_REFUND', [
+                            parsedReturnId,
+                            resolvedPaymentMethodId,
+                            normalizeAmountForKey(refundAmount),
+                            refundMode
+                        ]),
+                        createdByUserId: parsePositiveInt(returnData?.createdByUserId ?? returnData?.userId),
+                        meta: {
+                            refundMode
+                        }
+                    });
+                    throwIfResultError(treasuryEntryResult);
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                return { success: true, data: updatedPurchaseReturn };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
+            return result;
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async deletePurchaseReturn(returnId) {
+        const perf = startPerfTimer('db:deletePurchaseReturn', {
+            returnId: parseInt(returnId, 10) || null
+        });
+
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                const parsedReturnId = parsePositiveInt(returnId);
+                if (!parsedReturnId) {
+                    return { error: 'Invalid purchase return id' };
+                }
+
+                const currentReturn = await tx.purchaseReturn.findUnique({
+                    where: { id: parsedReturnId },
+                    include: {
+                        items: true
+                    }
+                });
+                if (!currentReturn) {
+                    return { error: 'Purchase return not found' };
+                }
+
+                const affectedProductIds = new Set();
+                for (const item of currentReturn.items || []) {
+                    const variantId = parsePositiveInt(item?.variantId);
+                    const quantity = Math.max(0, toInteger(item?.quantity, 0));
+                    if (!variantId || quantity <= 0) continue;
+
+                    const variant = await tx.variant.findUnique({
+                        where: { id: variantId },
+                        select: { id: true, productId: true }
+                    });
+                    if (!variant) {
+                        return { error: 'Variant not found while deleting purchase return' };
+                    }
+                    if (variant.productId) {
+                        affectedProductIds.add(variant.productId);
+                    }
+
+                    await tx.variant.update({
+                        where: { id: variantId },
+                        data: {
+                            quantity: { increment: quantity }
+                        }
+                    });
+                }
+
+                await syncProductInventoriesWithVariants(tx, Array.from(affectedProductIds));
+
+                const rollbackResult = await rollbackTreasuryEntriesByReference(tx, 'PURCHASE_RETURN', parsedReturnId);
+                throwIfResultError(rollbackResult, 'Failed to rollback purchase return treasury entries');
+
+                await tx.purchaseReturnItem.deleteMany({
+                    where: { purchaseReturnId: parsedReturnId }
+                });
+
+                const deletedPurchaseReturn = await tx.purchaseReturn.delete({
+                    where: { id: parsedReturnId }
+                });
+
+                const parsedSupplierId = parsePositiveInt(currentReturn.supplierId);
+                const returnTotal = Math.max(0, toNumber(currentReturn.total, 0));
+                if (parsedSupplierId && returnTotal > 0) {
+                    await tx.supplier.update({
+                        where: { id: parsedSupplierId },
+                        data: {
+                            balance: { decrement: returnTotal }
+                        }
+                    });
+                }
+
+                return { success: true, data: deletedPurchaseReturn };
+            });
+
+            perf({ rows: result?.success ? 1 : 0 });
             return result;
         } catch (error) {
             perf({ error });

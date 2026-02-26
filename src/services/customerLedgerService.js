@@ -6,6 +6,71 @@
 export class CustomerLedgerService {
   static SMART_MONTHS_DEFAULT = 6;
 
+  static toValidDate(value) {
+    if (!value) return null;
+    const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+    return this.isValidDate(date) ? date : null;
+  }
+
+  static compareTransactionIds(aId, bId, direction = 'desc') {
+    const safeA = String(aId || '');
+    const safeB = String(bId || '');
+    if (safeA === safeB) return 0;
+    return direction === 'asc'
+      ? safeA.localeCompare(safeB)
+      : safeB.localeCompare(safeA);
+  }
+
+  static compareTransactions(a, b, direction = 'desc') {
+    const aSortDate = this.toValidDate(a.sortDate) || this.toValidDate(a.date) || new Date(0);
+    const bSortDate = this.toValidDate(b.sortDate) || this.toValidDate(b.date) || new Date(0);
+    const primaryDiff = aSortDate.getTime() - bSortDate.getTime();
+    if (primaryDiff !== 0) {
+      return direction === 'asc' ? primaryDiff : -primaryDiff;
+    }
+
+    const aDate = this.toValidDate(a.date) || aSortDate;
+    const bDate = this.toValidDate(b.date) || bSortDate;
+    const secondaryDiff = aDate.getTime() - bDate.getTime();
+    if (secondaryDiff !== 0) {
+      return direction === 'asc' ? secondaryDiff : -secondaryDiff;
+    }
+
+    return this.compareTransactionIds(a.id, b.id, direction);
+  }
+
+  static hasTimePart(dateValue) {
+    const date = this.toValidDate(dateValue);
+    if (!date) return false;
+    return date.getHours() !== 0
+      || date.getMinutes() !== 0
+      || date.getSeconds() !== 0
+      || date.getMilliseconds() !== 0;
+  }
+
+  static mergeDateWithTime(dateValue, timeValue) {
+    const datePart = this.toValidDate(dateValue);
+    const timePart = this.toValidDate(timeValue);
+    if (!datePart) return timePart;
+    if (!timePart) return datePart;
+
+    const merged = new Date(datePart.getTime());
+    merged.setHours(
+      timePart.getHours(),
+      timePart.getMinutes(),
+      timePart.getSeconds(),
+      timePart.getMilliseconds()
+    );
+    return merged;
+  }
+
+  static resolveSortDate(baseDate, fallbackTimeDate = null) {
+    const resolvedBase = this.toValidDate(baseDate);
+    if (!resolvedBase) return this.toValidDate(fallbackTimeDate);
+    if (this.hasTimePart(resolvedBase) || !fallbackTimeDate) return resolvedBase;
+    return this.mergeDateWithTime(resolvedBase, fallbackTimeDate);
+  }
+
   /**
    * Get sale date with fallback
    */
@@ -24,6 +89,8 @@ export class CustomerLedgerService {
       const total = Number(sale.total || 0);
       const remainingFromSale = Number(sale.remainingAmount ?? sale.remaining);
       const paidFromSale = Number(sale.paidAmount ?? sale.paid);
+      const saleDate = this.getSaleDate(sale);
+      const saleCreatedAt = this.toValidDate(sale?.createdAt);
       const remaining = Number.isFinite(remainingFromSale)
         ? Math.max(0, remainingFromSale)
         : (sale.saleType === '\u0622\u062c\u0644' ? total : 0);
@@ -34,7 +101,8 @@ export class CustomerLedgerService {
 
       transactions.push({
         id: `sale-${sale.id}`,
-        date: this.getSaleDate(sale),
+        date: saleDate,
+        sortDate: this.resolveSortDate(saleDate, saleCreatedAt),
         type: '\u0628\u064a\u0639',
         typeColor: '#3b82f6',
         description: `\u0641\u0627\u062a\u0648\u0631\u0629 \u0628\u064a\u0639 #${sale.id}`,
@@ -51,9 +119,11 @@ export class CustomerLedgerService {
 
     // Process returns
     returns.forEach((returnItem) => {
+      const returnDate = new Date(returnItem.createdAt);
       transactions.push({
         id: `return-${returnItem.id}`,
-        date: new Date(returnItem.createdAt),
+        date: returnDate,
+        sortDate: returnDate,
         type: '\u0645\u0631\u062a\u062c\u0639',
         typeColor: '#f59e0b',
         description: `\u0645\u0631\u062a\u062c\u0639 #${returnItem.id}`,
@@ -73,11 +143,13 @@ export class CustomerLedgerService {
       const paymentDate = payment.paymentDate
         ? new Date(payment.paymentDate)
         : new Date(payment.createdAt);
+      const paymentCreatedAt = this.toValidDate(payment?.createdAt);
       const paymentMethodName = payment?.paymentMethod?.name || '-';
 
       transactions.push({
         id: `payment-${payment.id}`,
         date: paymentDate,
+        sortDate: this.resolveSortDate(paymentDate, paymentCreatedAt),
         type: '\u062f\u0641\u0639\u0629',
         typeColor: '#10b981',
         description: paymentMethodName === '-'
@@ -94,7 +166,7 @@ export class CustomerLedgerService {
       });
     });
 
-    return transactions.sort((a, b) => b.date - a.date);
+    return transactions.sort((a, b) => this.compareTransactions(a, b, 'desc'));
   }
 
   /**
@@ -115,11 +187,7 @@ export class CustomerLedgerService {
       return [];
     }
 
-    const ascending = [...transactions].sort((a, b) => {
-      const timeDiff = a.date - b.date;
-      if (timeDiff !== 0) return timeDiff;
-      return String(a.id).localeCompare(String(b.id));
-    });
+    const ascending = [...transactions].sort((a, b) => this.compareTransactions(a, b, 'asc'));
 
     const totalEffect = ascending.reduce(
       (sum, transaction) => sum + this.getTransactionEffect(transaction),

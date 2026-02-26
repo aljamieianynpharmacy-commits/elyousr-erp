@@ -287,7 +287,9 @@ const InvoiceTab = ({ invoice, isActive, onSelect, onClose, canClose }) => {
     if (invoice.editorMode === "payment" && invoice.sourcePaymentId) {
         tabLabel = `تعديل دفعة #${invoice.sourcePaymentId}`;
     } else if (invoice.isEditMode && invoice.sourceSaleId) {
-        tabLabel = `تعديل فاتورة #${invoice.sourceSaleId}`;
+        tabLabel = invoice.customer
+            ? `عميل: ${invoice.customer.name}`
+            : `تعديل فاتورة #${invoice.sourceSaleId}`;
     }
 
     return (

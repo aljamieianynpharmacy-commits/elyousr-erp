@@ -2,6 +2,18 @@ import React from "react";
 import TransactionActions from "./TransactionActions";
 
 const formatCurrency = (value) => `${Number(value || 0).toFixed(2)} \u062c.\u0645`;
+const formatDateTime = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const datePart = date.toLocaleDateString("ar-EG");
+  const timePart = date.toLocaleTimeString("ar-EG", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `${datePart} ${timePart}`;
+};
 
 export default function CustomerLedgerTable({
   transactions,
@@ -70,7 +82,7 @@ export default function CustomerLedgerTable({
               return (
                 <tr key={transaction.id}>
                   <td className="ledger-cell-date">
-                    {transaction.date.toLocaleDateString("ar-EG")}
+                    {formatDateTime(transaction.date)}
                   </td>
 
                   <td className="ledger-cell-description">{transaction.description}</td>

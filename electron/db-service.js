@@ -1098,6 +1098,64 @@ const parseDateOrDefault = (value, fallback = new Date()) => {
     return parsedDate || fallback;
 };
 
+const isDateOnlyString = (value) => (
+    typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(value)
+);
+
+const isSameCalendarDate = (a, b) => {
+    const dateA = toValidDate(a);
+    const dateB = toValidDate(b);
+    if (!dateA || !dateB) return false;
+    return dateA.getFullYear() === dateB.getFullYear()
+        && dateA.getMonth() === dateB.getMonth()
+        && dateA.getDate() === dateB.getDate();
+};
+
+const mergeDateWithTime = (dateValue, timeSourceValue) => {
+    const datePart = toValidDate(dateValue);
+    const timePart = toValidDate(timeSourceValue);
+    if (!datePart) return timePart || null;
+    if (!timePart) return datePart;
+
+    const merged = new Date(datePart);
+    merged.setHours(
+        timePart.getHours(),
+        timePart.getMinutes(),
+        timePart.getSeconds(),
+        timePart.getMilliseconds()
+    );
+    return merged;
+};
+
+const resolveEditedDateKeepingPosition = (incomingValue, existingValue, fallback = new Date()) => {
+    const existingDate = toValidDate(existingValue) || toValidDate(fallback) || new Date();
+
+    if (incomingValue === undefined || incomingValue === null || incomingValue === '') {
+        return new Date(existingDate);
+    }
+
+    if (isDateOnlyString(incomingValue)) {
+        const parsedDateOnly = parseDateOrDefault(incomingValue, existingDate);
+        if (!parsedDateOnly) return new Date(existingDate);
+        if (isSameCalendarDate(parsedDateOnly, existingDate)) {
+            return new Date(existingDate);
+        }
+        return mergeDateWithTime(parsedDateOnly, existingDate) || parsedDateOnly;
+    }
+
+    const parsedDateTime = toValidDate(incomingValue);
+    if (!parsedDateTime) {
+        return new Date(existingDate);
+    }
+
+    if (isSameCalendarDate(parsedDateTime, existingDate)) {
+        return new Date(existingDate);
+    }
+
+    return parsedDateTime;
+};
+
 const startOfDay = (value) => {
     const date = parseDateOrDefault(value);
     date.setHours(0, 0, 0, 0);
@@ -4327,6 +4385,13 @@ const dbService = {
                         currentSale.paymentMethodId || 1
                     )
                     : currentSale.paymentMethodId;
+                const hasInvoiceDateUpdate = Object.prototype.hasOwnProperty.call(saleData || {}, 'invoiceDate');
+                const nextInvoiceDate = hasInvoiceDateUpdate
+                    ? resolveEditedDateKeepingPosition(
+                        saleData?.invoiceDate,
+                        currentSale?.invoiceDate || currentSale?.createdAt || new Date()
+                    )
+                    : (toValidDate(currentSale?.invoiceDate) || toValidDate(currentSale?.createdAt) || new Date());
 
                 const oldSaleTransactions = await tx.customerTransaction.findMany({
                     where: {
@@ -4414,9 +4479,7 @@ const dbService = {
                         discount: parseFloat(saleData.discount || 0),
                         saleType: saleData.saleType || 'نقدي',
                         notes: saleData.notes || null,
-                        invoiceDate: saleData.invoiceDate
-                            ? new Date(saleData.invoiceDate)
-                            : undefined
+                        invoiceDate: hasInvoiceDateUpdate ? nextInvoiceDate : undefined
                     },
                     include: {
                         customer: true,
@@ -5565,10 +5628,13 @@ const dbService = {
                     sum + (toNumber(trx.debit) - toNumber(trx.credit))
                 ), 0);
 
-                const returnDate = parseDateOrDefault(
-                    returnData?.returnDate,
-                    currentReturn.createdAt || new Date()
-                );
+                const hasReturnDateUpdate = Object.prototype.hasOwnProperty.call(returnData || {}, 'returnDate');
+                const returnDate = hasReturnDateUpdate
+                    ? resolveEditedDateKeepingPosition(
+                        returnData?.returnDate,
+                        currentReturn?.createdAt || new Date()
+                    )
+                    : (toValidDate(currentReturn?.createdAt) || new Date());
                 const nextCustomerId = Object.prototype.hasOwnProperty.call(returnData || {}, 'customerId')
                     ? parsePositiveInt(returnData?.customerId)
                     : parsePositiveInt(currentReturn.customerId);
@@ -6849,8 +6915,6 @@ const dbService = {
                 return { error: 'Invalid payment amount' };
             }
 
-            const paymentDate = parsePaymentDateInput(paymentData?.paymentDate);
-
             const result = await prisma.$transaction(async (tx) => {
                 const existingPayment = await tx.customerPayment.findUnique({
                     where: { id: parsedPaymentId },
@@ -6866,6 +6930,14 @@ const dbService = {
                 if (!existingPayment) {
                     return { error: 'Payment not found' };
                 }
+
+                const hasPaymentDateUpdate = Object.prototype.hasOwnProperty.call(paymentData || {}, 'paymentDate');
+                const paymentDate = hasPaymentDateUpdate
+                    ? resolveEditedDateKeepingPosition(
+                        paymentData?.paymentDate,
+                        existingPayment?.paymentDate || new Date()
+                    )
+                    : (toValidDate(existingPayment?.paymentDate) || new Date());
 
                 const nextCustomerId = Object.prototype.hasOwnProperty.call(paymentData || {}, 'customerId')
                     ? parsePositiveInt(paymentData.customerId)

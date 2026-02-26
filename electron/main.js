@@ -895,8 +895,14 @@ ipcMain.handle('print:sale', async (event, saleId, companyInfo) => {
 });
 
 // Customers
+ipcMain.handle('db:getCustomerStats', async (event, params) => {
+    return await dbService.getCustomerStats(params);
+});
 ipcMain.handle('db:getCustomers', async (event, params) => {
     return await dbService.getCustomers(params);
+});
+ipcMain.handle('db:getCustomerLookup', async (event, params) => {
+    return await dbService.getCustomerLookup(params);
 });
 ipcMain.handle('db:addCustomer', async (event, customerData) => {
     return await dbService.addCustomer(customerData);

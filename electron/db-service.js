@@ -685,6 +685,100 @@ const computeCustomerPaymentStatus = (firstActivityDate, lastPaymentDate, overdu
     };
 };
 
+const CUSTOMER_SORTABLE_COLUMNS = new Set(['balance', 'lastPaymentDate', 'createdAt', 'name', 'id']);
+
+const normalizeCustomerFilterText = (value) => String(value ?? '').trim();
+
+const buildCustomerSearchCondition = (searchTerm) => {
+    const normalizedSearch = String(searchTerm || '').trim();
+    if (!normalizedSearch) return null;
+
+    return {
+        OR: [
+            { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
+            { phone: { startsWith: normalizedSearch } },
+            { phone2: { startsWith: normalizedSearch } },
+            { city: { startsWith: normalizedSearch, mode: 'insensitive' } }
+        ]
+    };
+};
+
+const buildCustomerColumnFilterConditions = (columnFilters = {}) => {
+    const filters = (columnFilters && typeof columnFilters === 'object') ? columnFilters : {};
+    const conditions = [];
+
+    Object.entries(filters).forEach(([key, rawValue]) => {
+        const value = normalizeCustomerFilterText(rawValue);
+        if (!value) return;
+
+        switch (key) {
+            case 'id': {
+                const parsedId = parsePositiveInt(value);
+                conditions.push(parsedId ? { id: parsedId } : { id: -1 });
+                return;
+            }
+            case 'type':
+                conditions.push({ customerType: { contains: value, mode: 'insensitive' } });
+                return;
+            case 'name':
+            case 'phone':
+            case 'phone2':
+            case 'address':
+            case 'city':
+            case 'district':
+            case 'notes':
+                conditions.push({ [key]: { contains: value, mode: 'insensitive' } });
+                return;
+            case 'creditLimit':
+            case 'balance': {
+                const parsed = Number.parseFloat(value.replace(',', '.'));
+                if (!Number.isFinite(parsed)) {
+                    conditions.push({ id: -1 });
+                    return;
+                }
+                conditions.push({ [key]: { equals: parsed } });
+                return;
+            }
+            default:
+                return;
+        }
+    });
+
+    return conditions;
+};
+
+const buildCustomersWhereClause = ({
+    searchTerm = '',
+    customerType = null,
+    city = '',
+    columnFilters = {}
+} = {}) => {
+    const andConditions = [];
+
+    const searchCondition = buildCustomerSearchCondition(searchTerm);
+    if (searchCondition) {
+        andConditions.push(searchCondition);
+    }
+
+    if (customerType && customerType !== 'all') {
+        andConditions.push({ customerType });
+    }
+
+    const normalizedCity = String(city || '').trim();
+    if (normalizedCity.length > 0) {
+        andConditions.push({ city: { startsWith: normalizedCity, mode: 'insensitive' } });
+    }
+
+    const columnFilterConditions = buildCustomerColumnFilterConditions(columnFilters);
+    if (columnFilterConditions.length > 0) {
+        andConditions.push(...columnFilterConditions);
+    }
+
+    if (andConditions.length === 0) return {};
+    if (andConditions.length === 1) return andConditions[0];
+    return { AND: andConditions };
+};
+
 const isCreditSaleType = (saleType) => {
     const normalized = String(saleType || '').trim().toLowerCase();
     return (
@@ -7034,12 +7128,89 @@ const dbService = {
         }
     },
 
+    async getCustomerStats({
+        overdueThreshold = 30,
+        searchTerm = '',
+        customerType = null,
+        city = '',
+        columnFilters = {}
+    } = {}) {
+        const perf = startPerfTimer('db:getCustomerStats', {
+            searchLength: String(searchTerm || '').trim().length,
+            customerType: customerType || 'all',
+            cityLength: String(city || '').trim().length,
+            columnFilterCount: Object.keys(columnFilters || {}).length
+        });
+        try {
+            const where = buildCustomersWhereClause({
+                searchTerm,
+                customerType,
+                city,
+                columnFilters
+            });
+
+            // We need to fetch basic fields to compute overdue status,
+            // but we don't need all columns in the DB, just the ones affecting stats
+            const customers = await prisma.customer.findMany({
+                where,
+                select: {
+                    balance: true,
+                    customerType: true,
+                    firstActivityDate: true,
+                    lastPaymentDate: true,
+                }
+            });
+
+            let vipCount = 0;
+            let debtedCount = 0;
+            let compliantCount = 0;
+            let totalDebt = 0;
+            let overdueCount = 0;
+
+            for (const c of customers) {
+                if (c.customerType === 'VIP') vipCount += 1;
+
+                const balance = c.balance || 0;
+                if (balance > 0) {
+                    debtedCount += 1;
+                    totalDebt += balance;
+                } else {
+                    compliantCount += 1;
+                }
+
+                const status = computeCustomerPaymentStatus(
+                    c.firstActivityDate,
+                    c.lastPaymentDate,
+                    overdueThreshold
+                );
+
+                if (status.isOverdue) {
+                    overdueCount += 1;
+                }
+            }
+
+            perf({ rows: customers.length });
+            return {
+                totalCount: customers.length,
+                vipCount,
+                debtedCount,
+                compliantCount,
+                totalDebt,
+                overdueCount
+            };
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
     async getCustomers({
         page = 1,
         pageSize = 1000,
         searchTerm = '',
         customerType = null,
         city = '',
+        columnFilters = {},
         sortCol = 'createdAt',
         sortDir = 'desc',
         overdueThreshold = 30
@@ -7050,6 +7221,7 @@ const dbService = {
             searchLength: String(searchTerm || '').trim().length,
             customerType: customerType || 'all',
             cityLength: String(city || '').trim().length,
+            columnFilterCount: Object.keys(columnFilters || {}).length,
             sortCol,
             sortDir
         });
@@ -7060,27 +7232,14 @@ const dbService = {
             const safeSortDir = String(sortDir).toLowerCase() === 'asc' ? 'asc' : 'desc';
             const skip = (safePage - 1) * safePageSize;
 
-            const where = {};
-            const normalizedSearch = String(searchTerm || '').trim();
-            const normalizedCity = String(city || '').trim();
+            const where = buildCustomersWhereClause({
+                searchTerm,
+                customerType,
+                city,
+                columnFilters
+            });
 
-            if (normalizedSearch.length > 0) {
-                where.OR = [
-                    { name: { startsWith: normalizedSearch, mode: 'insensitive' } },
-                    { phone: { startsWith: normalizedSearch } }
-                ];
-            }
-
-            if (customerType && customerType !== 'all') {
-                where.customerType = customerType;
-            }
-
-            if (normalizedCity.length > 0) {
-                where.city = { startsWith: normalizedCity, mode: 'insensitive' };
-            }
-
-            const sortable = new Set(['balance', 'lastPaymentDate', 'createdAt', 'name', 'id']);
-            const safeSortCol = sortable.has(sortCol) ? sortCol : 'createdAt';
+            const safeSortCol = CUSTOMER_SORTABLE_COLUMNS.has(sortCol) ? sortCol : 'createdAt';
             const orderBy = safeSortCol === 'lastPaymentDate'
                 ? [{ lastPaymentDate: safeSortDir }, { id: 'desc' }]
                 : { [safeSortCol]: safeSortDir };
@@ -7135,6 +7294,32 @@ const dbService = {
                 page: safePage,
                 totalPages: Math.max(1, Math.ceil(total / safePageSize))
             };
+        } catch (error) {
+            perf({ error });
+            return { error: error.message };
+        }
+    },
+
+    async getCustomerLookup({ searchTerm = '' } = {}) {
+        const perf = startPerfTimer('db:getCustomerLookup', {
+            searchLength: String(searchTerm || '').trim().length
+        });
+
+        try {
+            const where = buildCustomersWhereClause({ searchTerm });
+            const customers = await prisma.customer.findMany({
+                where,
+                orderBy: { id: 'desc' },
+                select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    customerType: true
+                }
+            });
+
+            perf({ rows: customers.length });
+            return customers;
         } catch (error) {
             perf({ error });
             return { error: error.message };

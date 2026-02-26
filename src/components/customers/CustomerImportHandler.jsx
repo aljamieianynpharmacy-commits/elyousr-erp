@@ -14,6 +14,13 @@ const normalizeCustomerNameKey = (value) => String(value ?? '').trim().toLowerCa
 const normalizeCustomerPhoneKey = (value) => String(value ?? '')
     .replace(/[^\d+]/g, '')
     .trim();
+const pickImportTextValue = (incomingValue, fallbackValue) => {
+    const incoming = String(incomingValue ?? '').trim();
+    if (incoming) return incoming;
+
+    const fallback = String(fallbackValue ?? '').trim();
+    return fallback || undefined;
+};
 
 const CustomerImportHandler = memo(function CustomerImportHandler({
     allCustomers,
@@ -261,20 +268,25 @@ const CustomerImportHandler = memo(function CustomerImportHandler({
                     }
 
                     if (existingCustomer) {
-                        const updatePayload = {
-                            name: row.name || existingCustomer.name || '',
-                            phone: row.phone || existingCustomer.phone || '',
-                            phone2: row.phone2 || existingCustomer.phone2 || '',
-                            address: row.address || existingCustomer.address || '',
-                            city: row.city || existingCustomer.city || '',
-                            district: row.district || existingCustomer.district || '',
-                            notes: row.notes || existingCustomer.notes || '',
-                            creditLimit: row.creditLimit ?? existingCustomer.creditLimit ?? 0,
-                            customerType: row.customerType || existingCustomer.customerType || 'عادي',
+                        const rawUpdatePayload = {
+                            name: pickImportTextValue(row.name, existingCustomer.name),
+                            phone: pickImportTextValue(row.phone, existingCustomer.phone),
+                            phone2: pickImportTextValue(row.phone2, existingCustomer.phone2),
+                            address: pickImportTextValue(row.address, existingCustomer.address),
+                            city: pickImportTextValue(row.city, existingCustomer.city),
+                            district: pickImportTextValue(row.district, existingCustomer.district),
+                            notes: pickImportTextValue(row.notes, existingCustomer.notes),
+                            customerType: pickImportTextValue(row.customerType, existingCustomer.customerType),
+                            ...(Number.isFinite(row.creditLimit)
+                                ? { creditLimit: row.creditLimit }
+                                : {}),
                             ...(Number.isFinite(row.balance)
                                 ? { balance: row.balance }
                                 : {})
                         };
+                        const updatePayload = Object.fromEntries(
+                            Object.entries(rawUpdatePayload).filter(([, value]) => value !== undefined)
+                        );
                         const updateResult = await window.api.updateCustomer(existingCustomer.id, updatePayload);
                         if (updateResult?.error) throw new Error(updateResult.error);
 

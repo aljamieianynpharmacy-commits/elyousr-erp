@@ -77,7 +77,9 @@ contextBridge.exposeInMainWorld('api', {
     deletePurchaseReturn: (returnId) => ipcRenderer.invoke('db:deletePurchaseReturn', returnId),
 
     // Customers
+    getCustomerStats: (params) => ipcRenderer.invoke('db:getCustomerStats', params),
     getCustomers: (params) => ipcRenderer.invoke('db:getCustomers', params),
+    getCustomerLookup: (params) => ipcRenderer.invoke('db:getCustomerLookup', params),
     addCustomer: (customerData) => ipcRenderer.invoke('db:addCustomer', customerData),
     updateCustomer: (id, customerData) => ipcRenderer.invoke('db:updateCustomer', id, customerData),
     deleteCustomer: (id) => ipcRenderer.invoke('db:deleteCustomer', id),
